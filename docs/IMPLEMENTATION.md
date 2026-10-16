@@ -158,13 +158,13 @@ APP_NAME=Earth-Hub
 APP_ENV=development
 API_PORT=8000
 
-POSTGRES_HOST=postgres
-POSTGRES_PORT=5432
+POSTGRES_HOST=localhost
+POSTGRES_PORT=5433
 POSTGRES_DB=earth_hub
 POSTGRES_USER=earth_hub_app
 POSTGRES_PASSWORD=change_me_locally
 
-KAFKA_BOOTSTRAP_SERVERS=kafka:9092
+KAFKA_BOOTSTRAP_SERVERS=localhost:29092
 KAFKA_TOPIC_RAW=earthquakes.raw
 
 USGS_FEED_URL=https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/all_day.geojson
@@ -173,7 +173,7 @@ POLL_INTERVAL_SECONDS=60
 
 `config.py` builds the database URL from the `POSTGRES_*` parts so the password is defined only once. The `all_day` feed is used instead of `all_hour` to catch revisions (see section 2.1).
 
-These values are a template. Compose service names such as `postgres` and `kafka` work within the Docker network; host-side tools generally connect through configured localhost ports. Use appropriate credentials and avoid exposing Kafka or PostgreSQL to public networks.
+These values are a template for code running on your machine, which connects through the localhost ports published by Docker Compose (5433 for PostgreSQL, since 5432 is often taken by a local install, and 29092 for Kafka). Containers use the in-network service names (`postgres:5432`, `kafka:9092`), which `docker-compose.yml` sets for them. Use appropriate credentials and avoid exposing Kafka or PostgreSQL to public networks.
 
 ## 4. Implementation roadmap: seven milestones
 
