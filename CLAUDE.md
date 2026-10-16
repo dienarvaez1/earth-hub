@@ -25,4 +25,18 @@ Local-first earthquake data platform: USGS GeoJSON feed → Python poller → Ka
 
 ## Commands
 
-Fill these in as Milestone 1 adds them (install, lint, test, start infrastructure, smoke test).
+- `make install`: install dependencies from `uv.lock`
+- `make up` / `make down` / `make reset`: start, stop, or stop and wipe Kafka and PostgreSQL
+- `make lint` / `make format`: Ruff checks and fixes
+- `make test`: unit tests (no Docker)
+- `make smoke`: integration smoke tests (needs `make up`)
+- `make smoke-restart`: restart services and check data survives
+- `make migrate`: `alembic upgrade head`
+
+Add dependencies with `uv add <pkg>` (or `uv add --dev <pkg>`); never edit `uv.lock` by hand.
+
+## Layout notes
+
+- `.env` holds host-side values (`localhost:5433`, `localhost:29092`). Containers get in-network names (`postgres:5432`, `kafka:9092`) from `docker-compose.yml`.
+- Alembic gets its database URL from `earth_hub.config`, never from `alembic.ini`. Tests pass a URL through `config.attributes["database_url"]`.
+- Smoke tests use temporary topics and databases; never write test data to `earthquakes.raw` or the main database.
