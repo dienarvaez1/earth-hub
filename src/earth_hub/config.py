@@ -1,6 +1,8 @@
 """Typed application settings loaded from the environment and an optional .env file."""
 
+import tempfile
 from functools import lru_cache
+from pathlib import Path
 from typing import Literal
 
 from pydantic import Field, HttpUrl, SecretStr
@@ -21,13 +23,14 @@ class Settings(BaseSettings):
     postgres_user: str = Field(min_length=1)
     postgres_password: SecretStr
 
-    kafka_bootstrap_servers: str = Field(default="localhost:29092", min_length=1)
+    kafka_bootstrap_servers: str = Field(default="127.0.0.1:29092", min_length=1)
     kafka_topic_raw: str = Field(default="earthquakes.raw", min_length=1)
 
     usgs_feed_url: HttpUrl = HttpUrl(
         "https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/all_day.geojson"
     )
     poll_interval_seconds: int = Field(default=60, ge=10)
+    poller_heartbeat_path: Path = Path(tempfile.gettempdir()) / "earth-hub-poller.heartbeat"
 
     def database_url(self, database: str | None = None) -> URL:
         """SQLAlchemy URL built from the POSTGRES_* parts. str() masks the password."""

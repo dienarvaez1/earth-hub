@@ -67,7 +67,7 @@ These three behaviors of the USGS data shape the data model and the Kafka messag
 USGS revises events hours or days after they first appear (magnitude, location, review status). An event leaves the `all_hour` feed after 60 minutes, so later revisions would never be seen, and a poller outage longer than an hour would lose events permanently.
 
 - Poll the `all_day` feed for normal operation.
-- Add a catch-up job that queries the USGS FDSN event API with `updatedafter=<last_seen>` after downtime or on a schedule, to pick up older revisions.
+- Add a catch-up job that queries the USGS FDSN event API with `updatedafter=<last_seen>` after downtime or on a schedule, to pick up older revisions. *Deferred from Milestone 2 to a later milestone; until then, revisions to events older than 24 hours and outages longer than the feed window are not covered.*
 - Record the last successful poll time so the catch-up window is known.
 
 **Risk 2: An event's ID can change when networks merge their reports.**
@@ -164,7 +164,7 @@ POSTGRES_DB=earth_hub
 POSTGRES_USER=earth_hub_app
 POSTGRES_PASSWORD=change_me_locally
 
-KAFKA_BOOTSTRAP_SERVERS=localhost:29092
+KAFKA_BOOTSTRAP_SERVERS=127.0.0.1:29092
 KAFKA_TOPIC_RAW=earthquakes.raw
 
 USGS_FEED_URL=https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/all_day.geojson
@@ -243,7 +243,7 @@ A well-built poller is therefore effectively real-time; polling more often would
 1. **Loop forever.** On each round, fetch the feed with an `If-Modified-Since` header. If USGS answers `304 Not Modified`, skip the round. The feed sends no ETag, but `Last-Modified` works for this.
 2. **Time requests to the cache.** Wait until the `Expires` time from the last response, plus a few seconds of jitter, then fetch again. This picks up each new version almost as soon as USGS publishes it, without wasted requests.
 3. **Publish only what changed.** Keep each event's last-seen `updated` timestamp. Send a Kafka message only when an event is new or its `updated` timestamp has moved forward. This also keeps raw-payload and audit storage from filling with near-duplicates.
-4. **Remember state across restarts.** After a restart the service must neither resend everything nor miss events. Rebuild its memory from PostgreSQL on startup, or store it in a compacted Kafka topic that keeps only the latest record per event. If the service was down for more than a few minutes, first run a catch-up query against the USGS FDSN event API (`fdsnws/event/1/query?updatedafter=<last_seen>`).
+4. **Remember state across restarts.** After a restart the service must neither resend everything nor miss events. *Implemented in Milestone 2:* on startup the poller reads the last 26 hours of `earthquakes.raw` and rebuilds the newest `updated` timestamp it published for each event, so the topic itself is the state and no separate store is needed. A catch-up query against the USGS FDSN event API (`fdsnws/event/1/query?updatedafter=<last_seen>`) after downtime is deferred to a later milestone.
 5. **Run reliably.** Use `restart: unless-stopped` in Docker Compose and a health check based on the time of the last successful poll. On `SIGTERM`, flush pending Kafka messages before exiting so nothing is lost on shutdown.
 
 Sketch of the main loop:
@@ -270,7 +270,7 @@ Implications for this milestone:
   - Unchanged events are not republished.
   - A restart neither resends already-published events nor skips new ones.
   - Graceful shutdown flushes pending messages without loss.
-  - Catch-up after downtime publishes the events that were missed.
+  - Catch-up after downtime publishes the events that were missed *(deferred with the catch-up job)*.
 - Expected latency is about 1–2 minutes from USGS publication to Kafka. Document it as near-real-time, not real-time.
 
 ### Milestone 3 — Consumer, validation, and PostgreSQL
