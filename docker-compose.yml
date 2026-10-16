@@ -6,6 +6,7 @@ services:
     hostname: kafka
     ports:
       - "127.0.0.1:29092:29092"
+      - "127.0.0.1:9101:9101" # JMX, for JConsole and similar tools
     environment:
       # Single node in KRaft mode, acting as both broker and controller.
       KAFKA_NODE_ID: 1
@@ -13,9 +14,9 @@ services:
       CLUSTER_ID: zNg7t9ubSuKrLY8xrskEgw
       KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
       KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
-      # INTERNAL is for containers (kafka:9092); EXTERNAL is for the host (localhost:29092).
+      # INTERNAL is for containers (kafka:9092); EXTERNAL is for the host (127.0.0.1:29092; an IP, not "localhost", so clients never try IPv6 ::1, which is not published).
       KAFKA_LISTENERS: INTERNAL://:9092,EXTERNAL://:29092,CONTROLLER://:9093
-      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka:9092,EXTERNAL://localhost:29092
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka:9092,EXTERNAL://127.0.0.1:29092
       KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT,CONTROLLER:PLAINTEXT
       KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
       # One broker, so internal topics can only have one replica.
@@ -29,6 +30,11 @@ services:
       KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
       KAFKA_LOG_DIRS: /var/lib/kafka/data
       KAFKA_HEAP_OPTS: -Xms512m -Xmx512m
+      # JMX for the broker process only (the image's launch script applies these), so
+      # Kafka CLI tools run inside the container don't try to open the same port.
+      # No authentication: safe only because the port is bound to 127.0.0.1.
+      KAFKA_JMX_PORT: 9101
+      KAFKA_JMX_HOSTNAME: 127.0.0.1
     volumes:
       - kafka-data:/var/lib/kafka/data
     mem_limit: 1g
@@ -57,6 +63,31 @@ services:
       - --replication-factor
       - "1"
     restart: "no"
+
+  poller:
+    # Not started by `make up`, so tests never depend on live USGS data. Use `make ingest`.
+    profiles: [ingest]
+    build: .
+    image: earth-hub:dev
+    env_file: .env
+    environment:
+      # Inside the Docker network, not the host-side values from .env.
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
+    depends_on:
+      kafka:
+        condition: service_healthy
+      kafka-init:
+        condition: service_completed_successfully
+    restart: unless-stopped
+    stop_grace_period: 20s
+    healthcheck:
+      test: ["CMD", "python", "-m", "earth_hub.ingestion.healthcheck"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
 
   postgres:
     image: postgres:18.6

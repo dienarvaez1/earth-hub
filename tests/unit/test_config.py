@@ -29,7 +29,7 @@ def test_defaults_are_host_side_values(env):
     settings = load()
     assert settings.postgres_host == "localhost"
     assert settings.postgres_port == 5433
-    assert settings.kafka_bootstrap_servers == "localhost:29092"
+    assert settings.kafka_bootstrap_servers == "127.0.0.1:29092"
     assert settings.kafka_topic_raw == "earthquakes.raw"
     assert str(settings.usgs_feed_url).endswith("/summary/all_day.geojson")
     assert settings.poll_interval_seconds == 60

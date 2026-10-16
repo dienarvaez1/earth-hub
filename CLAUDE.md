@@ -32,11 +32,14 @@ Local-first earthquake data platform: USGS GeoJSON feed → Python poller → Ka
 - `make smoke`: integration smoke tests (needs `make up`)
 - `make smoke-restart`: restart services and check data survives
 - `make migrate`: `alembic upgrade head`
+- `make ingest` / `make ingest-once`: run the poller against the live feed (container / one round on the host). Never part of the test suite.
 
 Add dependencies with `uv add <pkg>` (or `uv add --dev <pkg>`); never edit `uv.lock` by hand.
 
 ## Layout notes
 
-- `.env` holds host-side values (`localhost:5433`, `localhost:29092`). Containers get in-network names (`postgres:5432`, `kafka:9092`) from `docker-compose.yml`.
+- `.env` holds host-side values (`localhost:5433`, `127.0.0.1:29092`). Use `127.0.0.1` for Kafka, never `localhost`: the port is IPv4-only and `localhost` resolving to `::1` caused flaky offset lookups. Containers get in-network names (`postgres:5432`, `kafka:9092`) from `docker-compose.yml`.
 - Alembic gets its database URL from `earth_hub.config`, never from `alembic.ini`. Tests pass a URL through `config.attributes["database_url"]`.
+- Ingestion code lives in `src/earth_hub/ingestion/`. The poller publishes the unchanged USGS feature inside an envelope; it rejects only features without `id`, `updated` or `time`. Data-quality rules belong in the consumer.
+- Unit tests get feed data from the `feed_doc` fixture and fake Kafka through `fake_producer` / `fake_producer_cls`; integration tests use `make_temp_topic`.
 - Smoke tests use temporary topics and databases; never write test data to `earthquakes.raw` or the main database.
