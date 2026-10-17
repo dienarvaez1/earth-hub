@@ -41,10 +41,17 @@ def parse_http_date(value: str | None) -> datetime | None:
     return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
 
 
-def make_http_client(**kwargs) -> httpx.Client:
+def user_agent(contact: str = "") -> str:
+    """Identify Earth-Hub to USGS, with an optional contact so they can reach the operator."""
+    if not contact:
+        return USER_AGENT
+    return f"earth-hub/{__version__} (local-first earthquake data platform; +{contact})"
+
+
+def make_http_client(contact: str = "", timeout_s: float = 15.0, **kwargs) -> httpx.Client:
     return httpx.Client(
-        timeout=httpx.Timeout(15.0, connect=5.0),
-        headers={"User-Agent": USER_AGENT},
+        timeout=httpx.Timeout(timeout_s, connect=5.0),
+        headers={"User-Agent": user_agent(contact)},
         follow_redirects=True,
         **kwargs,
     )

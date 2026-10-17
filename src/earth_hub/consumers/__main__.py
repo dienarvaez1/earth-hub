@@ -16,10 +16,11 @@ def main() -> int:
         make_consumer(
             settings.kafka_bootstrap_servers,
             settings.kafka_consumer_group,
-            settings.kafka_topic_raw,
+            settings.consumer_topic,
         ),
         Store(make_engine(settings)),
         heartbeat_path=settings.consumer_heartbeat_path,
+        batch_size=settings.consumer_batch_size,
     )
     for signum in (signal.SIGTERM, signal.SIGINT):
         signal.signal(signum, lambda *_: consumer.stop_event.set())

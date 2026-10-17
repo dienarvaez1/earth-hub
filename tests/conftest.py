@@ -23,7 +23,7 @@ REPO = Path(__file__).resolve().parents[1]
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
 REQUIREMENTS_DOC = REPO / "docs" / "requirements.md"
 LOOPBACK = {"127.0.0.1", "::1", "localhost"}
-NETWORKED_MARKERS = {"integration", "e2e", "disruptive"}
+NETWORKED_MARKERS = {"integration", "e2e", "disruptive", "performance"}
 
 
 # --- QA plumbing: disruptive opt-in, requirement markers, traceability, network guard ---
@@ -34,6 +34,11 @@ def pytest_addoption(parser):
         "--run-disruptive",
         action="store_true",
         help="run tests that stop and start the shared Docker containers",
+    )
+    parser.addoption(
+        "--run-performance",
+        action="store_true",
+        help="run the performance tests (a full year of synthetic backfill, a few minutes)",
     )
     parser.addoption(
         "--trace-out",
@@ -60,11 +65,15 @@ def pytest_collection_modifyitems(config, items):
             "tests reference requirements missing from docs/requirements.md: "
             + ", ".join(f"{req} ({nodeid})" for nodeid, req in sorted(unknown))
         )
-    if not config.getoption("--run-disruptive"):
-        skip = pytest.mark.skip(reason="disruptive: stops shared containers; use --run-disruptive")
-        for item in items:
-            if "disruptive" in item.keywords:
-                item.add_marker(skip)
+    for marker, option, reason in (
+        ("disruptive", "--run-disruptive", "stops shared containers"),
+        ("performance", "--run-performance", "takes minutes"),
+    ):
+        if not config.getoption(option):
+            skip = pytest.mark.skip(reason=f"{marker}: {reason}; use {option}")
+            for item in items:
+                if marker in item.keywords:
+                    item.add_marker(skip)
 
 
 _trace: dict[str, dict[str, str]] = {}

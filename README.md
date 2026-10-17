@@ -70,6 +70,9 @@ make api                 # serve the REST API at http://127.0.0.1:8000/docs
 | `make api` / `make api-stop` | Start or stop the API container (`http://127.0.0.1:8000`) |
 | `make api-dev` | Run the API on your machine with auto-reload |
 | `make kafka-ui` / `make kafka-ui-stop` | Start or stop the read-only Kafka web viewer (`http://127.0.0.1:8080`) |
+| `make backfill START=... [END=...]` | Backfill from the USGS FDSN service, one week per request |
+| `make catchup-once` | One catch-up pass over the `all_month` feed and one deleted-events check |
+| `make test-performance` | A full year of synthetic backfill through the pipeline, timed |
 | `make consume` | Run the consumer from your machine |
 | `make reconcile` | Check every Kafka message has a database row, and the tables' invariants |
 | `make check-db-outage` | Stop PostgreSQL mid-stream and check nothing is lost or duplicated (disruptive) |
@@ -87,6 +90,24 @@ The poller (`src/earth_hub/ingestion/`) fetches the USGS `all_day` feed and publ
 - **Not yet covered:** revisions to events older than 24 hours, and outages longer than the feed window. A catch-up query against the USGS FDSN API is planned for a later milestone.
 
 `make up` never starts the poller, so tests don't depend on live data. Its container is healthy while successful rounds keep happening (heartbeat within 3 poll intervals).
+
+## Backfill and catch-up
+
+```bash
+make backfill START=2026-01-01            # 2026 up to now, one request per week
+make backfill START=2026-01-01 END=2026-06-01
+make catchup-once                         # one all_month pass and one deleted-events check
+```
+
+- **Backfill** reads the USGS FDSN event service, one calendar week per request: Sunday 00:00:00 UTC to the next Sunday, the first week starting at `START`. Each window ends exactly where the next begins, because FDSN ignores milliseconds in query times; "ending at 23:59:59.999" would lose events.
+- **Every week is checked** against FDSN's `/count`, and is recorded in `backfill_windows` only when complete. A re-run skips finished weeks.
+- **Weeks are split into days** when USGS times out on them, or when they hold more than 20,000 events.
+- **A final sweep** picks up events USGS added or revised while the backfill ran.
+- **Requests go one at a time**, with a 1-second pause between them.
+- **The `catchup` service** (started by `make ingest`) reads the `all_month` feed hourly, which covers revisions and outages up to 30 days, and checks FDSN daily for deleted events.
+- **Both** publish to `earthquakes.backfill`, and only events new or newer than what is stored. A separate batched consumer, `consumer-backfill`, stores them, so live events never wait behind history. A year of history (139,579 events) goes through in about 42 seconds.
+
+Set `USGS_CONTACT` in `.env` (for example a public repository URL) to add a contact to the `User-Agent` sent to USGS.
 
 ## Persistence
 
@@ -156,7 +177,7 @@ curl -s 'http://127.0.0.1:8000/api/v1/earthquakes/summary/hourly?start_time=2026
 
 ## Tests and QA
 
-Run everything with **`make regression`**: lint, unit, integration, API, contract, end-to-end and disruptive tests, in that order, stopping at the first failing layer. It takes about 2 minutes and writes:
+Run everything with **`make regression`**: lint, unit, integration, API, contract, end-to-end, disruptive and performance tests, in that order, stopping at the first failing layer. It takes about 3 minutes and writes:
 - `reports/regression-summary.md`
 - JUnit XML for each layer
 - a coverage report covering all layers (`reports/coverage-html/index.html`)
@@ -169,6 +190,7 @@ Run everything with **`make regression`**: lint, unit, integration, API, contrac
 | API | `tests/api/` | Every endpoint over a fixed set of 20 events stored through the real consumer code; statistics and summaries checked against separate SQL |
 | Contract | `tests/api/test_contract.py` | Schemathesis generates requests from the OpenAPI schema (`CONTRACT_EXAMPLES=1000` for a deeper run) |
 | End-to-end | `tests/e2e/` | Mock USGS feed → real poller → Kafka → real consumer → PostgreSQL → API, checked only through the API. These are the plan's scenarios: new, duplicate, revised, invalid, merged and deleted events, consumer and poller restarts, an empty database, invalid requests, and a reconciled batch of 55 messages |
+| Performance | `tests/performance/` | **A full year of synthetic history** (139,579 events) through backfill, Kafka, the batched consumer and the API, with a 3-minute budget; about 42 s. Runs only with `--run-performance` |
 | Disruptive | `tests/disruptive/` | **Stops and starts the shared containers:** PostgreSQL stopped while events arrive, a Kafka restart, data surviving a restart of both. Runs only with `--run-disruptive` |
 
 Other test commands:

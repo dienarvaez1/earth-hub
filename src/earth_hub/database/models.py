@@ -142,3 +142,49 @@ class RawEvent(Base):
         Index("ix_raw_events_earthquake_id", "earthquake_id"),
         Index("ix_raw_events_event_id", "event_id"),
     )
+
+
+WINDOW_JOBS = ("backfill", "sweep")
+WINDOW_STATUSES = ("done", "open")
+
+
+class BackfillWindow(Base):
+    """One fetched time window of a backfill, so an interrupted run resumes where it stopped.
+
+    A window is `open` when it ended at "now" (the current week): it is fetched again on the
+    next run. `expected` is what the FDSN count endpoint reported; `fetched` must not be lower.
+    """
+
+    __tablename__ = "backfill_windows"
+
+    id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
+    job: Mapped[str] = mapped_column(Text)
+    window_start: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    window_end: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    status: Mapped[str] = mapped_column(Text)
+    expected: Mapped[int] = mapped_column(Integer)
+    fetched: Mapped[int] = mapped_column(Integer)
+    published: Mapped[int] = mapped_column(Integer)
+    skipped: Mapped[int] = mapped_column(Integer)
+    rejected: Mapped[int] = mapped_column(Integer)
+    finished_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+    __table_args__ = (
+        UniqueConstraint("job", "window_start", name="uq_backfill_windows_job_start"),
+        CheckConstraint(f"job IN ({_in(WINDOW_JOBS)})", name="job"),
+        CheckConstraint(f"status IN ({_in(WINDOW_STATUSES)})", name="status"),
+        CheckConstraint("window_end > window_start", name="window_order"),
+        CheckConstraint("fetched >= expected", name="complete"),
+    )
+
+
+class IngestionCheckpoint(Base):
+    """A named point in time, e.g. when catch-up or the deleted-events check last ran."""
+
+    __tablename__ = "ingestion_checkpoints"
+
+    name: Mapped[str] = mapped_column(Text, primary_key=True)
+    value: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

@@ -24,6 +24,7 @@ from earth_hub.ingestion.state import STATE_WINDOW, SentState, read_topic_since,
 from earth_hub.ingestion.usgs_client import UsgsClient, make_http_client
 from earth_hub.reconcile import Report, reconcile, topic_offsets
 
+from .fdsn import FdsnServer
 from .feed import URL, FeedServer
 
 
@@ -37,6 +38,9 @@ class _CommitsLost:
     def poll(self, timeout):
         return self._consumer.poll(timeout)
 
+    def consume(self, num_messages, timeout):
+        return self._consumer.consume(num_messages=num_messages, timeout=timeout)
+
     def commit(self, **kwargs):
         return None
 
@@ -45,11 +49,23 @@ class _CommitsLost:
 
 
 class Pipeline:
-    def __init__(self, settings: Settings, topic: str, db: Engine, feed: FeedServer):
+    def __init__(
+        self,
+        settings: Settings,
+        topic: str,
+        db: Engine,
+        feed: FeedServer,
+        backfill_topic: str | None = None,
+        fdsn: FdsnServer | None = None,
+    ):
         self.settings, self.topic, self.db, self.feed = settings, topic, db, feed
+        self.backfill_topic, self.fdsn = backfill_topic, fdsn
         self.group = f"e2e-{uuid.uuid4().hex[:8]}"
+        self.backfill_group = f"e2e-bf-{uuid.uuid4().hex[:8]}"
         self.poller = self._make_poller(SentState())
         self._consumer: EarthquakeConsumer | None = None
+        self._backfill_consumer: EarthquakeConsumer | None = None
+        self.batch_size = 1
         self._client = TestClient(create_app(db))
         self._raw_producer: Producer | None = None
 
@@ -68,14 +84,54 @@ class Pipeline:
             )
         return self._consumer
 
+    @property
+    def backfill_consumer(self) -> EarthquakeConsumer:
+        """The separate, batched consumer of the backfill topic (as in docker-compose)."""
+        if self._backfill_consumer is None:
+            self._backfill_consumer = EarthquakeConsumer(
+                make_consumer(
+                    self.settings.kafka_bootstrap_servers, self.backfill_group, self.backfill_topic
+                ),
+                Store(self.db),
+                batch_size=500,
+            )
+        return self._backfill_consumer
+
     def sync(self, timeout_s: float = 60) -> None:
-        """Run the consumer until every message in the topic has a raw_events row."""
-        expected = self.messages_in_topic()
+        """Run the consumers until every message in each topic has a raw_events row."""
+        self.consumer.batch_size = self.batch_size
+        pairs = [(self.topic, lambda: self.consumer)]
+        if self.backfill_topic:
+            pairs.append((self.backfill_topic, lambda: self.backfill_consumer))
         deadline = time.monotonic() + timeout_s
-        while self.stored() < expected:
-            if time.monotonic() > deadline:
-                raise AssertionError(f"stored {self.stored()} of {expected} messages in time")
-            self.consumer.run_once(timeout_s=1.0)
+        for topic, consumer in pairs:
+            expected = self.messages_in_topic(topic)
+            while self.stored(topic) < expected:
+                if time.monotonic() > deadline:
+                    raise AssertionError(
+                        f"{topic}: stored {self.stored(topic)} of {expected} messages in time"
+                    )
+                consumer().run_once(timeout_s=1.0)
+
+    def backfill(self, start, end=None, *, now=None, sweep=True):
+        """Run the real backfill job against the mock FDSN service."""
+        from earth_hub.database.progress import Progress
+        from earth_hub.ingestion.backfill import Backfill
+        from earth_hub.ingestion.fdsn import FdsnClient
+
+        fdsn = FdsnClient(
+            "https://earthquake.usgs.gov/fdsnws/event/1",
+            make_http_client(transport=self.fdsn.transport),
+            pause_s=0,
+            sleep=lambda s: None,
+        )
+        publisher = EventPublisher(
+            make_producer(self.settings.kafka_bootstrap_servers), self.backfill_topic
+        )
+        clock = (lambda: now) if now else (lambda: datetime.now(UTC))
+        return Backfill(fdsn, publisher, Progress(self.db), clock=clock).run(
+            start, end, sweep=sweep
+        )
 
     def use_consumer_that_loses_commits(self) -> None:
         """Replace the consumer with one that stores messages but never commits offsets."""
@@ -122,13 +178,15 @@ class Pipeline:
         assert body["total"] == len(body["items"]), "more than one page; raise the limit"
         return {item["event_id"]: item for item in body["items"]}
 
-    def messages_in_topic(self) -> int:
-        return len(topic_offsets(self.settings.kafka_bootstrap_servers, self.topic))
+    def messages_in_topic(self, topic: str | None = None) -> int:
+        return len(topic_offsets(self.settings.kafka_bootstrap_servers, topic or self.topic))
 
-    def stored(self) -> int:
+    def stored(self, topic: str | None = None) -> int:
         with self.db.connect() as conn:
             return conn.execute(
-                select(func.count()).select_from(RawEvent).where(RawEvent.kafka_topic == self.topic)
+                select(func.count())
+                .select_from(RawEvent)
+                .where(RawEvent.kafka_topic == (topic or self.topic))
             ).scalar_one()
 
     def raw_outcomes(self) -> list[dict]:
@@ -142,12 +200,22 @@ class Pipeline:
                 ).mappings()
             ]
 
-    def reconcile(self) -> Report:
+    def reconcile(self, backfill: bool = False) -> Report:
+        if backfill:
+            return reconcile(
+                self.db,
+                self.settings.kafka_bootstrap_servers,
+                self.backfill_topic,
+                self.backfill_group,
+            )
         return reconcile(self.db, self.settings.kafka_bootstrap_servers, self.topic, self.group)
 
     # --- lifecycle -----------------------------------------------------------------------
 
     def close(self) -> None:
+        if self._backfill_consumer is not None:
+            self._backfill_consumer._consumer.close()
+            self._backfill_consumer = None
         self.restart_consumer()
         self.poller.shutdown()
         self._client.close()

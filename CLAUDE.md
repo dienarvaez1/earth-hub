@@ -34,6 +34,7 @@ Local-first earthquake data platform: USGS GeoJSON feed → Python poller → Ka
 - `make migrate`: `alembic upgrade head`
 - `make ingest` / `make ingest-once`: run the pipeline (migrate, poller, consumer) on the live feed / one poller round on the host. Never part of the test suite.
 - `make regression`: every layer in order, with reports in `reports/` and the traceability matrix. Run it before proposing a milestone as done.
+- `make backfill START=2026-01-01 [END=...]`, `make catchup-once`, `make test-performance` (a year of synthetic backfill, timed).
 - `make test-e2e`, `make test-disruptive` (stops shared containers), `make flake-check` (end-to-end suite ×5), `make traceability`.
 - `make reconcile`: topic-versus-database check.
 - `make api` / `make api-dev`: serve the API (container / host with reload) at http://127.0.0.1:8000/docs.
@@ -59,4 +60,8 @@ Add dependencies with `uv add <pkg>` (or `uv add --dev <pkg>`); never edit `uv.l
 - Unit tests cannot use the network: a guard in `tests/conftest.py` blocks anything but loopback.
 - End-to-end and disruptive tests use `tests/support/` (`FeedServer`, `EventFactory`, `Pipeline`) and assert through the API, ending with a reconciliation.
 - Record every defect found in `docs/defects/README.md`, with a regression test.
+- Backfill (`ingestion/backfill.py`, `fdsn.py`, `windows.py`): FDSN ignores milliseconds in query times. Windows must end exactly where the next begins: never `- 1 ms`, never `limit`. Always compare with `/count` using the same `includedeleted`. A `504` or timeout is not retried; the window is split instead (the gateway caches the `504`). Requests are sequential, with `FDSN_PAUSE_SECONDS` between them.
+- Backfill and catch-up publish to `earthquakes.backfill`, which the live poller never reads back. It is consumed by `consumer-backfill`, the same code with `KAFKA_CONSUMER_TOPIC` set.
+- `repository.process_batch` processes a batch as a set and must give exactly the results of `process_message` one by one: `tests/integration/test_batch.py` checks this on random streams. Merges fall back to the one-by-one path. Every lock goes through `_lock`, which uses sorted order (deadlock safety).
+- The mock FDSN service (`tests/support/fdsn.py`) reproduces the real one's boundary semantics; keep it faithful when changing either.
 - Smoke tests use temporary topics and databases; never write test data to `earthquakes.raw` or the main database.

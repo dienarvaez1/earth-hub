@@ -67,7 +67,10 @@ def topic_offsets(
         }
     )
     try:
-        partitions = consumer.list_topics(topic, timeout=timeout_s).topics[topic].partitions
+        meta = consumer.list_topics(topic, timeout=timeout_s).topics.get(topic)
+        if meta is None or meta.error is not None:
+            raise LookupError(f"topic {topic} does not exist")
+        partitions = meta.partitions
         assignments, remaining = [], {}
         for partition in partitions:
             low, high = with_retries(
@@ -161,15 +164,23 @@ def format_report(report: Report) -> str:
 
 
 def main() -> int:
+    """Reconcile the live topic and the backfill topic, each against its own consumer group."""
     settings = get_settings()
-    report = reconcile(
-        make_engine(settings),
-        settings.kafka_bootstrap_servers,
-        settings.kafka_topic_raw,
-        settings.kafka_consumer_group,
-    )
-    print(format_report(report))
-    return 0 if report.ok else 1
+    engine = make_engine(settings)
+    ok = True
+    for topic, group in (
+        (settings.kafka_topic_raw, settings.kafka_consumer_group),
+        (settings.kafka_topic_backfill, settings.kafka_backfill_consumer_group),
+    ):
+        try:
+            report = reconcile(engine, settings.kafka_bootstrap_servers, topic, group)
+        except LookupError:
+            print(f"topic {topic}: does not exist yet, nothing to reconcile")
+            continue
+        print(format_report(report))
+        ok &= report.ok
+    engine.dispose()
+    return 0 if ok else 1
 
 
 if __name__ == "__main__":
