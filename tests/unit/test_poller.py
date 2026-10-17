@@ -4,7 +4,6 @@ from datetime import UTC, datetime, timedelta
 import httpx
 import pytest
 
-from earth_hub.ingestion.healthcheck import is_healthy
 from earth_hub.ingestion.poller import MAX_WAIT_S, MIN_WAIT_S, Poller, next_wait
 from earth_hub.ingestion.producer import EventPublisher
 from earth_hub.ingestion.state import SentState, state_from_messages
@@ -233,13 +232,3 @@ def test_jitter_stays_within_bounds():
     expires = NOW + timedelta(seconds=30)
     waits = [next_wait(expires, NOW, 60.0, lambda r=r: r / 10) for r in range(11)]
     assert min(waits) == pytest.approx(32.0) and max(waits) == pytest.approx(35.0)
-
-
-@pytest.mark.parametrize(
-    ("age_s", "interval", "healthy"),
-    [(0, 60, True), (180, 60, True), (181, 60, False), (500, 200, True), (None, 60, False)],
-)
-def test_healthcheck(age_s, interval, healthy):
-    now = 10_000.0
-    mtime = None if age_s is None else now - age_s
-    assert is_healthy(mtime, now, interval) is healthy

@@ -32,7 +32,8 @@ Local-first earthquake data platform: USGS GeoJSON feed → Python poller → Ka
 - `make smoke`: integration smoke tests (needs `make up`)
 - `make smoke-restart`: restart services and check data survives
 - `make migrate`: `alembic upgrade head`
-- `make ingest` / `make ingest-once`: run the poller against the live feed (container / one round on the host). Never part of the test suite.
+- `make ingest` / `make ingest-once`: run the pipeline (migrate, poller, consumer) on the live feed / one poller round on the host. Never part of the test suite.
+- `make reconcile`: topic-versus-database check; `make check-db-outage`: outage recovery check.
 
 Add dependencies with `uv add <pkg>` (or `uv add --dev <pkg>`); never edit `uv.lock` by hand.
 
@@ -42,4 +43,9 @@ Add dependencies with `uv add <pkg>` (or `uv add --dev <pkg>`); never edit `uv.l
 - Alembic gets its database URL from `earth_hub.config`, never from `alembic.ini`. Tests pass a URL through `config.attributes["database_url"]`.
 - Ingestion code lives in `src/earth_hub/ingestion/`. The poller publishes the unchanged USGS feature inside an envelope; it rejects only features without `id`, `updated` or `time`. Data-quality rules belong in the consumer.
 - Unit tests get feed data from the `feed_doc` fixture and fake Kafka through `fake_producer` / `fake_producer_cls`; integration tests use `make_temp_topic`.
+- Persistence lives in `src/earth_hub/database/` (models, repository), `validation/` and `consumers/`. Each message is handled in one transaction by `repository.process_message`; the consumer commits the Kafka offset only after it.
+- Validation rules have stable IDs documented in `docs/data-quality-rules.md`; add a rule there and a test for it together.
+- Schema changes: edit `database/models.py`, then `uv run alembic revision --autogenerate`, then review the file. `tests/integration/test_migrations.py` fails if models and migrations drift.
+- DB integration tests use the `db` fixture (a fresh migrated database per test); build messages with `make_envelope` / `make_feature` so tests use the poller's real contract.
+- In shell scripts, never export settings like `POSTGRES_DB`: docker compose picks them up and recreates containers. Pass them per command.
 - Smoke tests use temporary topics and databases; never write test data to `earthquakes.raw` or the main database.

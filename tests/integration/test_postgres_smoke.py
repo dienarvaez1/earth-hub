@@ -1,15 +1,9 @@
-import uuid
-from pathlib import Path
-
 import pytest
 from alembic import command
-from alembic.config import Config
 from alembic.script import ScriptDirectory
 from sqlalchemy import create_engine, text
 
 pytestmark = pytest.mark.integration
-
-ALEMBIC_INI = Path(__file__).resolve().parents[2] / "alembic.ini"
 
 
 def test_create_insert_query(engine):
@@ -29,20 +23,8 @@ def test_server_is_postgresql_18(engine):
     assert int(version) // 10000 == 18
 
 
-@pytest.fixture
-def empty_database(engine, settings):
-    """A brand-new database, dropped after the test."""
-    name = f"earth_hub_smoke_{uuid.uuid4().hex[:8]}"
-    with engine.connect().execution_options(isolation_level="AUTOCOMMIT") as conn:
-        conn.execute(text(f'CREATE DATABASE "{name}"'))
-    yield settings.database_url(name)
-    with engine.connect().execution_options(isolation_level="AUTOCOMMIT") as conn:
-        conn.execute(text(f'DROP DATABASE "{name}" WITH (FORCE)'))
-
-
-def test_migrations_upgrade_empty_database_to_head(empty_database):
-    config = Config(str(ALEMBIC_INI))
-    config.attributes["database_url"] = empty_database
+def test_migrations_upgrade_empty_database_to_head(empty_database, make_alembic_config):
+    config = make_alembic_config(empty_database)
     command.upgrade(config, "head")
 
     head = ScriptDirectory.from_config(config).get_current_head()

@@ -31,6 +31,8 @@ class Settings(BaseSettings):
     )
     poll_interval_seconds: int = Field(default=60, ge=10)
     poller_heartbeat_path: Path = Path(tempfile.gettempdir()) / "earth-hub-poller.heartbeat"
+    consumer_heartbeat_path: Path = Path(tempfile.gettempdir()) / "earth-hub-consumer.heartbeat"
+    kafka_consumer_group: str = Field(default="earth-hub-consumer", min_length=1)
 
     def database_url(self, database: str | None = None) -> URL:
         """SQLAlchemy URL built from the POSTGRES_* parts. str() masks the password."""

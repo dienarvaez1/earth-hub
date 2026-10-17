@@ -4,14 +4,16 @@ from alembic import context
 from sqlalchemy import create_engine, pool
 
 from earth_hub.config import get_settings
+from earth_hub.database.models import Base
 
 config = context.config
 
 if config.config_file_name is not None:
-    fileConfig(config.config_file_name)
+    # Without disable_existing_loggers=False, running migrations in-process (as the tests
+    # do) silences every logger created before it, including all of earth_hub's.
+    fileConfig(config.config_file_name, disable_existing_loggers=False)
 
-# No models yet; set this to the models' MetaData once tables exist (Milestone 3).
-target_metadata = None
+target_metadata = Base.metadata
 
 
 def _database_url():
