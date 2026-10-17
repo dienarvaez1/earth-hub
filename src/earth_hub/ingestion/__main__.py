@@ -33,7 +33,7 @@ def main(argv: list[str] | None = None) -> int:
     publisher = EventPublisher(
         make_producer(settings.kafka_bootstrap_servers), settings.kafka_topic_raw
     )
-    with make_http_client() as http:
+    with make_http_client(settings.usgs_contact) as http:
         poller = Poller(
             UsgsClient(str(settings.usgs_feed_url), http),
             publisher,

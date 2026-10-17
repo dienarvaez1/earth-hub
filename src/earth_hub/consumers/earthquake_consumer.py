@@ -11,7 +11,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Protocol
 
-from confluent_kafka import Consumer, KafkaError, KafkaException
+from confluent_kafka import Consumer, KafkaError, KafkaException, TopicPartition
 from sqlalchemy import Engine
 from sqlalchemy.exc import DBAPIError, OperationalError
 
@@ -27,7 +27,8 @@ IDLE_PING_INTERVAL_S = 30.0
 
 class KafkaConsumerLike(Protocol):
     def poll(self, timeout: float): ...
-    def commit(self, *, message, asynchronous: bool): ...
+    def consume(self, num_messages: int, timeout: float) -> list: ...
+    def commit(self, *, message=None, offsets=None, asynchronous: bool): ...
     def close(self) -> None: ...
 
 
@@ -58,6 +59,10 @@ class Store:
         with self._engine.begin() as conn:
             return repository.process_message(conn, message)
 
+    def process_batch(self, messages: list[IncomingMessage]) -> list[ProcessResult]:
+        with self._engine.begin() as conn:
+            return repository.process_batch(conn, messages)
+
     def record_error(self, message: IncomingMessage, error: str) -> None:
         with self._engine.begin() as conn:
             repository.record_error(conn, message, error)
@@ -83,9 +88,11 @@ class EarthquakeConsumer:
         heartbeat_path: Path | None = None,
         sleep: Callable[[float], None] | None = None,
         monotonic: Callable[[], float] = time.monotonic,
+        batch_size: int = 1,
     ):
         self._consumer = consumer
         self._store = store
+        self.batch_size = batch_size
         self._heartbeat_path = heartbeat_path
         self.stop_event = threading.Event()
         self._sleep = sleep or self.stop_event.wait
@@ -102,8 +109,93 @@ class EarthquakeConsumer:
             self._consumer.close()
             logger.info("consumer stopped", extra={"outcomes": self.outcomes})
 
-    def run_once(self, timeout_s: float = 1.0) -> bool:
-        """Handle at most one message. Returns True if a message was processed and committed."""
+    def run_once(self, timeout_s: float = 1.0) -> int:
+        """Handle the next message, or the next batch of up to batch_size messages.
+        Returns how many were processed and committed (0 when idle)."""
+        if self.batch_size > 1:
+            return self._run_batch(timeout_s)
+        return int(self._run_single(timeout_s))
+
+    def _run_batch(self, timeout_s: float) -> int:
+        messages = self._consumer.consume(num_messages=self.batch_size, timeout=timeout_s)
+        good = []
+        for message in messages:
+            if message.error():
+                if message.error().code() != KafkaError._PARTITION_EOF:
+                    logger.error("kafka error", extra={"error": str(message.error())})
+            else:
+                good.append(message)
+        if not good:
+            if not messages:
+                self._idle()
+            return 0
+
+        incoming = [_incoming(m) for m in good]
+        results = self._process_many(incoming)
+        if not results:  # stopping while the database is down: leave the offsets alone
+            return 0
+        self._commit(good[: len(results)])
+        for message, result in zip(incoming, results, strict=False):
+            self.outcomes[result.outcome] = self.outcomes.get(result.outcome, 0) + 1
+            logger.debug(
+                "message processed",
+                extra={**_where(message), "event_id": _key(message), "outcome": result.outcome},
+            )
+        logger.info(
+            "batch processed",
+            extra={
+                "stage": "persist",
+                "messages": len(results),
+                "outcomes": _tally(r.outcome for r in results),
+            },
+        )
+        self._beat()
+        return len(results)
+
+    def _process_many(self, incoming: list[IncomingMessage]) -> list[ProcessResult]:
+        """One transaction for the batch. A database outage retries the whole batch; any other
+        failure redoes it one message at a time, so only the bad message becomes an error."""
+        outage_attempt = 0
+        while not self.stop_event.is_set():
+            try:
+                return self._store.process_batch(incoming)
+            except Exception as exc:
+                if not is_infrastructure_error(exc):
+                    logger.warning(
+                        "batch failed, processing its messages one at a time",
+                        extra={"messages": len(incoming), "error": f"{type(exc).__name__}: {exc}"},
+                    )
+                    break
+                outage_attempt += 1
+                delay = min(MAX_BACKOFF_S, 2 ** (outage_attempt - 1))
+                logger.error(
+                    "database unavailable, retrying the same message",
+                    extra={**_where(incoming[0]), "batch": len(incoming), "retry_in_s": delay},
+                )
+                self._sleep(delay)
+        else:
+            return []
+        results = []
+        for message in incoming:
+            result = self._process(message)
+            if result is None:
+                break
+            results.append(result)
+        return results
+
+    def _commit(self, messages) -> None:
+        highest: dict[tuple[str, int], int] = {}
+        for m in messages:
+            key = (m.topic(), m.partition())
+            highest[key] = max(highest.get(key, -1), m.offset())
+        offsets = [TopicPartition(t, p, o + 1) for (t, p), o in sorted(highest.items())]
+        try:
+            self._consumer.commit(offsets=offsets, asynchronous=False)
+        except KafkaException as exc:
+            # The rows are committed; redelivered messages will be recognized and skipped.
+            logger.warning("offset commit failed", extra={"error": str(exc)})
+
+    def _run_single(self, timeout_s: float) -> bool:
         message = self._consumer.poll(timeout_s)
         if message is None:
             self._idle()
@@ -113,14 +205,7 @@ class EarthquakeConsumer:
                 logger.error("kafka error", extra={"error": str(message.error())})
             return False
 
-        incoming = IncomingMessage(
-            topic=message.topic(),
-            partition=message.partition(),
-            offset=message.offset(),
-            key=message.key(),
-            value=message.value(),
-            timestamp_ms=message.timestamp()[1] if message.timestamp()[0] else None,
-        )
+        incoming = _incoming(message)
         result = self._process(incoming)
         if result is None:  # stopping while the database is down: leave the offset alone
             return False
@@ -200,6 +285,24 @@ class EarthquakeConsumer:
     def _beat(self) -> None:
         if self._heartbeat_path is not None:
             self._heartbeat_path.write_text(str(time.time()))
+
+
+def _incoming(message) -> IncomingMessage:
+    return IncomingMessage(
+        topic=message.topic(),
+        partition=message.partition(),
+        offset=message.offset(),
+        key=message.key(),
+        value=message.value(),
+        timestamp_ms=message.timestamp()[1] if message.timestamp()[0] else None,
+    )
+
+
+def _tally(outcomes) -> dict[str, int]:
+    tally: dict[str, int] = {}
+    for outcome in outcomes:
+        tally[outcome] = tally.get(outcome, 0) + 1
+    return tally
 
 
 def _where(incoming: IncomingMessage) -> dict:

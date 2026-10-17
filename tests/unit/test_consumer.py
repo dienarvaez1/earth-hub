@@ -111,7 +111,7 @@ def make(kafka, store, **kwargs):
 def test_offset_committed_after_successful_processing():
     kafka, store = FakeKafka([FakeMessage(7)]), FakeStore()
     consumer, _ = make(kafka, store)
-    assert consumer.run_once() is True
+    assert consumer.run_once() == 1
     assert store.processed == [7] and kafka.commits == [7]
     assert consumer.outcomes == {"applied": 1}
 
@@ -130,7 +130,7 @@ def test_database_outage_retries_same_message_and_commits_only_after():
         return original_process(message)
 
     store.process = process
-    assert consumer.run_once() is True
+    assert consumer.run_once() == 1
     assert store.processed == [7, 7, 7, 7]
     assert sleeps == [1, 2, 4]
     assert kafka.commits == [7]
@@ -149,7 +149,7 @@ def test_stopping_during_outage_commits_nothing():
     store = FakeStore(*[db_down()] * 5)
     consumer, _ = make(kafka, store)
     consumer._sleep = lambda s: consumer.stop_event.set()
-    assert consumer.run_once() is False
+    assert consumer.run_once() == 0
     assert kafka.commits == []
 
 
@@ -198,7 +198,7 @@ def test_integrity_error_is_not_an_outage():
 def test_failed_offset_commit_does_not_crash():
     kafka = FakeKafka([FakeMessage(7)], commit_error=KafkaException("rebalance"))
     consumer, _ = make(kafka, FakeStore())
-    assert consumer.run_once() is True
+    assert consumer.run_once() == 1
 
 
 def test_kafka_errors_are_skipped_without_commit():
@@ -206,7 +206,7 @@ def test_kafka_errors_are_skipped_without_commit():
     other = FakeMessage(0, error=FakeError(KafkaError._TRANSPORT))
     kafka, store = FakeKafka([eof, other]), FakeStore()
     consumer, _ = make(kafka, store)
-    assert consumer.run_once() is False and consumer.run_once() is False
+    assert consumer.run_once() == 0 and consumer.run_once() == 0
     assert store.processed == [] and kafka.commits == []
 
 
@@ -258,3 +258,105 @@ def test_outcomes_are_counted(outcome):
     consumer, _ = make(FakeKafka([FakeMessage(1)]), FakeStore(ProcessResult(outcome)))
     consumer.run_once()
     assert consumer.outcomes == {outcome: 1}
+
+
+# --- batches -----------------------------------------------------------------------------
+
+
+class BatchKafka(FakeKafka):
+    def consume(self, num_messages, timeout):
+        batch, self.messages = self.messages[:num_messages], self.messages[num_messages:]
+        return batch
+
+    def commit(self, *, message=None, offsets=None, asynchronous):
+        assert asynchronous is False
+        if self.commit_error:
+            raise self.commit_error
+        if offsets is not None:
+            self.commits.append(sorted((tp.partition, tp.offset) for tp in offsets))
+        else:
+            self.commits.append(message.offset())
+
+
+class BatchStore(FakeStore):
+    def __init__(self, *batch_script, **kwargs):
+        super().__init__(**kwargs)
+        self.batch_script = list(batch_script)
+        self.batches: list[list[int]] = []
+
+    def process_batch(self, messages):
+        self.batches.append([m.offset for m in messages])
+        step = self.batch_script.pop(0) if self.batch_script else None
+        if isinstance(step, Exception):
+            raise step
+        return [ProcessResult("applied", 1) for _ in messages]
+
+
+def make_batch(kafka, store, batch_size=500):
+    sleeps = []
+    consumer = EarthquakeConsumer(kafka, store, sleep=sleeps.append, batch_size=batch_size)
+    return consumer, sleeps
+
+
+@pytest.mark.req("REQ-PER-007", "REQ-PER-015")
+def test_batch_commits_each_partitions_next_offset_after_the_database():
+    messages = [FakeMessage(o, partition=p) for p, o in [(0, 4), (1, 9), (0, 5), (2, 1), (1, 10)]]
+    kafka, store = BatchKafka(messages), BatchStore()
+    consumer, _ = make_batch(kafka, store)
+    assert consumer.run_once() == 5
+    assert store.batches == [[4, 9, 5, 1, 10]]
+    assert kafka.commits == [[(0, 6), (1, 11), (2, 2)]]  # highest offset + 1, per partition
+    assert consumer.outcomes == {"applied": 5}
+
+
+def test_batch_size_limits_each_round():
+    kafka, store = BatchKafka([FakeMessage(o) for o in range(7)]), BatchStore()
+    consumer, _ = make_batch(kafka, store, batch_size=3)
+    assert [consumer.run_once() for _ in range(4)] == [3, 3, 1, 0]
+
+
+@pytest.mark.req("REQ-PER-008")
+def test_database_outage_retries_the_whole_batch_and_commits_after():
+    kafka = BatchKafka([FakeMessage(o) for o in range(3)])
+    store = BatchStore(db_down(), db_down())
+    consumer, sleeps = make_batch(kafka, store)
+    assert consumer.run_once() == 3
+    assert store.batches == [[0, 1, 2]] * 3 and sleeps == [1, 2]
+    assert kafka.commits == [[(0, 3)]]
+
+
+@pytest.mark.req("REQ-PER-016")
+def test_failed_batch_is_redone_one_by_one_isolating_the_bad_message():
+    kafka = BatchKafka([FakeMessage(o) for o in range(4)])
+    bug = ValueError("boom")
+    # The batch fails; then message 2 fails three times on its own, the rest succeed.
+    store = BatchStore(bug)
+    script = {2: [bug, bug, bug]}
+
+    def process(message):
+        store.processed.append(message.offset)
+        errors = script.get(message.offset)
+        if errors:
+            raise errors.pop(0)
+        return ProcessResult("applied", 1)
+
+    store.process = process
+    consumer, _ = make_batch(kafka, store)
+    assert consumer.run_once() == 4
+    assert store.errors == [(2, "ValueError: boom")]
+    assert consumer.outcomes == {"applied": 3, "error": 1}
+    assert kafka.commits == [[(0, 4)]]
+
+
+def test_stopping_during_a_batch_outage_commits_nothing():
+    kafka = BatchKafka([FakeMessage(o) for o in range(3)])
+    consumer, _ = make_batch(kafka, BatchStore(*[db_down()] * 5))
+    consumer._sleep = lambda s: consumer.stop_event.set()
+    assert consumer.run_once() == 0 and kafka.commits == []
+
+
+def test_kafka_errors_in_a_batch_are_skipped():
+    eof = FakeMessage(0, error=FakeError(KafkaError._PARTITION_EOF))
+    kafka, store = BatchKafka([eof, FakeMessage(1)]), BatchStore()
+    consumer, _ = make_batch(kafka, store)
+    assert consumer.run_once() == 1 and store.batches == [[1]]

@@ -64,4 +64,4 @@ These values occur in real USGS data and are valid:
 | `rejected` | Broke a rule above |
 | `error` | Failed 3 times for an unexpected reason (a bug), stored with the exception so the partition can move on |
 
-A redelivered Kafka message (same topic, partition and offset) is recognized and skipped without a new row. `make reconcile` checks that every message in the topic has exactly one `raw_events` row.
+A redelivered Kafka message (same topic, partition and offset) is recognized and skipped without a new row. Messages from backfill and catch-up (`source` is `backfill`, `sweep`, `catchup` or `deleted`) go through exactly the same rules, from the `earthquakes.backfill` topic. `make reconcile` checks that every message in the topic has exactly one `raw_events` row.

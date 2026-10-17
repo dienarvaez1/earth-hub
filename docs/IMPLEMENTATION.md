@@ -67,7 +67,7 @@ These three behaviors of the USGS data shape the data model and the Kafka messag
 USGS revises events hours or days after they first appear (magnitude, location, review status). An event leaves the `all_hour` feed after 60 minutes, so later revisions would never be seen, and a poller outage longer than an hour would lose events permanently.
 
 - Poll the `all_day` feed for normal operation.
-- Add a catch-up job that queries the USGS FDSN event API with `updatedafter=<last_seen>` after downtime or on a schedule, to pick up older revisions. *Deferred from Milestone 2 to a later milestone; until then, revisions to events older than 24 hours and outages longer than the feed window are not covered.*
+- Add a catch-up job that queries the USGS FDSN event API with `updatedafter=<last_seen>` after downtime or on a schedule, to pick up older revisions. *Built in the backfill and catch-up milestone: hourly passes over the CDN-cached `all_month` feed cover 30 days, a daily FDSN query picks up deleted events, and `make backfill` loads any older range (see "Backfill and catch-up" below).*
 - Record the last successful poll time so the catch-up window is known.
 
 **Risk 2: An event's ID can change when networks merge their reports.**
@@ -243,7 +243,7 @@ A well-built poller is therefore effectively real-time; polling more often would
 1. **Loop forever.** On each round, fetch the feed with an `If-Modified-Since` header. If USGS answers `304 Not Modified`, skip the round. The feed sends no ETag, but `Last-Modified` works for this.
 2. **Time requests to the cache.** Wait until the `Expires` time from the last response, plus a few seconds of jitter, then fetch again. This picks up each new version almost as soon as USGS publishes it, without wasted requests.
 3. **Publish only what changed.** Keep each event's last-seen `updated` timestamp. Send a Kafka message only when an event is new or its `updated` timestamp has moved forward. This also keeps raw-payload and audit storage from filling with near-duplicates.
-4. **Remember state across restarts.** After a restart the service must neither resend everything nor miss events. *Implemented in Milestone 2:* on startup the poller reads the last 26 hours of `earthquakes.raw` and rebuilds the newest `updated` timestamp it published for each event, so the topic itself is the state and no separate store is needed. A catch-up query against the USGS FDSN event API (`fdsnws/event/1/query?updatedafter=<last_seen>`) after downtime is deferred to a later milestone.
+4. **Remember state across restarts.** After a restart the service must neither resend everything nor miss events. *Implemented in Milestone 2:* on startup the poller reads the last 26 hours of `earthquakes.raw` and rebuilds the newest `updated` timestamp it published for each event, so the topic itself is the state and no separate store is needed. Recovery beyond the feed window is handled by the catch-up job (see "Backfill and catch-up").
 5. **Run reliably.** Use `restart: unless-stopped` in Docker Compose and a health check based on the time of the last successful poll. On `SIGTERM`, flush pending Kafka messages before exiting so nothing is lost on shutdown.
 
 Sketch of the main loop:
@@ -270,7 +270,7 @@ Implications for this milestone:
   - Unchanged events are not republished.
   - A restart neither resends already-published events nor skips new ones.
   - Graceful shutdown flushes pending messages without loss.
-  - Catch-up after downtime publishes the events that were missed *(deferred with the catch-up job)*.
+  - Catch-up after downtime publishes the events that were missed *(built in the backfill and catch-up milestone)*.
 - Expected latency is about 1–2 minutes from USGS publication to Kafka. Document it as near-real-time, not real-time.
 
 ### Milestone 3 — Consumer, validation, and PostgreSQL
@@ -380,6 +380,50 @@ Keep the API read-only in the initial release. It should query PostgreSQL, not t
 - **Outage and restart checks are pytest tests** in `tests/disruptive/`, replacing the shell scripts. They stop the shared containers for real, so they only run on request (`--run-disruptive`) and as the last layer of `make regression`.
 - **The defect log records all 20 defects found so far**, 6 of them as full reports.
 - **Reports are JUnit XML plus a Markdown summary**, with no new dependency.
+
+### Backfill and catch-up (between Milestones 5 and 6)
+
+Loads history from the USGS FDSN event service, and recovers what the live poller cannot see.
+
+**Backfill** (`make backfill START=2026-01-01 [END=...]`):
+
+- **One request per calendar week**, Sunday 00:00:00 UTC to the next Sunday. The first window starts at the requested date (2026-01-01, a Thursday), and the current week stays open until it is over. For 2026 up to 17 October that is 42 windows.
+- **No events lost at boundaries.** FDSN ignores milliseconds in `starttime` and `endtime` and treats both edges as inclusive at whole seconds (measured against the live service). So every window ends at exactly the instant the next begins. An event exactly on a boundary may be returned twice, which the consumer stores once; "ending at 23:59:59.999" would lose the events in the last second of the week.
+- **Completeness:**
+  - each window is compared with `/count` using the same parameters, and is never recorded as done if fewer events arrive
+  - `limit` is never used
+  - a window that comes back short is asked for again, up to 3 times, because an event can move out of a window between the count and the query
+- **Split when needed:**
+  - a window over the 20,000-event cap is split into days
+  - so is a window USGS times out on: some busy recent weeks get a `504` after USGS's 60-second gateway limit, while single days answer in about a second
+  - splitting keeps the same boundary rule, so it never loses events
+- **Resumable:** finished windows are recorded in `backfill_windows`, and a re-run skips them, continuing inside a week that was partly done in days.
+- **Final sweep:** everything USGS added or revised while the backfill ran (`updatedafter=<start of the run>`) across the whole range, for events that arrived late or whose revised time moved them into a week already fetched.
+- **Considerate to USGS:**
+  - one request at a time, with a 1-second pause between them
+  - backoff on `429` and `5xx`, honouring `Retry-After`
+  - no retries on a cached `504`
+  - an optional contact in the `User-Agent` (`USGS_CONTACT`)
+
+**Catch-up** (the `catchup` service):
+
+- hourly, and on startup: the CDN-cached `all_month` feed, which covers revisions and outages up to 30 days
+- daily: FDSN events marked deleted since the previous check
+
+**Both** publish only events that are new or newer than PostgreSQL holds, to their own topic, `earthquakes.backfill`. A separate, batched consumer reads that topic, so live events never queue behind historical ones.
+
+**Batched consumer:**
+- **How a batch is stored:** messages are processed 500 at a time, as a set. Three reads, outcomes decided in memory in message order, then a few bulk writes. That is about 7 statements per batch instead of 6 per message.
+- **Fallbacks:** a batch that would merge records falls back to message-by-message processing, which is already proven. A batch that fails for another reason is redone one message at a time, so only the bad message becomes an `error`.
+- **Locking:** all of a batch's advisory locks are taken up front, in one sorted order.
+
+**Measured:**
+
+| | Result |
+| --- | --- |
+| Consumer throughput | 166 messages/s one by one, 6,121 messages/s batched (37×) |
+| A full year of synthetic history (139,579 events) through the whole pipeline | About 42 s (budget: 3 min) |
+| A live event during a 20,000-event backfill | Reached the API in 0.7 s |
 
 ### Milestone 6 — Analytics, observability, and performance
 

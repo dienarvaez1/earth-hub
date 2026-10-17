@@ -40,6 +40,29 @@ Every table row that starts with `| REQ-` is read by the tooling: keep one requi
 | REQ-PER-013 | Reconciliation accounts for every message in the topic, separating lost from pending, and checks the tables' invariants |
 | REQ-PER-014 | Messages that `jsonb` cannot hold (not JSON, `NaN`, NUL, `null`) are kept as text and rejected, never crash the consumer |
 
+## Backfill and catch-up
+
+| ID | Requirement |
+| --- | --- |
+| REQ-BF-001 | Backfill requests one calendar week at a time, Sunday 00:00:00 UTC to the next Sunday, the first week starting at the requested date (2026-01-01) and the current week left open until it is over |
+| REQ-BF-002 | Consecutive windows meet at exactly the same whole second, so no event is lost at a boundary even though FDSN ignores milliseconds in query times |
+| REQ-BF-003 | Every window is checked against the FDSN `/count` with the same parameters, never uses `limit`, and is not recorded as done if fewer events arrive than were counted |
+| REQ-BF-004 | A window over the FDSN cap of 20,000 events is split into smaller windows covering exactly the same range |
+| REQ-BF-005 | An interrupted backfill resumes without fetching finished windows again |
+| REQ-BF-006 | A final sweep publishes events added or revised during the backfill, including events whose revised time moved them into a week already fetched |
+| REQ-BF-007 | Requests to FDSN go one at a time with a pause between them, back off on `429` and `5xx`, and honour `Retry-After` |
+| REQ-BF-008 | Backfill includes deleted events, and counts them the same way it queries them |
+| REQ-BF-009 | Backfill and catch-up publish only events that are new or newer than what PostgreSQL stores |
+| REQ-BF-010 | Backfill and catch-up publish to `earthquakes.backfill`, consumed separately from the live topic |
+| REQ-BF-011 | A full year of history backfills through the whole pipeline in 3 minutes or less, with exact totals in the API |
+| REQ-BF-012 | Live events keep their normal latency while a backfill is being consumed |
+| REQ-BF-013 | A window USGS times out on (504 or no answer in time) is not retried as is, but split into days, and smaller if needed, on the same boundaries; a resumed week continues with its remaining days |
+| REQ-CU-001 | Catch-up reads the `all_month` feed hourly and on startup, recovering revisions and outages up to 30 days old |
+| REQ-CU-002 | A daily check publishes events USGS marked deleted since the previous check |
+| REQ-PER-015 | Processing messages in a batch gives exactly the same stored results as processing them one by one |
+| REQ-PER-016 | A batch that fails for a non-database reason is redone one message at a time, so only the bad message is recorded as an error |
+| REQ-PER-017 | Consumers processing overlapping batches never deadlock |
+
 ## Data quality
 
 One requirement per rule in [data-quality-rules.md](data-quality-rules.md).
@@ -110,6 +133,7 @@ The scenarios from Milestone 5 of the plan, verified through the API on the whol
 | REQ-OPS-002 | Data in Kafka and PostgreSQL survives a restart of both |
 | REQ-OPS-003 | Configuration is validated at startup, and passwords never appear in logs, test output or API responses |
 | REQ-OPS-004 | Logs are one JSON object per line, with extra fields such as event ID and stage |
-| REQ-OPS-005 | The poller's and consumer's health checks follow their heartbeats |
+| REQ-OPS-005 | The poller's, consumers' and catch-up's health checks follow their heartbeats |
+| REQ-OPS-006 | Requests to USGS identify Earth-Hub in the `User-Agent`, with an optional operator contact |
 | REQ-QA-001 | Unit tests never use the network, the live USGS feed included |
 | REQ-QA-002 | Test data is deterministic: results do not depend on live earthquakes |

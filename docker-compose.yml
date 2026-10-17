@@ -50,18 +50,16 @@ services:
     depends_on:
       kafka:
         condition: service_healthy
+    # The live topic, and the backfill topic used by backfill and catch-up.
     entrypoint:
-      - /opt/kafka/bin/kafka-topics.sh
-      - --bootstrap-server
-      - kafka:9092
-      - --create
-      - --if-not-exists
-      - --topic
-      - ${KAFKA_TOPIC_RAW:-earthquakes.raw}
-      - --partitions
-      - "3"
-      - --replication-factor
-      - "1"
+      - /bin/bash
+      - -c
+      - |
+        set -e
+        for topic in "${KAFKA_TOPIC_RAW:-earthquakes.raw}" "${KAFKA_TOPIC_BACKFILL:-earthquakes.backfill}"; do
+          /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists \
+            --topic "$$topic" --partitions 3 --replication-factor 1
+        done
     restart: "no"
 
   # App services share one image. They are not started by `make up`, so tests never
@@ -125,6 +123,56 @@ services:
       timeout: 5s
       retries: 3
       start_period: 30s
+
+  consumer-backfill:
+    # The same consumer, reading the backfill topic in its own group, so a large backfill
+    # never delays live events.
+    profiles: [ingest]
+    image: earth-hub:dev
+    env_file: .env
+    environment:
+      <<: *in-network
+      KAFKA_CONSUMER_TOPIC: ${KAFKA_TOPIC_BACKFILL:-earthquakes.backfill}
+      KAFKA_CONSUMER_GROUP: earth-hub-consumer-backfill
+    command: ["python", "-m", "earth_hub.consumers"]
+    depends_on:
+      kafka:
+        condition: service_healthy
+      kafka-init:
+        condition: service_completed_successfully
+      migrate:
+        condition: service_completed_successfully
+    restart: unless-stopped
+    stop_grace_period: 20s
+    healthcheck:
+      test: ["CMD", "python", "-m", "earth_hub.healthcheck", "consumer"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+  catchup:
+    # Hourly all_month feed pass and a daily deleted-events check, into the backfill topic.
+    profiles: [ingest]
+    image: earth-hub:dev
+    env_file: .env
+    environment: *in-network
+    command: ["python", "-m", "earth_hub.ingestion.catchup"]
+    depends_on:
+      kafka:
+        condition: service_healthy
+      kafka-init:
+        condition: service_completed_successfully
+      migrate:
+        condition: service_completed_successfully
+    restart: unless-stopped
+    stop_grace_period: 20s
+    healthcheck:
+      test: ["CMD", "python", "-m", "earth_hub.healthcheck", "catchup"]
+      interval: 60s
+      timeout: 5s
+      retries: 3
+      start_period: 120s
 
   api:
     # Read-only: queries PostgreSQL only. `make api`, then http://127.0.0.1:8000/docs

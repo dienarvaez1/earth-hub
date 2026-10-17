@@ -9,7 +9,7 @@ import logging
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
-from sqlalchemy import Connection, delete, func, insert, select, text, update
+from sqlalchemy import Connection, bindparam, delete, func, insert, select, text, tuple_, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from earth_hub.database.models import Earthquake, EarthquakeId, RawEvent
@@ -85,8 +85,9 @@ def _fits_bigint(value) -> bool:
 
 
 def process_message(
-    conn: Connection, message: IncomingMessage, *, now: datetime | None = None
+    conn: Connection, message: IncomingMessage, *, now: datetime | None = None, locked: bool = False
 ) -> ProcessResult:
+    """`locked`: the caller already holds the advisory locks for this message's IDs."""
     now = now or datetime.now(UTC)
     envelope, raw_value = _decode(message.value)
 
@@ -105,9 +106,266 @@ def process_message(
         _finish(conn, raw_id, "rejected", rule=rejected.rule, reason=rejected.reason)
         return ProcessResult("rejected", reason=rejected.reason)
 
-    earthquake_id, outcome = _apply(conn, event, now)
+    earthquake_id, outcome = _apply(conn, event, now, locked=locked)
     _finish(conn, raw_id, outcome, earthquake_id=earthquake_id)
     return ProcessResult(outcome, earthquake_id)
+
+
+def process_batch(
+    conn: Connection, messages: list[IncomingMessage], *, now: datetime | None = None
+) -> list[ProcessResult]:
+    """Process several messages in the caller's one transaction, with exactly the same results
+    as processing them one by one in order.
+
+    Done as a set, because the cost per message is round trips to the database, not work in
+    it: read what the batch needs in three queries, decide every outcome in memory in message
+    order, then write with a few bulk statements. A batch in which any message would merge two
+    records goes through process_message one by one instead; merges are rare.
+
+    The advisory locks for every ID in the batch are taken first, in one sorted order. Taking
+    them message by message instead could deadlock two consumers whose batches overlap: one
+    holding A and waiting for B while the other holds B and waits for A.
+    """
+    now = now or datetime.now(UTC)
+    if not messages:
+        return []
+    decoded = [_decode(m.value) for m in messages]
+    _lock(conn, {i for envelope, _ in decoded for i in _envelope_ids(envelope)})
+
+    done = _stored_offsets(conn, messages)
+    known_ids, stored = _stored_events(conn, decoded)
+    plan = _BatchPlan(known_ids, stored)
+    for message, (envelope, raw_value) in zip(messages, decoded, strict=True):
+        if (message.topic, message.partition, message.offset) in done:
+            plan.results.append(ProcessResult("already_processed"))
+            continue
+        if not plan.add(message, envelope, raw_value, now):
+            # A merge: replay the whole batch one message at a time. Nothing was written yet,
+            # and the locks are already held.
+            return [process_message(conn, m, now=now, locked=True) for m in messages]
+    return plan.write(conn, now)
+
+
+class _BatchPlan:
+    """Outcomes of a batch, decided in memory exactly as process_message would decide them."""
+
+    def __init__(self, known_ids: dict[str, int], stored: dict[int, dict]):
+        self.event_of: dict[str, object] = dict(known_ids)  # USGS ID -> event key
+        self.events: dict[object, dict] = {k: dict(v) for k, v in stored.items()}
+        self.new_events: list[object] = []  # keys of events this batch creates, in order
+        self.changed: set[object] = set()  # stored events this batch updates
+        self.new_ids: dict[str, object] = {}  # USGS IDs to add -> event key
+        self.raw_rows: list[tuple[dict, object]] = []
+        self.results: list = []
+
+    def add(self, message, envelope, raw_value, now) -> bool:
+        """Plan one message. False if it would merge records (the caller falls back)."""
+        audit = _audit_row(message, envelope, raw_value)
+        try:
+            event = validate(envelope, now=now)
+        except Rejected as rejected:
+            row = audit | {"outcome": "rejected", "rule": rejected.rule, "reason": rejected.reason}
+            self.raw_rows.append((row, None))
+            self.results.append(("rejected", None, rejected.reason))
+            return True
+
+        keys = {self.event_of[i] for i in event.ids if i in self.event_of}
+        if len(keys) > 1:
+            return False
+        if not keys:
+            key = ("new", len(self.new_events))
+            self.new_events.append(key)
+            self.events[key] = {
+                "source_updated_ms": event.source_updated_ms,
+                "preferred_event_id": event.event_id,
+                "fields": event.fields,
+                "revision_count": 1,
+            }
+            outcome = "applied"
+        else:
+            (key,) = keys
+            current = self.events[key]
+            if event.source_updated_ms > current["source_updated_ms"]:
+                current.update(
+                    source_updated_ms=event.source_updated_ms,
+                    preferred_event_id=event.event_id,
+                    fields=event.fields,
+                    revision_count=current["revision_count"] + 1,
+                )
+                if not isinstance(key, tuple):
+                    self.changed.add(key)
+                outcome = "applied"
+            elif event.source_updated_ms == current["source_updated_ms"]:
+                outcome = "duplicate"
+            else:
+                outcome = "stale"
+        for event_id in event.ids:  # identity facts, recorded even for stale messages
+            if event_id not in self.event_of:
+                self.event_of[event_id] = key
+                self.new_ids[event_id] = key
+        self.raw_rows.append((audit | {"outcome": outcome, "rule": None, "reason": None}, key))
+        self.results.append((outcome, key, None))
+        return True
+
+    def write(self, conn: Connection, now: datetime) -> list[ProcessResult]:
+        ids: dict[object, int] = {k: k for k in self.events if not isinstance(k, tuple)}
+        if self.new_events:
+            rows = [
+                {
+                    "preferred_event_id": self.events[k]["preferred_event_id"],
+                    **self.events[k]["fields"],
+                    "revision_count": self.events[k]["revision_count"],
+                    "last_applied_at": now,
+                }
+                for k in self.new_events
+            ]
+            # In message order, so identities are assigned as one-by-one processing would.
+            created = (
+                conn.execute(
+                    insert(earthquakes).returning(earthquakes.c.id, sort_by_parameter_order=True),
+                    rows,
+                )
+                .scalars()
+                .all()
+            )
+            ids.update(zip(self.new_events, created, strict=True))
+        if self.changed:
+            conn.execute(
+                update(earthquakes)
+                .where(earthquakes.c.id == bindparam("_id"))
+                .values({c: bindparam(f"_{c}") for c in _UPDATABLE}),
+                [
+                    {"_id": k}
+                    | {
+                        f"_{c}": v
+                        for c, v in (
+                            self.events[k]["fields"]
+                            | {
+                                "preferred_event_id": self.events[k]["preferred_event_id"],
+                                "revision_count": self.events[k]["revision_count"],
+                                "last_applied_at": now,
+                            }
+                        ).items()
+                    }
+                    for k in sorted(self.changed)
+                ],
+            )
+        if self.new_ids:
+            conn.execute(
+                pg_insert(earthquake_ids).on_conflict_do_nothing(index_elements=["event_id"]),
+                [{"event_id": i, "earthquake_id": ids[k]} for i, k in self.new_ids.items()],
+            )
+        if self.raw_rows:
+            conn.execute(
+                pg_insert(raw_events).on_conflict_do_nothing(constraint="uq_raw_events_offset"),
+                [
+                    row | {"earthquake_id": ids[k] if k is not None else None}
+                    for row, k in self.raw_rows
+                ],
+            )
+        return [
+            r
+            if isinstance(r, ProcessResult)
+            else ProcessResult(r[0], ids[r[1]] if r[1] is not None else None, r[2])
+            for r in self.results
+        ]
+
+
+_UPDATABLE = (
+    "preferred_event_id",
+    "event_time",
+    "event_time_ms",
+    "source_updated",
+    "source_updated_ms",
+    "magnitude",
+    "mag_type",
+    "place",
+    "longitude",
+    "latitude",
+    "depth_km",
+    "event_type",
+    "review_status",
+    "tsunami",
+    "felt",
+    "cdi",
+    "mmi",
+    "alert",
+    "sig",
+    "net",
+    "url",
+    "title",
+    "revision_count",
+    "last_applied_at",
+)
+
+
+def _stored_offsets(conn: Connection, messages) -> set[tuple[str, int, int]]:
+    keys = [(m.topic, m.partition, m.offset) for m in messages]
+    rows = conn.execute(
+        select(
+            raw_events.c.kafka_topic, raw_events.c.kafka_partition, raw_events.c.kafka_offset
+        ).where(
+            tuple_(
+                raw_events.c.kafka_topic, raw_events.c.kafka_partition, raw_events.c.kafka_offset
+            ).in_(keys)
+        )
+    ).all()
+    return {tuple(r) for r in rows}
+
+
+def _stored_events(conn: Connection, decoded) -> tuple[dict[str, int], dict[int, dict]]:
+    """USGS ID -> event id, and the stored state of those events, in one query."""
+    all_ids = sorted({i for envelope, _ in decoded for i in _envelope_ids(envelope)})
+    if not all_ids:
+        return {}, {}
+    rows = conn.execute(
+        select(
+            earthquake_ids.c.event_id,
+            earthquakes.c.id,
+            earthquakes.c.source_updated_ms,
+            earthquakes.c.preferred_event_id,
+            earthquakes.c.revision_count,
+        )
+        .join(earthquakes, earthquakes.c.id == earthquake_ids.c.earthquake_id)
+        .where(earthquake_ids.c.event_id.in_(all_ids))
+    ).all()
+    known = {r.event_id: r.id for r in rows}
+    stored = {
+        r.id: {
+            "source_updated_ms": r.source_updated_ms,
+            "preferred_event_id": r.preferred_event_id,
+            "revision_count": r.revision_count,
+            "fields": None,
+        }
+        for r in rows
+    }
+    return known, stored
+
+
+def _envelope_ids(envelope) -> set[str]:
+    """The IDs a message would lock, read leniently: invalid messages are rejected later."""
+    if not isinstance(envelope, dict):
+        return set()
+    ids = {i for i in envelope.get("ids") or [] if isinstance(i, str) and i}
+    if isinstance(envelope.get("event_id"), str) and envelope["event_id"]:
+        ids.add(envelope["event_id"])
+    return ids
+
+
+def _lock(conn: Connection, ids) -> None:
+    """Advisory locks in Python's sorted order, which every caller uses, so no two
+    transactions can wait on each other. One statement: ORDER BY the array position makes
+    PostgreSQL take them in that order (volatile output is evaluated after the sort)."""
+    ordered = sorted(ids)
+    if not ordered:
+        return
+    conn.execute(
+        text(
+            "SELECT pg_advisory_xact_lock(hashtextextended(t.id, 0)) "
+            "FROM unnest(CAST(:ids AS text[])) WITH ORDINALITY AS t(id, n) ORDER BY t.n"
+        ),
+        {"ids": ordered},
+    )
 
 
 def record_error(conn: Connection, message: IncomingMessage, error: str) -> None:
@@ -131,13 +389,11 @@ def _finish(conn, raw_id, outcome, *, rule=None, reason=None, earthquake_id=None
     )
 
 
-def _apply(conn: Connection, event: ValidEvent, now: datetime) -> tuple[int, str]:
+def _apply(conn: Connection, event: ValidEvent, now: datetime, *, locked: bool = False):
     # Serialize work on these IDs, in a fixed order to avoid deadlocks, so two consumers
     # can never create two records for one event or merge the same records twice.
-    for event_id in sorted(event.ids):
-        conn.execute(
-            text("SELECT pg_advisory_xact_lock(hashtextextended(:id, 0))"), {"id": event_id}
-        )
+    if not locked:
+        _lock(conn, event.ids)
 
     matches = sorted(
         conn.execute(

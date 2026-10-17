@@ -34,6 +34,7 @@ markers = [
     "integration: needs the Docker Compose infrastructure running (make up)",
     "e2e: whole pipeline, feed to API, on temporary topics and databases (needs make up)",
     "disruptive: stops and starts shared containers; runs only with --run-disruptive",
+    "performance: a full year of synthetic data; runs only with --run-performance",
     "req(*ids): requirements from docs/requirements.md that this test verifies",
 ]
 
