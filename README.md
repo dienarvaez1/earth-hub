@@ -2,7 +2,7 @@
 
 Local-first earthquake data platform: the USGS earthquake feed flows through Apache Kafka into PostgreSQL and out through a REST API, with data quality and testing treated as first-class concerns. See [docs/IMPLEMENTATION.md](docs/IMPLEMENTATION.md) for the full plan.
 
-**Status:** Milestone 3 (persistence). Live USGS events flow through Kafka into validated PostgreSQL tables; the REST API arrives in Milestone 4.
+**Status:** Milestone 4 (REST API). Live USGS events flow through Kafka into validated PostgreSQL tables and are served by a read-only REST API. End-to-end QA and regression automation come next, in Milestone 5.
 
 ## Requirements
 
@@ -34,6 +34,7 @@ make migrate             # apply database migrations
 make smoke               # check Kafka and PostgreSQL work end to end
 make ingest              # run the pipeline (poller + consumer) on the live USGS feed
 make reconcile           # check every Kafka message reached PostgreSQL
+make api                 # serve the REST API at http://127.0.0.1:8000/docs
 ```
 
 ## Commands
@@ -54,6 +55,8 @@ make reconcile           # check every Kafka message reached PostgreSQL
 | `make ingest` | Build and start the pipeline containers: migrate, poller, consumer (live USGS feed) |
 | `make ingest-once` | Poll the live feed once from your machine and exit |
 | `make ingest-logs` / `make ingest-stop` | Follow or stop the poller and consumer |
+| `make api` / `make api-stop` | Start or stop the API container (`http://127.0.0.1:8000`) |
+| `make api-dev` | Run the API on your machine with auto-reload |
 | `make consume` | Run the consumer from your machine |
 | `make reconcile` | Check every Kafka message has a database row, and the tables' invariants |
 | `make check-db-outage` | Stop PostgreSQL mid-stream and check nothing is lost or duplicated |
@@ -96,6 +99,48 @@ The Kafka offset is committed only after the database commit, so delivery is at-
 
 `make reconcile` compares the topic with `raw_events`. A missing row below the consumer group's committed offset counts as **lost**; at or above it, as **pending** (lag). It also checks five invariants, such as every preferred ID mapping to its own event.
 
+## REST API
+
+A read-only FastAPI app (`src/earth_hub/api/`) over PostgreSQL. It never reads from Kafka or USGS. Interactive docs are at `/docs` and the OpenAPI schema at `/openapi.json`.
+
+| Endpoint | Returns |
+| --- | --- |
+| `GET /api/v1/health` | Database status, newest event time, version. `503` when the database is down |
+| `GET /api/v1/earthquakes` | A page of events: `{items, total, limit, offset}` |
+| `GET /api/v1/earthquakes/{event_id}` | One event. Former USGS IDs work too, and return the event under its current ID |
+| `GET /api/v1/earthquakes/stats` | Count, min/max/average magnitude, counts by event type and by magnitude type |
+| `GET /api/v1/earthquakes/summary/hourly` | Counts per UTC hour, empty hours included (24 h by default, 31 days at most) |
+| `GET /api/v1/earthquakes/summary/magnitude` | Counts for `<0`, `0-1`, … `6-7`, `>=7` and `unknown`, empty ranges included |
+
+**Filters** (list, stats and summaries):
+- `min_magnitude` and `max_magnitude` (−2 to 10.5)
+- `start_time` (inclusive) and `end_time` (exclusive): ISO 8601 date-times, UTC assumed without a timezone, years 1900–2099
+- `place`: a case-insensitive substring, where `%` and `_` match literally
+- `event_type`, `review_status`, and `include_deleted` (deleted events are hidden by default)
+
+**List only:**
+- `limit`: 1–500, default 20
+- `offset`: 0–10,000,000
+- `sort`: `event_time`, `magnitude` or `depth`
+- `order`: `asc` or `desc` (default `desc`)
+
+Missing magnitudes sort last, and ties break by storage order, so pages are stable.
+
+**Errors** always look like `{"error": {"code", "message", "details"}}`:
+
+| Code | Status |
+| --- | --- |
+| `invalid_parameters` | `422`, listing every problem |
+| `not_found` | `404` |
+| `method_not_allowed` | `405`, with an `Allow` header |
+| `database_unavailable` | `503` |
+| `internal_error` | `500`, with no internals |
+
+```bash
+curl -s 'http://127.0.0.1:8000/api/v1/earthquakes?min_magnitude=4&sort=magnitude&limit=5'
+curl -s 'http://127.0.0.1:8000/api/v1/earthquakes/summary/hourly?start_time=2026-10-16T00:00:00Z'
+```
+
 ## Tests
 
 - **Unit tests** (`tests/unit/`) run without Docker or network access, and never call the live USGS feed. Feed data comes from `tests/fixtures/usgs/all_day_sample.geojson`, six real events chosen for edge cases (several IDs, negative magnitude and depth, an explosion), and HTTP is mocked with httpx's `MockTransport`.
@@ -109,6 +154,9 @@ The Kafka offset is committed only after the database commit, so delivery is at-
 - **Repository tests** run against a throwaway, fully migrated database per test: redelivery, duplicates, newer and older revisions, preferred-ID changes, two- and three-way merges, rejected and unstorable messages, database `CHECK` constraints, and a concurrency test where two threads deliver the same new event 10 times.
 - **Pipeline tests** go from Kafka to PostgreSQL with a real consumer, including a simulated crash between the database commit and the offset commit, and reconciliation of lost and pending messages.
 - **Migration tests** check that the migrations match the models exactly, and that they upgrade and downgrade cleanly.
+- **API tests** (`tests/api/`) use a fixed set of 20 events stored through the real consumer code, including a merge. They cover pagination boundaries, sorting and tie-breaking, every filter and the time boundaries, literal matching of `%` and `_`, lookups by former IDs, an empty database, and statistics and summaries checked against separate SQL queries.
+- **API validation tests** (`tests/unit/test_api_validation.py`) need no database. They cover every invalid parameter, a database that's down (`503`), and that no internals leak.
+- **Contract tests** (`tests/api/test_contract.py`): Schemathesis generates requests from the OpenAPI schema and checks for server errors and responses that don't match the schema. For a deeper run: `CONTRACT_EXAMPLES=1000 make test-all`.
 - **Outage check** (`make check-db-outage`) stops PostgreSQL while messages arrive, starts it again, and checks every message was stored exactly once. It uses its own topic and database.
 - **Restart check** (`make smoke-restart`) writes a token to PostgreSQL and Kafka, restarts both, confirms the token is still there, then reruns the smoke tests.
 

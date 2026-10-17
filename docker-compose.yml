@@ -67,7 +67,7 @@ services:
   # App services share one image. They are not started by `make up`, so tests never
   # depend on live USGS data: `make ingest` runs migrate, poller and consumer.
   migrate:
-    profiles: [ingest]
+    profiles: [ingest, api]
     build: .
     image: earth-hub:dev
     env_file: .env
@@ -125,6 +125,32 @@ services:
       timeout: 5s
       retries: 3
       start_period: 30s
+
+  api:
+    # Read-only: queries PostgreSQL only. `make api`, then http://127.0.0.1:8000/docs
+    profiles: [api]
+    image: earth-hub:dev
+    env_file: .env
+    environment: *in-network
+    command: ["uvicorn", "earth_hub.api.main:app", "--host", "0.0.0.0", "--port", "8000"]
+    ports:
+      - "127.0.0.1:${API_PORT:-8000}:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    restart: unless-stopped
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/v1/health', timeout=4)"
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
 
   postgres:
     image: postgres:18.6
