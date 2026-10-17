@@ -20,6 +20,7 @@ def sql(engine, query, **params):
 # --- stats -----------------------------------------------------------------------------
 
 
+@pytest.mark.req("REQ-API-006")
 @pytest.mark.parametrize(
     ("params", "where"),
     [
@@ -67,6 +68,7 @@ def test_stats_match_sql(client, seeded_engine, params, where):
     assert body["by_magnitude_type"] == by_mag_type
 
 
+@pytest.mark.req("REQ-API-006")
 def test_stats_known_values(client):
     body = client.get("/api/v1/earthquakes/stats").json()
     assert body["count"] == VISIBLE_COUNT
@@ -91,6 +93,7 @@ def test_stats_when_only_unknown_magnitudes_match(client):
 # --- hourly summary --------------------------------------------------------------------
 
 
+@pytest.mark.req("REQ-API-007")
 def test_default_hourly_window_is_the_last_24_hours_with_zeros(client, seeded_engine):
     body = client.get("/api/v1/earthquakes/summary/hourly").json()
     # API_NOW is 23:30 on day one, so the window is T0 .. T0 + 24 h.
@@ -124,6 +127,7 @@ def test_hourly_counts_known_values(client):
     assert by_hour[23] == 0  # us18 is deleted
 
 
+@pytest.mark.req("REQ-API-007")
 def test_hourly_explicit_range_and_partial_hours(client):
     body = client.get(
         "/api/v1/earthquakes/summary/hourly",
@@ -135,6 +139,7 @@ def test_hourly_explicit_range_and_partial_hours(client):
     assert [b["count"] for b in body["buckets"]] == [2, 0, 1]
 
 
+@pytest.mark.req("REQ-API-003")
 def test_hourly_respects_other_filters(client):
     body = client.get(
         "/api/v1/earthquakes/summary/hourly", params={"event_type": "explosion"}
@@ -142,6 +147,7 @@ def test_hourly_respects_other_filters(client):
     assert sum(b["count"] for b in body["buckets"]) == 1  # uw09; nn19 is outside the window
 
 
+@pytest.mark.req("REQ-API-007")
 @pytest.mark.parametrize(
     ("params", "parameter"),
     [
@@ -155,6 +161,7 @@ def test_hourly_range_limits(client, params, parameter):
     assert response.json()["error"]["details"][0]["parameter"] == parameter
 
 
+@pytest.mark.req("REQ-API-007")
 def test_hourly_31_days_is_allowed(client):
     body = client.get(
         "/api/v1/earthquakes/summary/hourly",
@@ -168,6 +175,7 @@ def test_hourly_31_days_is_allowed(client):
 LABELS = ["<0", "0-1", "1-2", "2-3", "3-4", "4-5", "5-6", "6-7", ">=7", "unknown"]
 
 
+@pytest.mark.req("REQ-API-008")
 def test_magnitude_buckets_match_sql(client, seeded_engine):
     buckets = client.get("/api/v1/earthquakes/summary/magnitude").json()["buckets"]
     assert [b["label"] for b in buckets] == LABELS
@@ -188,6 +196,7 @@ def test_magnitude_buckets_match_sql(client, seeded_engine):
     assert sum(b["count"] for b in buckets) == VISIBLE_COUNT
 
 
+@pytest.mark.req("REQ-API-008")
 def test_magnitude_bucket_edges(client):
     counts = {
         b["label"]: b["count"]
@@ -217,6 +226,7 @@ def test_magnitude_bounds_are_described(client):
 # --- empty database --------------------------------------------------------------------
 
 
+@pytest.mark.req("REQ-API-007", "REQ-API-008")
 def test_empty_database_gives_empty_and_zero_results(empty_client):
     assert empty_client.get("/api/v1/earthquakes").json() == {
         "items": [],
@@ -238,6 +248,7 @@ def test_empty_database_gives_empty_and_zero_results(empty_client):
     assert empty_client.get("/api/v1/earthquakes/us01").status_code == 404
 
 
+@pytest.mark.req("REQ-API-001")
 def test_health_reports_latest_event(client, empty_client):
     body = client.get("/api/v1/health").json()
     assert body["status"] == body["database"] == "ok"
@@ -249,6 +260,7 @@ def test_api_now_is_used_for_defaults():
     assert API_NOW.tzinfo is UTC
 
 
+@pytest.mark.req("REQ-API-007")
 def test_hourly_window_anchors_on_the_one_time_given(client):
     # Found by Schemathesis: an old start_time alone used to run to "now" and exceed 31 days.
     only_start = client.get(

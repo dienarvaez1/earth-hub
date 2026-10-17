@@ -4,6 +4,7 @@ from earth_hub.config import Settings
 from earth_hub.healthcheck import CONSUMER_MAX_AGE_S, is_healthy, main, max_age_s
 
 
+@pytest.mark.req("REQ-OPS-005")
 @pytest.mark.parametrize(
     ("age_s", "max_age", "healthy"),
     [(0, 180, True), (180, 180, True), (181, 180, False), (None, 180, False)],
@@ -14,6 +15,7 @@ def test_is_healthy(age_s, max_age, healthy):
     assert is_healthy(mtime, now, max_age) is healthy
 
 
+@pytest.mark.req("REQ-OPS-005")
 @pytest.mark.parametrize(("interval", "expected"), [(10, 180), (60, 180), (200, 600)])
 def test_poller_max_age_is_three_rounds(interval, expected):
     settings = Settings(

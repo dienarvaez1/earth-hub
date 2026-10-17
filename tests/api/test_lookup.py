@@ -5,6 +5,7 @@ import pytest
 pytestmark = pytest.mark.integration
 
 
+@pytest.mark.req("REQ-API-005")
 def test_lookup_by_current_id(client):
     response = client.get("/api/v1/earthquakes/us02")
     assert response.status_code == 200
@@ -12,6 +13,7 @@ def test_lookup_by_current_id(client):
     assert body["event_id"] == "us02" and body["magnitude"] == 6.1 and body["ids"] == ["us02"]
 
 
+@pytest.mark.req("REQ-API-005")
 def test_former_id_resolves_to_the_merged_event(client):
     old = client.get("/api/v1/earthquakes/ak20").json()
     current = client.get("/api/v1/earthquakes/us20").json()
@@ -22,11 +24,13 @@ def test_former_id_resolves_to_the_merged_event(client):
     assert current["revision_count"] == 3
 
 
+@pytest.mark.req("REQ-API-009")
 def test_deleted_event_is_still_found_by_id(client):
     body = client.get("/api/v1/earthquakes/us18").json()
     assert body["review_status"] == "deleted"
 
 
+@pytest.mark.req("REQ-API-005", "REQ-API-011")
 @pytest.mark.parametrize("event_id", ["nope", "US01", "us01 ", "%25", "us0*"])
 def test_unknown_id_is_404_in_the_error_format(client, event_id):
     response = client.get(f"/api/v1/earthquakes/{event_id}")

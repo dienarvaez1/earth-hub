@@ -70,6 +70,7 @@ def test_first_round_publishes_every_event(feed_doc, fake_producer):
     assert sorted(published_ids(fake_producer)) == sorted(f["id"] for f in feed_doc["features"])
 
 
+@pytest.mark.req("REQ-ING-001")
 def test_304_publishes_nothing(feed_doc, fake_producer):
     feed = FakeFeed(feed_doc)
     poller = make_poller(feed, fake_producer)
@@ -82,6 +83,7 @@ def test_304_publishes_nothing(feed_doc, fake_producer):
     assert len(fake_producer.produced) == count
 
 
+@pytest.mark.req("REQ-ING-004")
 def test_new_feed_version_with_no_changes_publishes_nothing(feed_doc, fake_producer):
     feed = FakeFeed(feed_doc)
     poller = make_poller(feed, fake_producer)
@@ -92,6 +94,7 @@ def test_new_feed_version_with_no_changes_publishes_nothing(feed_doc, fake_produ
     assert (result.published, result.unchanged) == (0, len(feed_doc["features"]))
 
 
+@pytest.mark.req("REQ-ING-004")
 def test_revision_is_published_once(feed_doc, fake_producer):
     feed = FakeFeed(feed_doc)
     poller = make_poller(feed, fake_producer)
@@ -108,6 +111,7 @@ def test_revision_is_published_once(feed_doc, fake_producer):
     assert poller.run_round().published == 0
 
 
+@pytest.mark.req("REQ-ING-004")
 def test_older_revision_is_not_published(feed_doc, fake_producer):
     feed = FakeFeed(revise(feed_doc, "us6000u2n7", by_ms=5000))
     poller = make_poller(feed, fake_producer)
@@ -127,6 +131,7 @@ def test_same_event_listed_twice_publishes_newest_once(feed_doc, fake_producer):
     assert [v["source_updated_ms"] for v in values] == [duplicate["properties"]["updated"]]
 
 
+@pytest.mark.req("REQ-ING-008")
 def test_state_rebuilt_after_restart_prevents_resending(feed_doc, fake_producer, fake_producer_cls):
     first = make_poller(FakeFeed(feed_doc), fake_producer)
     first.run_round()
@@ -137,6 +142,7 @@ def test_state_rebuilt_after_restart_prevents_resending(feed_doc, fake_producer,
     assert restarted.run_round().published == 0
 
 
+@pytest.mark.req("REQ-ING-006")
 def test_failed_delivery_is_retried_next_round(feed_doc, fake_producer_cls):
     target = feed_doc["features"][2]["id"]
     producer = fake_producer_cls(fail_keys={target.encode()})
@@ -155,6 +161,7 @@ def test_failed_delivery_is_retried_next_round(feed_doc, fake_producer_cls):
     assert published_ids(producer) == [target]
 
 
+@pytest.mark.req("REQ-ING-003")
 def test_feed_unavailable_fails_round_without_publishing(feed_doc, fake_producer):
     feed = FakeFeed(feed_doc)
     feed.next_status = [503, 503, 503]
@@ -173,6 +180,7 @@ def test_unusable_body_fails_round(fake_producer):
     assert fake_producer.produced == []
 
 
+@pytest.mark.req("REQ-ING-007")
 def test_rejected_features_are_counted_and_logged(feed_doc, fake_producer, caplog):
     del feed_doc["features"][0]["properties"]["updated"]
     result = make_poller(FakeFeed(feed_doc), fake_producer).run_round()
@@ -187,6 +195,7 @@ def test_empty_feed_is_a_successful_round(feed_doc, fake_producer):
     assert (result.status, result.published) == ("published", 0)
 
 
+@pytest.mark.req("REQ-OPS-005")
 def test_heartbeat_written_on_success_only(feed_doc, fake_producer, tmp_path):
     heartbeat = tmp_path / "hb"
     feed = FakeFeed(feed_doc)
@@ -199,6 +208,7 @@ def test_heartbeat_written_on_success_only(feed_doc, fake_producer, tmp_path):
     assert heartbeat.read_text() == NOW.isoformat()
 
 
+@pytest.mark.req("REQ-ING-009", "REQ-ING-002")
 def test_run_forever_stops_and_flushes(feed_doc, fake_producer):
     poller = make_poller(FakeFeed(feed_doc), fake_producer)
     waits = []
@@ -214,6 +224,7 @@ def test_run_forever_stops_and_flushes(feed_doc, fake_producer):
     assert fake_producer.flush_calls[-1] == 10.0
 
 
+@pytest.mark.req("REQ-ING-002")
 @pytest.mark.parametrize(
     ("expires", "rng", "expected"),
     [
@@ -228,6 +239,7 @@ def test_next_wait(expires, rng, expected):
     assert next_wait(expires, NOW, 60.0, lambda: rng) == pytest.approx(expected)
 
 
+@pytest.mark.req("REQ-ING-002")
 def test_jitter_stays_within_bounds():
     expires = NOW + timedelta(seconds=30)
     waits = [next_wait(expires, NOW, 60.0, lambda r=r: r / 10) for r in range(11)]

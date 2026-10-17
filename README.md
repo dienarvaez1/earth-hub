@@ -2,7 +2,7 @@
 
 Local-first earthquake data platform: the USGS earthquake feed flows through Apache Kafka into PostgreSQL and out through a REST API, with data quality and testing treated as first-class concerns. See [docs/IMPLEMENTATION.md](docs/IMPLEMENTATION.md) for the full plan.
 
-**Status:** Milestone 4 (REST API). Live USGS events flow through Kafka into validated PostgreSQL tables and are served by a read-only REST API. End-to-end QA and regression automation come next, in Milestone 5.
+**Status:** Milestone 5 (end-to-end QA). Live USGS events flow through Kafka into validated PostgreSQL tables and are served by a read-only REST API. The whole path is covered by automated end-to-end and outage tests, run by one regression command. Analytics, observability and performance come next, in Milestone 6.
 
 ## Requirements
 
@@ -54,10 +54,15 @@ make api                 # serve the REST API at http://127.0.0.1:8000/docs
 | `make reset` | Stop the services and delete their data |
 | `make lint` | Check style and formatting with Ruff |
 | `make format` | Fix style and formatting |
-| `make test` | Unit tests; no Docker needed |
-| `make test-integration` / `make smoke` | Integration tests against the running services |
-| `make test-all` | Unit and integration tests in one process, which also catches tests that affect each other |
-| `make smoke-restart` | Restart Kafka and PostgreSQL and check data survives |
+| `make regression` | **Every test layer in order, with reports in `reports/`** |
+| `make test` | Unit tests; no Docker or network needed |
+| `make test-integration` / `make smoke` | Integration, API and contract tests against the running services |
+| `make test-e2e` | End-to-end tests, from the feed to the API |
+| `make test-disruptive` | Tests that stop and start the shared Kafka and PostgreSQL containers |
+| `make test-all` | Every non-disruptive test in one process, which also catches tests that affect each other |
+| `make flake-check` | The end-to-end suite 5 times in a row |
+| `make traceability` | Rebuild the traceability matrix from the last regression run |
+| `make smoke-restart` | Restart Kafka and PostgreSQL and check data survives (disruptive) |
 | `make migrate` | Apply database migrations with Alembic |
 | `make ingest` | Build and start the pipeline containers: migrate, poller, consumer (live USGS feed) |
 | `make ingest-once` | Poll the live feed once from your machine and exit |
@@ -67,7 +72,7 @@ make api                 # serve the REST API at http://127.0.0.1:8000/docs
 | `make kafka-ui` / `make kafka-ui-stop` | Start or stop the read-only Kafka web viewer (`http://127.0.0.1:8080`) |
 | `make consume` | Run the consumer from your machine |
 | `make reconcile` | Check every Kafka message has a database row, and the tables' invariants |
-| `make check-db-outage` | Stop PostgreSQL mid-stream and check nothing is lost or duplicated |
+| `make check-db-outage` | Stop PostgreSQL mid-stream and check nothing is lost or duplicated (disruptive) |
 | `make coverage` | Unit tests with a coverage report |
 
 ## Ingestion
@@ -149,24 +154,35 @@ curl -s 'http://127.0.0.1:8000/api/v1/earthquakes?min_magnitude=4&sort=magnitude
 curl -s 'http://127.0.0.1:8000/api/v1/earthquakes/summary/hourly?start_time=2026-10-16T00:00:00Z'
 ```
 
-## Tests
+## Tests and QA
 
-- **Unit tests** (`tests/unit/`) run without Docker or network access, and never call the live USGS feed. Feed data comes from `tests/fixtures/usgs/all_day_sample.geojson`, six real events chosen for edge cases (several IDs, negative magnitude and depth, an explosion), and HTTP is mocked with httpx's `MockTransport`.
-- **Integration tests** (`tests/integration/`, marked `integration`) need `make up`. The smoke tests:
-  - send a message to a temporary Kafka topic and read it back,
-  - check that `earthquakes.raw` exists with 3 partitions,
-  - create, insert and query a PostgreSQL table inside a rolled-back transaction,
-  - run all migrations against a brand-new, throwaway database.
-- **Ingestion integration tests** run the poller against real Kafka on temporary topics with a mocked feed: keyed envelopes, stable partitioning per event, and a restart that rebuilds state from the topic and resends only real revisions.
-- **Validation tests** cover every rule in `docs/data-quality-rules.md`, including boundary values, `NaN`, booleans and unrepresentable timestamps.
-- **Repository tests** run against a throwaway, fully migrated database per test: redelivery, duplicates, newer and older revisions, preferred-ID changes, two- and three-way merges, rejected and unstorable messages, database `CHECK` constraints, and a concurrency test where two threads deliver the same new event 10 times.
-- **Pipeline tests** go from Kafka to PostgreSQL with a real consumer, including a simulated crash between the database commit and the offset commit, and reconciliation of lost and pending messages.
-- **Migration tests** check that the migrations match the models exactly, and that they upgrade and downgrade cleanly.
-- **API tests** (`tests/api/`) use a fixed set of 20 events stored through the real consumer code, including a merge. They cover pagination boundaries, sorting and tie-breaking, every filter and the time boundaries, literal matching of `%` and `_`, lookups by former IDs, an empty database, and statistics and summaries checked against separate SQL queries.
-- **API validation tests** (`tests/unit/test_api_validation.py`) need no database. They cover every invalid parameter, a database that's down (`503`), and that no internals leak.
-- **Contract tests** (`tests/api/test_contract.py`): Schemathesis generates requests from the OpenAPI schema and checks for server errors and responses that don't match the schema. For a deeper run: `CONTRACT_EXAMPLES=1000 make test-all`.
-- **Outage check** (`make check-db-outage`) stops PostgreSQL while messages arrive, starts it again, and checks every message was stored exactly once. It uses its own topic and database.
-- **Restart check** (`make smoke-restart`) writes a token to PostgreSQL and Kafka, restarts both, confirms the token is still there, then reruns the smoke tests.
+Run everything with **`make regression`**: lint, unit, integration, API, contract, end-to-end and disruptive tests, in that order, stopping at the first failing layer. It takes about 2 minutes and writes:
+- `reports/regression-summary.md`
+- JUnit XML for each layer
+- a coverage report covering all layers (`reports/coverage-html/index.html`)
+- the [traceability matrix](docs/traceability-matrix.md)
+
+| Layer | Location | What it covers |
+| --- | --- | --- |
+| Unit | `tests/unit/` | Parsing, the 16 validation rules at their boundaries, retries and timing, poller state, consumer control flow, API validation and errors. **No Docker, no network:** a guard blocks it and the live USGS feed |
+| Integration | `tests/integration/` | Real Kafka and PostgreSQL on temporary topics and databases: smoke tests, migrations, redelivery, revisions, ID changes and merges, concurrency, constraints, reconciliation |
+| API | `tests/api/` | Every endpoint over a fixed set of 20 events stored through the real consumer code; statistics and summaries checked against separate SQL |
+| Contract | `tests/api/test_contract.py` | Schemathesis generates requests from the OpenAPI schema (`CONTRACT_EXAMPLES=1000` for a deeper run) |
+| End-to-end | `tests/e2e/` | Mock USGS feed → real poller → Kafka → real consumer → PostgreSQL → API, checked only through the API. These are the plan's scenarios: new, duplicate, revised, invalid, merged and deleted events, consumer and poller restarts, an empty database, invalid requests, and a reconciled batch of 55 messages |
+| Disruptive | `tests/disruptive/` | **Stops and starts the shared containers:** PostgreSQL stopped while events arrive, a Kafka restart, data surviving a restart of both. Runs only with `--run-disruptive` |
+
+Other test commands:
+- `make test-e2e`, `make test-disruptive`, and `make test-all` (every non-disruptive test in one process)
+- `make flake-check` runs the end-to-end suite 5 times in a row
+- `make smoke-restart` and `make check-db-outage` run single disruptive tests
+
+**QA documents** in `docs/`:
+- [test strategy](docs/test-strategy.md) and [test plan](docs/test-plan.md)
+- [requirements](docs/requirements.md) (74, each with an ID) and the generated [traceability matrix](docs/traceability-matrix.md)
+- the [defect log](docs/defects/README.md): 20 defects found and fixed, 6 with full reports
+- the [data-quality rules](docs/data-quality-rules.md)
+
+Tests declare what they verify with `@pytest.mark.req("REQ-...")`. `make traceability` fails if a requirement has no passing test, and a marker naming an unknown requirement fails at collection.
 
 ## Configuration
 

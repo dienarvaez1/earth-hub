@@ -15,6 +15,7 @@ from sqlalchemy import Engine, text
 
 from earth_hub.config import get_settings
 from earth_hub.database.engine import make_engine
+from earth_hub.kafka_metadata import with_retries
 
 # Each query counts rows that break an invariant; all must be zero.
 INVARIANTS = {
@@ -69,8 +70,10 @@ def topic_offsets(
         partitions = consumer.list_topics(topic, timeout=timeout_s).topics[topic].partitions
         assignments, remaining = [], {}
         for partition in partitions:
-            low, high = consumer.get_watermark_offsets(
-                TopicPartition(topic, partition), timeout=timeout_s
+            low, high = with_retries(
+                lambda partition=partition: consumer.get_watermark_offsets(
+                    TopicPartition(topic, partition), timeout=timeout_s
+                )
             )
             if high > low:
                 assignments.append(TopicPartition(topic, partition, low))

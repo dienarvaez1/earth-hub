@@ -1,6 +1,8 @@
 import json
 from datetime import UTC, datetime
 
+import pytest
+
 from earth_hub.ingestion.events import parse_feed
 from earth_hub.ingestion.producer import EventPublisher
 
@@ -11,6 +13,7 @@ def messages(feed_doc):
     return parse_feed(json.dumps(feed_doc).encode(), fetched_at=FETCHED_AT).messages
 
 
+@pytest.mark.req("REQ-ING-005", "REQ-ING-006")
 def test_all_messages_delivered_with_event_id_keys(feed_doc, fake_producer):
     msgs = messages(feed_doc)
     result = EventPublisher(fake_producer, "earthquakes.raw").publish(msgs)
@@ -23,6 +26,7 @@ def test_all_messages_delivered_with_event_id_keys(feed_doc, fake_producer):
     ]
 
 
+@pytest.mark.req("REQ-ING-006")
 def test_broker_error_is_reported_per_message(feed_doc, fake_producer_cls):
     msgs = messages(feed_doc)
     producer = fake_producer_cls(fail_keys={msgs[1].key})
@@ -32,6 +36,7 @@ def test_broker_error_is_reported_per_message(feed_doc, fake_producer_cls):
     assert len(result.delivered) == len(msgs) - 1
 
 
+@pytest.mark.req("REQ-ING-006")
 def test_missing_delivery_report_counts_as_failure(feed_doc, fake_producer_cls):
     msgs = messages(feed_doc)
     producer = fake_producer_cls(drop_keys={msgs[0].key})

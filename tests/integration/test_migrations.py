@@ -11,6 +11,7 @@ pytestmark = pytest.mark.integration
 TABLES = {"earthquakes", "earthquake_ids", "raw_events"}
 
 
+@pytest.mark.req("REQ-PER-012")
 def test_migrations_match_the_models(db):
     """A model change without a migration (or the reverse) fails here."""
     with db.connect() as conn:
@@ -18,6 +19,7 @@ def test_migrations_match_the_models(db):
     assert diff == []
 
 
+@pytest.mark.req("REQ-PER-012")
 def test_upgrade_then_downgrade_to_base(empty_database, make_alembic_config):
     config = make_alembic_config(empty_database)
     engine = create_engine(empty_database)

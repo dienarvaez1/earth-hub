@@ -68,6 +68,7 @@ def revise(feature, by_ms=60_000, **properties):
 # --- new events, redelivery, revisions --------------------------------------------------
 
 
+@pytest.mark.req("REQ-PER-001")
 def test_new_event_is_stored_with_normalized_fields(db, deliver, make_envelope, feed_doc):
     feature = feed_doc["features"][0]
     result = deliver(make_envelope(feature))
@@ -95,6 +96,7 @@ def test_whole_fixture_feed_is_stored(db, deliver, make_envelope, feed_doc):
     assert_invariants(db)
 
 
+@pytest.mark.req("REQ-PER-002")
 def test_redelivered_offset_is_skipped(db, deliver, make_envelope, feed_doc):
     value = make_envelope(feed_doc["features"][0])
     deliver(value, offset=5)
@@ -102,6 +104,7 @@ def test_redelivered_offset_is_skipped(db, deliver, make_envelope, feed_doc):
     assert len(rows(db, Earthquake)) == 1 and len(rows(db, RawEvent)) == 1
 
 
+@pytest.mark.req("REQ-PER-003")
 def test_same_revision_at_new_offset_is_duplicate(db, deliver, make_envelope, feed_doc):
     value = make_envelope(feed_doc["features"][0])
     deliver(value)
@@ -114,6 +117,7 @@ def test_same_revision_at_new_offset_is_duplicate(db, deliver, make_envelope, fe
     ]
 
 
+@pytest.mark.req("REQ-PER-004")
 def test_newer_revision_updates_the_event(db, deliver, make_envelope, feed_doc):
     feature = feed_doc["features"][0]
     deliver(make_envelope(feature))
@@ -130,6 +134,7 @@ def test_newer_revision_updates_the_event(db, deliver, make_envelope, feed_doc):
     assert event["revision_count"] == 2
 
 
+@pytest.mark.req("REQ-PER-004")
 def test_older_revision_is_stale_and_changes_nothing(db, deliver, make_envelope, feed_doc):
     feature = feed_doc["features"][0]
     newer = revise(feature, mag=4.6)
@@ -142,6 +147,7 @@ def test_older_revision_is_stale_and_changes_nothing(db, deliver, make_envelope,
 # --- changing and merging IDs (risk 2) -------------------------------------------------
 
 
+@pytest.mark.req("REQ-PER-005")
 def test_preferred_id_change_keeps_one_record(db, deliver, make_envelope, make_feature):
     first = make_feature("ak0001", ["ak0001"], updated=1792137700000)
     deliver(make_envelope(first))
@@ -155,6 +161,7 @@ def test_preferred_id_change_keeps_one_record(db, deliver, make_envelope, make_f
     assert_invariants(db)
 
 
+@pytest.mark.req("REQ-PER-005", "REQ-PER-004")
 def test_late_message_under_old_id_is_stale(db, deliver, make_envelope, make_feature):
     deliver(make_envelope(make_feature("us0001", ["us0001", "ak0001"], updated=1792137760000)))
     old = make_feature("ak0001", ["ak0001"], updated=1792137700000)
@@ -163,6 +170,7 @@ def test_late_message_under_old_id_is_stale(db, deliver, make_envelope, make_fea
     assert event["preferred_event_id"] == "us0001"
 
 
+@pytest.mark.req("REQ-PER-006")
 def test_two_records_merge_into_the_oldest(db, deliver, make_envelope, make_feature):
     deliver(make_envelope(make_feature("ak0001", ["ak0001"], updated=1792137700000)))
     deliver(make_envelope(make_feature("us0001", ["us0001"], updated=1792137710000)))
@@ -182,6 +190,7 @@ def test_two_records_merge_into_the_oldest(db, deliver, make_envelope, make_feat
     assert_invariants(db)
 
 
+@pytest.mark.req("REQ-PER-006")
 def test_merge_keeps_the_newest_data_even_from_the_removed_record(
     db, deliver, make_envelope, make_feature
 ):
@@ -196,6 +205,7 @@ def test_merge_keeps_the_newest_data_even_from_the_removed_record(
     assert_invariants(db)
 
 
+@pytest.mark.req("REQ-PER-006")
 def test_three_way_merge(db, deliver, make_envelope, make_feature):
     for i, eid in enumerate(["ak1", "us1", "hv1"]):
         deliver(make_envelope(make_feature(eid, [eid], updated=1792137700000 + i)))
@@ -209,6 +219,7 @@ def test_three_way_merge(db, deliver, make_envelope, make_feature):
 # --- rejections and errors -------------------------------------------------------------
 
 
+@pytest.mark.req("REQ-PER-001")
 def test_invalid_message_is_rejected_with_its_rule(db, deliver, make_envelope, feed_doc):
     feature = json.loads(json.dumps(feed_doc["features"][0]))
     feature["geometry"]["coordinates"][1] = 95.0
@@ -222,6 +233,7 @@ def test_invalid_message_is_rejected_with_its_rule(db, deliver, make_envelope, f
     assert raw["envelope"]["payload"]["geometry"]["coordinates"][1] == 95.0
 
 
+@pytest.mark.req("REQ-PER-014")
 @pytest.mark.parametrize(
     ("value", "stored_raw"),
     [
@@ -240,10 +252,12 @@ def test_unstorable_json_is_kept_as_text_and_rejected(db, deliver, value, stored
     assert raw["rule"] == "ENV-001"
 
 
+@pytest.mark.req("REQ-PER-014")
 def test_empty_value_is_rejected(db, deliver):
     assert deliver(None).outcome == "rejected"
 
 
+@pytest.mark.req("REQ-PER-009")
 def test_record_error_stores_the_message_and_reason(db):
     message = IncomingMessage("earthquakes.raw", 1, 9, b"us1", b'{"x": 1}', None)
     with db.begin() as conn:
@@ -259,6 +273,7 @@ def test_record_error_stores_the_message_and_reason(db):
 # --- database-level protection ---------------------------------------------------------
 
 
+@pytest.mark.req("REQ-PER-011")
 @pytest.mark.parametrize(
     ("column", "value"),
     [
@@ -290,6 +305,7 @@ def test_check_constraints_hold_without_the_application(db, column, value):
             conn.execute(insert(Earthquake), row)
 
 
+@pytest.mark.req("REQ-PER-006")
 def test_deleting_an_event_with_aliases_is_refused(db, deliver, make_envelope, feed_doc):
     deliver(make_envelope(feed_doc["features"][0]))
     with pytest.raises(IntegrityError, match="foreign key"):
@@ -297,6 +313,7 @@ def test_deleting_an_event_with_aliases_is_refused(db, deliver, make_envelope, f
             conn.execute(text("DELETE FROM earthquakes"))
 
 
+@pytest.mark.req("REQ-PER-010")
 def test_concurrent_deliveries_of_one_event_create_one_record(db, make_envelope, make_feature):
     """Advisory locks stop two consumers from both inserting the same new event."""
     for round_ in range(10):

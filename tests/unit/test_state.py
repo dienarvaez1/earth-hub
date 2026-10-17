@@ -1,6 +1,8 @@
 import json
 from datetime import UTC, datetime, timedelta
 
+import pytest
+
 from earth_hub.ingestion.state import STATE_WINDOW, SentState, state_from_messages
 
 NOW = datetime(2026, 10, 16, 8, 0, tzinfo=UTC)
@@ -22,6 +24,7 @@ def test_newer_revision_replaces_older_and_older_never_wins():
     assert state.updated_ms("us1") == 300
 
 
+@pytest.mark.req("REQ-ING-008")
 def test_rebuild_keeps_newest_revision_per_event():
     state = state_from_messages(
         [envelope("us1", 300), envelope("us1", 100), envelope("ak2", 50), envelope("us1", 200)]

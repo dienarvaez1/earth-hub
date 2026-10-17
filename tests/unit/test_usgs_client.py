@@ -58,6 +58,7 @@ def test_200_returns_body_and_cache_headers():
     assert requests[0].headers["User-Agent"] == USER_AGENT
 
 
+@pytest.mark.req("REQ-ING-001")
 def test_conditional_request_and_304():
     transport, requests = scripted(httpx.Response(304, headers=HEADERS))
     response = make_client(transport).fetch(if_modified_since=HEADERS["Last-Modified"])
@@ -66,6 +67,7 @@ def test_conditional_request_and_304():
     assert requests[0].headers["If-Modified-Since"] == HEADERS["Last-Modified"]
 
 
+@pytest.mark.req("REQ-ING-003")
 @pytest.mark.parametrize(
     "first_failure",
     [
@@ -87,6 +89,7 @@ def test_transient_failure_then_success_recovers(first_failure):
     assert sleeps == [1.5]  # backoff 1 s * 2**0 * (1 + jitter 0.5)
 
 
+@pytest.mark.req("REQ-ING-003")
 def test_three_server_errors_give_up_with_exponential_backoff():
     sleeps = []
     transport, requests = scripted(httpx.Response(500), httpx.Response(502), httpx.Response(500))
@@ -96,6 +99,7 @@ def test_three_server_errors_give_up_with_exponential_backoff():
     assert sleeps == [1.5, 3.0]  # no sleep after the last attempt
 
 
+@pytest.mark.req("REQ-ING-003")
 @pytest.mark.parametrize("status", [400, 403, 404, 410])
 def test_client_errors_are_not_retried(status):
     transport, requests = scripted(httpx.Response(status))

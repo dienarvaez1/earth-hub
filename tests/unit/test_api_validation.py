@@ -30,6 +30,7 @@ def assert_invalid(response, *parameters):
     assert all(d["message"] for d in error["details"])
 
 
+@pytest.mark.req("REQ-API-010")
 @pytest.mark.parametrize(
     ("params", "parameter"),
     [
@@ -59,6 +60,7 @@ def test_invalid_list_parameters(client, params, parameter):
     assert_invalid(client.get("/api/v1/earthquakes", params=params), parameter)
 
 
+@pytest.mark.req("REQ-API-010")
 @pytest.mark.parametrize(
     "path",
     [
@@ -71,11 +73,13 @@ def test_aggregates_validate_filters_too(client, path):
     assert_invalid(client.get(path, params={"min_magnitude": 11}), "min_magnitude")
 
 
+@pytest.mark.req("REQ-API-010")
 def test_several_problems_are_reported_together(client):
     response = client.get("/api/v1/earthquakes", params={"limit": 0, "offset": -5, "order": "x"})
     assert_invalid(response, "limit", "offset", "order")
 
 
+@pytest.mark.req("REQ-API-011")
 @pytest.mark.parametrize(
     "path",
     [
@@ -98,6 +102,7 @@ def test_database_down_is_503_in_the_error_format(client, path):
     }
 
 
+@pytest.mark.req("REQ-API-001")
 def test_health_is_503_when_database_is_down(client):
     response = client.get("/api/v1/health")
     assert response.status_code == 503
@@ -109,6 +114,7 @@ def test_health_is_503_when_database_is_down(client):
     )
 
 
+@pytest.mark.req("REQ-API-011", "REQ-OPS-003")
 def test_no_internals_or_credentials_leak_in_errors(client):
     for path in ("/api/v1/earthquakes", "/api/v1/health"):
         text = client.get(path).text
@@ -116,6 +122,7 @@ def test_no_internals_or_credentials_leak_in_errors(client):
             assert secret not in text
 
 
+@pytest.mark.req("REQ-API-011", "REQ-API-013")
 def test_unknown_route_and_method_use_the_error_format(client):
     missing = client.get("/api/v2/earthquakes")
     assert missing.status_code == 404 and missing.json()["error"]["code"] == "not_found"
@@ -124,6 +131,7 @@ def test_unknown_route_and_method_use_the_error_format(client):
     assert wrong_method.json()["error"]["code"] == "method_not_allowed"
 
 
+@pytest.mark.req("REQ-API-011")
 def test_unexpected_error_is_a_generic_500(client, monkeypatch):
     from earth_hub.api import services
 
@@ -154,6 +162,7 @@ def _fake_connect():
     return _FakeConnection()
 
 
+@pytest.mark.req("REQ-API-012")
 def test_openapi_documents_every_endpoint_and_error(client):
     spec = client.get("/openapi.json").json()
     assert set(spec["paths"]) == {
@@ -195,12 +204,14 @@ def test_docs_page_is_served(client):
 # --- regressions for defects found by Schemathesis ---------------------------------------
 
 
+@pytest.mark.req("REQ-API-010")
 @pytest.mark.parametrize("value", ["0.5", "1792137522341", "2026-10-10", "10:00", "now"])
 def test_times_must_be_iso_date_times_not_numbers_or_dates(client, value):
     # Pydantic's lax mode accepted 0.5 as a Unix timestamp; the contract says date-time.
     assert_invalid(client.get("/api/v1/earthquakes", params={"start_time": value}), "start_time")
 
 
+@pytest.mark.req("REQ-API-010")
 @pytest.mark.parametrize(
     ("path", "params", "parameter"),
     [
@@ -214,12 +225,14 @@ def test_nul_characters_are_rejected_not_a_500(client, path, params, parameter):
     assert_invalid(client.get(path, params=params), parameter)
 
 
+@pytest.mark.req("REQ-API-011")
 def test_405_includes_the_allow_header(client):
     response = client.request("TRACE", "/api/v1/earthquakes")
     assert response.status_code == 405
     assert response.headers["allow"] == "GET"
 
 
+@pytest.mark.req("REQ-API-010")
 @pytest.mark.parametrize(
     "params",
     [
@@ -235,6 +248,7 @@ def test_times_outside_1900_to_2099_are_rejected_not_a_500(client, params):
     assert_invalid(client.get("/api/v1/earthquakes/summary/hourly", params=params), name)
 
 
+@pytest.mark.req("REQ-API-002")
 @pytest.mark.parametrize("offset", [10_000_001, 2**63, 1192528022417137467392])
 def test_offsets_beyond_the_cap_are_rejected_not_a_500(client, offset):
     # Found by Schemathesis: an offset beyond bigint failed inside PostgreSQL.

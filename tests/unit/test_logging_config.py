@@ -15,6 +15,7 @@ def make_record(**extra) -> logging.LogRecord:
     return record
 
 
+@pytest.mark.req("REQ-OPS-004")
 def test_record_is_one_json_object_with_core_fields():
     entry = json.loads(JsonFormatter().format(make_record()))
     assert entry["level"] == "INFO"
@@ -23,6 +24,7 @@ def test_record_is_one_json_object_with_core_fields():
     assert entry["ts"].endswith("+00:00")
 
 
+@pytest.mark.req("REQ-OPS-004")
 def test_extra_fields_are_included():
     entry = json.loads(JsonFormatter().format(make_record(event_id="us7000abcd", stage="persist")))
     assert entry["event_id"] == "us7000abcd"
