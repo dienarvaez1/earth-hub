@@ -64,30 +64,67 @@ services:
       - "1"
     restart: "no"
 
-  poller:
-    # Not started by `make up`, so tests never depend on live USGS data. Use `make ingest`.
+  # App services share one image. They are not started by `make up`, so tests never
+  # depend on live USGS data: `make ingest` runs migrate, poller and consumer.
+  migrate:
     profiles: [ingest]
     build: .
     image: earth-hub:dev
     env_file: .env
-    environment:
+    environment: &in-network
       # Inside the Docker network, not the host-side values from .env.
       KAFKA_BOOTSTRAP_SERVERS: kafka:9092
       POSTGRES_HOST: postgres
       POSTGRES_PORT: "5432"
+    command: ["alembic", "upgrade", "head"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  poller:
+    profiles: [ingest]
+    image: earth-hub:dev
+    env_file: .env
+    environment: *in-network
+    command: ["python", "-m", "earth_hub.ingestion"]
     depends_on:
       kafka:
         condition: service_healthy
       kafka-init:
         condition: service_completed_successfully
+      migrate:
+        condition: service_completed_successfully
     restart: unless-stopped
     stop_grace_period: 20s
     healthcheck:
-      test: ["CMD", "python", "-m", "earth_hub.ingestion.healthcheck"]
+      test: ["CMD", "python", "-m", "earth_hub.healthcheck", "poller"]
       interval: 30s
       timeout: 5s
       retries: 3
       start_period: 60s
+
+  consumer:
+    profiles: [ingest]
+    image: earth-hub:dev
+    env_file: .env
+    environment: *in-network
+    command: ["python", "-m", "earth_hub.consumers"]
+    depends_on:
+      kafka:
+        condition: service_healthy
+      kafka-init:
+        condition: service_completed_successfully
+      migrate:
+        condition: service_completed_successfully
+    restart: unless-stopped
+    stop_grace_period: 20s
+    healthcheck:
+      test: ["CMD", "python", "-m", "earth_hub.healthcheck", "consumer"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
 
   postgres:
     image: postgres:18.6

@@ -14,8 +14,9 @@ WORKDIR /app
 COPY pyproject.toml uv.lock ./
 RUN uv sync --locked --no-dev --no-install-project
 
-COPY README.md ./
+COPY README.md alembic.ini ./
 COPY src ./src
+COPY migrations ./migrations
 RUN uv sync --locked --no-dev
 
 RUN useradd --system --uid 10001 earthhub

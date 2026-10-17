@@ -295,6 +295,13 @@ Implications for this milestone:
 
 **Exit gate:** Repeated deliveries do not create duplicate normalized records, revisions update correctly, and processing failures are observable and recoverable.
 
+**Decisions made in Milestone 3:**
+
+- **Invalid messages go to a quarantine table, not a dead-letter topic.** `raw_events` records every message with its outcome, so rejected messages sit next to the accepted ones and can be queried and reconciled in one place. The rules are in `docs/data-quality-rules.md`.
+- **Unexpected processing errors are retried 3 times**, then stored with `outcome = 'error'` so the partition keeps moving. Database outages are never treated this way: the same message is retried until PostgreSQL is back.
+- **Merges keep the oldest internal record**, take the newest data among the merged records, and move every ID and raw row to it.
+- **Redelivery is detected by the Kafka offset** (`raw_events` is unique on topic, partition and offset), which makes at-least-once delivery safe without claiming exactly-once.
+
 ### Milestone 4 — Earth-Hub REST API
 
 **Implementation**
