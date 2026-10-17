@@ -152,6 +152,31 @@ services:
       retries: 3
       start_period: 15s
 
+  kafka-ui:
+    # Web viewer for topics, messages and consumer groups. `make kafka-ui`, then
+    # http://127.0.0.1:8080. Read-only: it cannot produce, delete or reconfigure anything.
+    profiles: [tools]
+    image: ghcr.io/kafbat/kafka-ui:v1.5.0
+    ports:
+      - "127.0.0.1:${KAFKA_UI_PORT:-8080}:8080"
+    environment:
+      KAFKA_CLUSTERS_0_NAME: earth-hub
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:9092
+      KAFKA_CLUSTERS_0_READONLY: "true"
+      DYNAMIC_CONFIG_ENABLED: "false"
+      JAVA_OPTS: -Xms128m -Xmx384m
+    mem_limit: 768m
+    depends_on:
+      kafka:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8080/actuator/health | grep -q UP"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+
   postgres:
     image: postgres:18.6
     ports:
