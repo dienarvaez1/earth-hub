@@ -52,6 +52,10 @@ class ValidEvent:
     # Normalized values for the earthquakes table, keyed by column name.
     fields: dict[str, Any] = field(repr=False)
 
+    @property
+    def deleted(self) -> bool:
+        return self.fields["review_status"] == "deleted"
+
 
 def ms_to_datetime(ms: int) -> datetime:
     # timedelta arithmetic is exact; datetime.fromtimestamp(ms / 1000) can be off by 1 µs.
@@ -160,11 +164,20 @@ def validate(envelope: Any, *, now: datetime) -> ValidEvent:
     elif envelope["source_updated_ms"] < envelope["event_time_ms"]:
         violations.append(Violation("TIME-003", "updated is earlier than the event time"))
 
+    # A deletion only has to identify and order the event. USGS fills some deletions with
+    # placeholders (magnitude -5 on uw deletions), which must not block the deletion: such
+    # values are stored as unknown instead (DEF-027).
+    deletion = props.get("status") == "deleted"
+    cleared: set[str] = set()
+
     magnitude = props.get("mag")
     if magnitude is not None and (
         not _is_number(magnitude) or not _in_range(magnitude, MAGNITUDE_RANGE)
     ):
-        violations.append(Violation("MAG-001", f"magnitude {magnitude!r} outside -2..10.5"))
+        if deletion:
+            cleared.add("mag")
+        else:
+            violations.append(Violation("MAG-001", f"magnitude {magnitude!r} outside -2..10.5"))
 
     if not isinstance(props.get("type"), str) or not props["type"]:
         violations.append(Violation("PROP-001", "type must be a non-empty string"))
@@ -188,12 +201,17 @@ def validate(envelope: Any, *, now: datetime) -> ValidEvent:
     for name, check in optional_types.items():
         value = props.get(name)
         if value is not None and not check(value):
-            violations.append(Violation("PROP-003", f"{name} has an invalid value {value!r}"))
+            if deletion:
+                cleared.add(name)
+            else:
+                violations.append(Violation("PROP-003", f"{name} has an invalid value {value!r}"))
 
     if violations:
         raise Rejected(violations)
 
     ids = tuple(dict.fromkeys([envelope["event_id"], *envelope["ids"]]))
+    props = {k: v for k, v in props.items() if k not in cleared}
+    magnitude = props.get("mag")
     return ValidEvent(
         event_id=envelope["event_id"],
         ids=ids,
@@ -221,5 +239,6 @@ def validate(envelope: Any, *, now: datetime) -> ValidEvent:
             "net": props.get("net"),
             "url": props.get("url"),
             "title": props.get("title"),
+            "revision_ids": list(ids),
         },
     )

@@ -68,6 +68,7 @@ def snapshot(engine) -> dict:
                 RawEvent.kafka_offset,
                 RawEvent.outcome,
                 RawEvent.rule,
+                RawEvent.reason,
                 RawEvent.earthquake_id,
                 RawEvent.event_id,
             ).order_by(RawEvent.kafka_offset)
@@ -152,6 +153,7 @@ def random_stream(rng, ns: str, make_envelope, make_feature, merges: bool) -> li
     """A random but realistic message stream over a small pool of events in namespace `ns`."""
     pool = [f"{ns}e{i}" for i in range(12)]
     latest: dict[str, dict] = {}
+    extras: dict[str, list[str]] = {}  # IDs an event gained, which USGS may delete on their own
     sent: list[bytes] = []
     for _ in range(80):
         choice = rng.random()
@@ -165,6 +167,7 @@ def random_stream(rng, ns: str, make_envelope, make_feature, merges: bool) -> li
             if rng.random() < 0.15:  # gains an extra, never-seen ID
                 extra = f"{ns}x{len(sent)}"  # unique: a shared ID would be a merge
                 feature["properties"]["ids"] = feature["properties"]["ids"] + extra + ","
+                extras.setdefault(event_id, []).append(extra)
             if rng.random() < 0.05:
                 feature["properties"]["status"] = "deleted"
             latest[event_id] = feature
@@ -194,6 +197,15 @@ def random_stream(rng, ns: str, make_envelope, make_feature, merges: bool) -> li
             )
             latest[event_id] = merged
             sent.append(make_envelope(merged))
+        elif choice < 0.92 and extras.get(event_id):  # a duplicate deleted on its own (DEF-026)
+            duplicate = rng.choice(extras[event_id])
+            deletion = make_feature(
+                duplicate,
+                updated=latest[event_id]["properties"]["updated"] + rng.randint(-2, 2) * 1000,
+                status="deleted",
+                mag=rng.choice([1.0, -5]),  # -5: the placeholder uw deletions carry (DEF-027)
+            )
+            sent.append(make_envelope(deletion))
         else:
             sent.append(make_envelope(latest[event_id]))  # resend of the current version
     return sent
@@ -237,6 +249,8 @@ def test_random_streams_give_identical_results_batched_or_one_by_one(
             cursor += size
         assert got == expected, f"seed {seed}"
     assert snapshot(second_db) == snapshot(db)
+    kept = [r for r in snapshot(db)["raw"] if r.reason and "a duplicate merged into" in r.reason]
+    assert kept, "no stream exercised a duplicate's deletion"
     if merges:
         assert fallbacks[0] > 0  # merges went through the one-by-one path
     else:

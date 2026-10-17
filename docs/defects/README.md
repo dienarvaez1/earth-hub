@@ -13,7 +13,7 @@ Six are written up in full, as examples of the [defect report template](#templat
 | Medium | A function misbehaves in specific conditions; a workaround exists |
 | Low | Cosmetic, a standards deviation, or a minor inconvenience |
 
-Priority is how urgently it had to be fixed: **P1** before anything else, **P2** within the milestone, **P3** when convenient. All 25 were fixed within their milestone.
+Priority is how urgently it had to be fixed: **P1** before anything else, **P2** within the milestone, **P3** when convenient. All 27 were fixed within their milestone, or in a follow-up straight after.
 
 ## Log
 
@@ -44,6 +44,8 @@ Priority is how urgently it had to be fixed: **P1** before anything else, **P2**
 | DEF-023 | Backfill | Medium | Live backfill | A USGS outage ended the backfill command with a Python traceback instead of a "run again to resume" message | backfill milestone |
 | DEF-024 | Backfill | Medium | End-to-end test | The deleted-events check crashed when its stored checkpoint had sub-second precision; it is now rounded down to the second | backfill milestone |
 | DEF-025 | Backfill | Medium | Mutation check | The concurrent-batches deadlock test could not detect a wrong lock order once locking became a single statement; a deterministic test now checks the lock order through `pg_locks` | backfill milestone |
+| DEF-026 | Backfill | High | Reconciling the 2026 backfill with USGS, window by window | The deletion of a duplicate hid the event it had been merged into: USGS deleted `aka2026jntkwa` on its own after merging it into `aka2026jntiye`, and since both IDs point to one stored event, the newer deletion replaced it. Deletions that don't list the stored event's current ID no longer apply to it, whichever arrives first | fix-deletions |
+| DEF-027 | Backfill | Medium | Reviewing the 19 messages the consumer rejected during the 2026 backfill | Deletions were held to the content rules, so `uw` deletions carrying magnitude −5 as a placeholder were rejected by `MAG-001`. Had the event been stored, it would have stayed visible. Placeholder values in deletions are now stored as unknown | fix-deletions |
 
 ## By how they were found
 
@@ -51,13 +53,13 @@ Priority is how urgently it had to be fixed: **P1** before anything else, **P2**
 | --- | --- |
 | Property-based contract testing (Schemathesis) | 6: DEF-013 to DEF-018 |
 | Code and design review | 4: DEF-003, DEF-005, DEF-009, DEF-010 |
-| Running against the live service | 2: DEF-021, DEF-023 |
+| Running against the live service | 4: DEF-021, DEF-023, DEF-026, DEF-027 |
 | Ordinary test runs | 5: DEF-002, DEF-011, DEF-012, DEF-022, DEF-024 |
 | Running tests repeatedly, or all together | 3: DEF-004, DEF-006, DEF-019 |
 | Fault injection (stopping services) | 2: DEF-001, DEF-020 |
 | Checking the test tooling itself | 3: DEF-007, DEF-008, DEF-025 |
 
-Three of the 25 only ever showed up **intermittently** (DEF-004, DEF-017, DEF-019), and three were **defects in test tooling** that made results untrustworthy (DEF-007, DEF-008, DEF-025). Both groups are why the regression suite includes `make flake-check` and why test scripts are themselves checked.
+Three of the 27 only ever showed up **intermittently** (DEF-004, DEF-017, DEF-019), and three were **defects in test tooling** that made results untrustworthy (DEF-007, DEF-008, DEF-025). Both groups are why the regression suite includes `make flake-check` and why test scripts are themselves checked.
 
 ## Template
 

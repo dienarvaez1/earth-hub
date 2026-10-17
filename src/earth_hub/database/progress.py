@@ -8,6 +8,7 @@ from sqlalchemy import Engine, func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from earth_hub.database.models import BackfillWindow, Earthquake, EarthquakeId, IngestionCheckpoint
+from earth_hub.database.revisions import Revision, compare
 from earth_hub.ingestion.events import EventMessage
 from earth_hub.ingestion.windows import Window
 
@@ -31,21 +32,45 @@ class Progress:
     # --- what is stored ------------------------------------------------------------------
 
     def needs_publish(self, messages: list[EventMessage]) -> list[EventMessage]:
-        """Messages that are new, or newer than the stored event any of their IDs points to."""
+        """Messages that are new, or that the consumer would apply to a stored event any of
+        their IDs points to (the same rule: database/revisions.py)."""
         ids = sorted({i for m in messages for i in m.ids})
         if not ids:
             return []
         query = (
-            select(EarthquakeId.event_id, Earthquake.source_updated_ms)
+            select(
+                EarthquakeId.event_id,
+                Earthquake.id,
+                Earthquake.preferred_event_id,
+                Earthquake.revision_ids,
+                Earthquake.source_updated_ms,
+                Earthquake.review_status,
+            )
             .join(Earthquake, Earthquake.id == EarthquakeId.earthquake_id)
             .where(EarthquakeId.event_id.in_(ids))
         )
         with self._engine.connect() as conn:
-            stored = dict(conn.execute(query).all())
+            rows = conn.execute(query).all()
+        event_of = {r.event_id: r.id for r in rows}
+        stored = {
+            r.id: Revision(
+                r.preferred_event_id,
+                tuple(r.revision_ids),
+                r.source_updated_ms,
+                r.review_status == "deleted",
+            )
+            for r in rows
+        }
         newest: dict[str, EventMessage] = {}
         for message in messages:
-            known = [stored[i] for i in message.ids if i in stored]
-            if known and message.source_updated_ms <= max(known):
+            incoming = Revision(
+                message.event_id,
+                tuple(dict.fromkeys([message.event_id, *message.ids])),
+                message.source_updated_ms,
+                (message.payload.get("properties") or {}).get("status") == "deleted",
+            )
+            matched = {event_of[i] for i in incoming.ids if i in event_of}
+            if matched and all(compare(stored[e], incoming)[0] != "applied" for e in matched):
                 continue
             current = newest.get(message.event_id)
             if current is None or message.source_updated_ms > current.source_updated_ms:

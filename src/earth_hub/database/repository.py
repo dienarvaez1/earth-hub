@@ -13,6 +13,7 @@ from sqlalchemy import Connection, bindparam, delete, func, insert, select, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from earth_hub.database.models import Earthquake, EarthquakeId, RawEvent
+from earth_hub.database.revisions import Revision, compare
 from earth_hub.validation.earthquake_rules import Rejected, ValidEvent, ms_to_datetime, validate
 
 logger = logging.getLogger(__name__)
@@ -106,9 +107,9 @@ def process_message(
         _finish(conn, raw_id, "rejected", rule=rejected.rule, reason=rejected.reason)
         return ProcessResult("rejected", reason=rejected.reason)
 
-    earthquake_id, outcome = _apply(conn, event, now, locked=locked)
-    _finish(conn, raw_id, outcome, earthquake_id=earthquake_id)
-    return ProcessResult(outcome, earthquake_id)
+    earthquake_id, outcome, reason = _apply(conn, event, now, locked=locked)
+    _finish(conn, raw_id, outcome, reason=reason, earthquake_id=earthquake_id)
+    return ProcessResult(outcome, earthquake_id, reason)
 
 
 def process_batch(
@@ -178,33 +179,33 @@ class _BatchPlan:
             self.events[key] = {
                 "source_updated_ms": event.source_updated_ms,
                 "preferred_event_id": event.event_id,
+                "deleted": event.deleted,
+                "revision_ids": event.ids,
                 "fields": event.fields,
                 "revision_count": 1,
             }
-            outcome = "applied"
+            outcome, reason = "applied", None
         else:
             (key,) = keys
             current = self.events[key]
-            if event.source_updated_ms > current["source_updated_ms"]:
+            outcome, reason = compare(_stored_revision(current), _revision(event))
+            if outcome == "applied":
                 current.update(
                     source_updated_ms=event.source_updated_ms,
                     preferred_event_id=event.event_id,
+                    deleted=event.deleted,
+                    revision_ids=event.ids,
                     fields=event.fields,
                     revision_count=current["revision_count"] + 1,
                 )
                 if not isinstance(key, tuple):
                     self.changed.add(key)
-                outcome = "applied"
-            elif event.source_updated_ms == current["source_updated_ms"]:
-                outcome = "duplicate"
-            else:
-                outcome = "stale"
         for event_id in event.ids:  # identity facts, recorded even for stale messages
             if event_id not in self.event_of:
                 self.event_of[event_id] = key
                 self.new_ids[event_id] = key
-        self.raw_rows.append((audit | {"outcome": outcome, "rule": None, "reason": None}, key))
-        self.results.append((outcome, key, None))
+        self.raw_rows.append((audit | {"outcome": outcome, "rule": None, "reason": reason}, key))
+        self.results.append((outcome, key, reason))
         return True
 
     def write(self, conn: Connection, now: datetime) -> list[ProcessResult]:
@@ -294,6 +295,7 @@ _UPDATABLE = (
     "net",
     "url",
     "title",
+    "revision_ids",
     "revision_count",
     "last_applied_at",
 )
@@ -324,6 +326,8 @@ def _stored_events(conn: Connection, decoded) -> tuple[dict[str, int], dict[int,
             earthquakes.c.id,
             earthquakes.c.source_updated_ms,
             earthquakes.c.preferred_event_id,
+            earthquakes.c.review_status,
+            earthquakes.c.revision_ids,
             earthquakes.c.revision_count,
         )
         .join(earthquakes, earthquakes.c.id == earthquake_ids.c.earthquake_id)
@@ -334,12 +338,28 @@ def _stored_events(conn: Connection, decoded) -> tuple[dict[str, int], dict[int,
         r.id: {
             "source_updated_ms": r.source_updated_ms,
             "preferred_event_id": r.preferred_event_id,
+            "deleted": r.review_status == "deleted",
+            "revision_ids": tuple(r.revision_ids),
             "revision_count": r.revision_count,
             "fields": None,
         }
         for r in rows
     }
     return known, stored
+
+
+def _revision(event: ValidEvent) -> Revision:
+    return Revision(event.event_id, event.ids, event.source_updated_ms, event.deleted)
+
+
+def _stored_revision(state) -> Revision:
+    """From a planned event (dict) or a stored row (mapping) alike."""
+    return Revision(
+        state["preferred_event_id"],
+        tuple(state["revision_ids"]),
+        state["source_updated_ms"],
+        state["deleted"],
+    )
 
 
 def _envelope_ids(envelope) -> set[str]:
@@ -410,21 +430,31 @@ def _apply(conn: Connection, event: ValidEvent, now: datetime, *, locked: bool =
             .returning(earthquakes.c.id)
         ).scalar_one()
         _add_ids(conn, earthquake_id, event.ids)
-        return earthquake_id, "applied"
+        return earthquake_id, "applied", None
 
     survivor, *others = matches
     if others:
         _merge(conn, survivor, others)
 
-    current_updated = conn.execute(
-        select(earthquakes.c.source_updated_ms)
-        .where(earthquakes.c.id == survivor)
-        .with_for_update()
-    ).scalar_one()
+    current = (
+        conn.execute(
+            select(
+                earthquakes.c.preferred_event_id,
+                earthquakes.c.revision_ids,
+                earthquakes.c.source_updated_ms,
+                (earthquakes.c.review_status == "deleted").label("deleted"),
+            )
+            .where(earthquakes.c.id == survivor)
+            .with_for_update()
+        )
+        .mappings()
+        .one()
+    )
     # IDs are identity facts, valid even when the data in this message is older.
     _add_ids(conn, survivor, event.ids)
 
-    if event.source_updated_ms > current_updated:
+    outcome, reason = compare(_stored_revision(current), _revision(event))
+    if outcome == "applied":
         conn.execute(
             update(earthquakes)
             .where(earthquakes.c.id == survivor)
@@ -435,8 +465,7 @@ def _apply(conn: Connection, event: ValidEvent, now: datetime, *, locked: bool =
                 last_applied_at=now,
             )
         )
-        return survivor, "applied"
-    return survivor, "duplicate" if event.source_updated_ms == current_updated else "stale"
+    return survivor, outcome, reason
 
 
 def _add_ids(conn: Connection, earthquake_id: int, ids: tuple[str, ...]) -> None:

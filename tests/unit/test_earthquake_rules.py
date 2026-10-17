@@ -310,3 +310,41 @@ def test_all_payload_violations_are_reported_together(envelope):
     ]
     assert excinfo.value.rule == "GEO-002"
     assert "GEO-003: longitude 200.0" in excinfo.value.reason
+
+
+def as_deletion(envelope):
+    envelope["payload"]["properties"]["status"] = "deleted"
+    return envelope
+
+
+@pytest.mark.req("REQ-DQ-DEL-001")
+def test_deletion_with_placeholder_magnitude_is_accepted_as_unknown(envelope):
+    """Seen live: uw deletions carry magnitude -5 (DEF-027)."""
+    envelope["payload"]["properties"]["mag"] = -5
+    assert rejected_rules(json.loads(json.dumps(envelope))) == ["MAG-001"]  # not a deletion
+    event = validate(as_deletion(envelope), now=NOW)
+    assert event.deleted and event.fields["magnitude"] is None
+
+
+@pytest.mark.req("REQ-DQ-DEL-001")
+def test_deletion_with_mistyped_optional_fields_stores_them_as_unknown(envelope):
+    props = as_deletion(envelope)["payload"]["properties"]
+    props.update(felt="many", tsunami=7, place=12)
+    fields = validate(envelope, now=NOW).fields
+    assert (fields["felt"], fields["tsunami"], fields["place"]) == (None, False, None)
+    assert fields["mag_type"] == props["magType"]  # valid values are kept
+
+
+@pytest.mark.req("REQ-DQ-DEL-001")
+def test_deletion_still_needs_valid_geometry_time_and_type(envelope):
+    """Only nullable content is cleared; a row cannot be stored without these."""
+    as_deletion(envelope)["payload"]["geometry"]["coordinates"][1] = 120.0
+    envelope["payload"]["properties"]["type"] = ""
+    assert rejected_rules(envelope) == ["GEO-002", "PROP-001"]
+
+
+@pytest.mark.req("REQ-DQ-DEL-002")
+def test_revision_ids_include_the_event_id(envelope):
+    envelope["ids"] = ["ak1", "us2"]
+    event = validate(envelope, now=NOW)
+    assert event.fields["revision_ids"] == [event.event_id, "ak1", "us2"]

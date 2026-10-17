@@ -19,7 +19,7 @@ from sqlalchemy import (
     UniqueConstraint,
     func,
 )
-from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 OUTCOMES = ("applied", "stale", "duplicate", "rejected", "error")
@@ -70,6 +70,8 @@ class Earthquake(Base):
     net: Mapped[str | None] = mapped_column(Text)
     url: Mapped[str | None] = mapped_column(Text)
     title: Mapped[str | None] = mapped_column(Text)
+    # The IDs listed by the revision currently stored; see database/revisions.py.
+    revision_ids: Mapped[list[str]] = mapped_column(ARRAY(Text), server_default="{}")
     revision_count: Mapped[int] = mapped_column(Integer, server_default="1")
     first_seen_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
