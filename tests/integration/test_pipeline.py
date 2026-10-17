@@ -58,6 +58,7 @@ def keyed(make_envelope, features):
     return [(f["id"].encode(), make_envelope(f)) for f in features]
 
 
+@pytest.mark.req("REQ-PER-001", "REQ-PER-013")
 def test_fixture_feed_flows_into_postgres(settings, topic, db, publish, make_envelope, feed_doc):
     publish(keyed(make_envelope, feed_doc["features"]))
     outcomes = consume(settings, topic, db, f"g-{uuid.uuid4().hex[:8]}", len(feed_doc["features"]))
@@ -69,6 +70,7 @@ def test_fixture_feed_flows_into_postgres(settings, topic, db, publish, make_env
     assert report.lost == [] and report.broken_invariants == {}
 
 
+@pytest.mark.req("REQ-PER-007", "REQ-PER-002")
 def test_crash_after_db_commit_before_offset_commit_creates_no_duplicates(
     settings, topic, db, publish, make_envelope, feed_doc
 ):
@@ -107,6 +109,7 @@ def test_crash_after_db_commit_before_offset_commit_creates_no_duplicates(
     assert count(db, RawEvent.__table__) == len(features)
 
 
+@pytest.mark.req("REQ-PER-013", "REQ-PER-004")
 def test_mixed_batch_is_fully_accounted_for(
     settings, topic, db, publish, make_envelope, make_feature
 ):
@@ -135,6 +138,7 @@ def test_mixed_batch_is_fully_accounted_for(
     assert report.outcomes == {"applied": 2, "stale": 1, "rejected": 2}
 
 
+@pytest.mark.req("REQ-PER-013")
 def test_reconcile_reports_lost_and_pending_messages(
     settings, topic, db, publish, make_envelope, feed_doc
 ):
@@ -164,6 +168,7 @@ def test_reconcile_reports_lost_and_pending_messages(
     assert not report.ok
 
 
+@pytest.mark.req("REQ-PER-001")
 def test_envelope_from_kafka_matches_the_stored_payload(
     settings, topic, db, publish, make_envelope, feed_doc
 ):

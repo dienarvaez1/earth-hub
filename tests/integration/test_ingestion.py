@@ -74,6 +74,7 @@ def with_fresh_times(doc):
     return doc
 
 
+@pytest.mark.req("REQ-ING-005")
 def test_round_publishes_keyed_envelopes(settings, make_temp_topic, feed_doc):
     topic = make_temp_topic(partitions=3)
     result = make_poller(settings, topic, serve(feed_doc), SentState()).run_round()
@@ -89,6 +90,7 @@ def test_round_publishes_keyed_envelopes(settings, make_temp_topic, feed_doc):
         assert envelope["payload"] == feature
 
 
+@pytest.mark.req("REQ-ING-010")
 def test_same_key_always_lands_on_the_same_partition(settings, make_temp_topic, feed_doc):
     topic = make_temp_topic(partitions=3)
     poller = make_poller(settings, topic, serve(feed_doc), SentState())
@@ -106,6 +108,7 @@ def test_same_key_always_lands_on_the_same_partition(settings, make_temp_topic, 
     assert all(len(p) == 1 for p in partitions.values()), partitions
 
 
+@pytest.mark.req("REQ-ING-008")
 def test_restart_rebuilds_state_and_publishes_only_real_changes(
     settings, make_temp_topic, feed_doc
 ):

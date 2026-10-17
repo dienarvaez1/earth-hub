@@ -6,6 +6,7 @@ from sqlalchemy import create_engine, text
 pytestmark = pytest.mark.integration
 
 
+@pytest.mark.req("REQ-OPS-001")
 def test_create_insert_query(engine):
     with engine.connect() as conn, conn.begin() as tx:
         conn.execute(
@@ -17,6 +18,7 @@ def test_create_insert_query(engine):
     assert rows == [(1, "probe")]
 
 
+@pytest.mark.req("REQ-OPS-001")
 def test_server_is_postgresql_18(engine):
     with engine.connect() as conn:
         version = conn.execute(text("SHOW server_version_num")).scalar_one()

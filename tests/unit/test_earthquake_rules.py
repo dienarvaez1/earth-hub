@@ -58,6 +58,7 @@ def test_millisecond_conversion_is_exact():
     assert ms_to_datetime(1792137522341).microsecond == 341000
 
 
+@pytest.mark.req("REQ-DQ-ACC-001")
 def test_edge_case_values_are_accepted(make_envelope, feed_doc):
     by_id = {f["id"]: validate(json.loads(make_envelope(f)), now=NOW) for f in feed_doc["features"]}
     assert by_id["av94451518"].fields["magnitude"] == -0.34
@@ -73,17 +74,20 @@ def test_ids_always_include_the_preferred_id_once(envelope):
 # --- envelope rules --------------------------------------------------------------------
 
 
+@pytest.mark.req("REQ-DQ-ENV-001")
 @pytest.mark.parametrize("value", [None, [], "text", 42], ids=["null", "list", "str", "int"])
 def test_non_object_is_env_001(value):
     assert rejected_rules(value) == ["ENV-001"]
 
 
+@pytest.mark.req("REQ-DQ-ENV-002")
 @pytest.mark.parametrize("version", [None, 2, "1"])
 def test_unsupported_schema_version_is_env_002(envelope, version):
     envelope["schema_version"] = version
     assert rejected_rules(envelope) == ["ENV-002"]
 
 
+@pytest.mark.req("REQ-DQ-ENV-003")
 @pytest.mark.parametrize(
     "mutate",
     [
@@ -112,16 +116,19 @@ def test_malformed_envelope_is_env_003(envelope, mutate):
     assert set(rejected_rules(envelope)) == {"ENV-003"}
 
 
+@pytest.mark.req("REQ-DQ-ENV-004")
 def test_payload_id_mismatch_is_env_004(envelope):
     envelope["payload"]["id"] = "someone-else"
     assert rejected_rules(envelope) == ["ENV-004"]
 
 
+@pytest.mark.req("REQ-DQ-ENV-003")
 def test_missing_properties_is_env_003(envelope):
     envelope["payload"]["properties"] = None
     assert rejected_rules(envelope) == ["ENV-003"]
 
 
+@pytest.mark.req("REQ-DQ-ENV-005")
 def test_envelope_and_payload_timestamps_must_agree_env_005(envelope):
     envelope["source_updated_ms"] += 1
     assert rejected_rules(envelope) == ["ENV-005"]
@@ -139,6 +146,7 @@ def coords(envelope, lon=None, lat=None, depth=None):
     ]
 
 
+@pytest.mark.req("REQ-DQ-GEO-001")
 @pytest.mark.parametrize(
     "mutate",
     [
@@ -158,6 +166,7 @@ def test_bad_geometry_is_geo_001(envelope, mutate):
     assert rejected_rules(envelope) == ["GEO-001"]
 
 
+@pytest.mark.req("REQ-DQ-GEO-002", "REQ-DQ-GEO-003", "REQ-DQ-GEO-004")
 @pytest.mark.parametrize(
     ("kwargs", "rule"),
     [
@@ -174,6 +183,7 @@ def test_coordinates_out_of_range(envelope, kwargs, rule):
     assert rejected_rules(envelope) == [rule]
 
 
+@pytest.mark.req("REQ-DQ-GEO-002", "REQ-DQ-GEO-003", "REQ-DQ-GEO-004")
 @pytest.mark.parametrize(
     "kwargs",
     [
@@ -191,62 +201,73 @@ def test_coordinate_boundaries_are_inclusive(envelope, kwargs):
     validate(envelope, now=NOW)
 
 
+@pytest.mark.req("REQ-DQ-TIME-001")
 def test_event_before_1900_is_time_001(envelope):
     before_1900 = int(datetime(1899, 12, 31, 23, 59, tzinfo=UTC).timestamp() * 1000)
     set_time(envelope, before_1900)
     assert rejected_rules(envelope) == ["TIME-001"]
 
 
+@pytest.mark.req("REQ-DQ-TIME-002")
 def test_event_more_than_an_hour_ahead_is_time_002(envelope):
     set_time(envelope, NOW_MS + 3_600_001)
     assert rejected_rules(envelope) == ["TIME-002"]
 
 
+@pytest.mark.req("REQ-DQ-TIME-002")
 def test_event_up_to_an_hour_ahead_is_allowed(envelope):
     set_time(envelope, NOW_MS + 3_600_000)
     validate(envelope, now=NOW)
 
 
+@pytest.mark.req("REQ-DQ-TIME-003")
 def test_updated_before_event_time_is_time_003(envelope):
     set_time(envelope, NOW_MS - 1000, updated_ms=NOW_MS - 1001)
     assert rejected_rules(envelope) == ["TIME-003"]
 
 
+@pytest.mark.req("REQ-DQ-TIME-001")
 @pytest.mark.parametrize("huge", [10**20, -(10**20), 2**63])
 def test_unrepresentable_times_are_rejected_not_crashed(envelope, huge):
     set_time(envelope, huge)
     assert "TIME-001" in rejected_rules(envelope)
 
 
+@pytest.mark.req("REQ-DQ-MAG-001")
 @pytest.mark.parametrize("mag", [10.51, -2.01, "4.5", True, math.nan])
 def test_bad_magnitude_is_mag_001(envelope, mag):
     envelope["payload"]["properties"]["mag"] = mag
     assert rejected_rules(envelope) == ["MAG-001"]
 
 
+@pytest.mark.req("REQ-DQ-MAG-001")
 @pytest.mark.parametrize("mag", [None, -2.0, 10.5, 0, 7])
 def test_allowed_magnitudes(envelope, mag):
     envelope["payload"]["properties"]["mag"] = mag
     assert validate(envelope, now=NOW).fields["magnitude"] == (None if mag is None else float(mag))
 
 
+@pytest.mark.req("REQ-DQ-PROP-001")
 @pytest.mark.parametrize("value", [None, "", 3])
 def test_missing_type_is_prop_001(envelope, value):
     envelope["payload"]["properties"]["type"] = value
     assert rejected_rules(envelope) == ["PROP-001"]
 
 
+@pytest.mark.req("REQ-DQ-PROP-002")
 @pytest.mark.parametrize("status", [None, "manual", "REVIEWED"])
 def test_unknown_status_is_prop_002(envelope, status):
     envelope["payload"]["properties"]["status"] = status
     assert rejected_rules(envelope) == ["PROP-002"]
 
 
+@pytest.mark.req("REQ-DQ-ACC-001")
 def test_deleted_status_is_kept(envelope):
     envelope["payload"]["properties"]["status"] = "deleted"
     assert validate(envelope, now=NOW).fields["review_status"] == "deleted"
 
 
+@pytest.mark.req("REQ-DQ-PROP-003")
 @pytest.mark.parametrize(
     ("name", "value"),
     [
@@ -266,6 +287,7 @@ def test_wrong_optional_types_are_prop_003(envelope, name, value):
     assert rejected_rules(envelope) == ["PROP-003"]
 
 
+@pytest.mark.req("REQ-DQ-ACC-001")
 def test_optional_fields_may_be_null(envelope):
     props = envelope["payload"]["properties"]
     for name in ("felt", "sig", "cdi", "mmi", "magType", "place", "alert", "net", "url", "title"):

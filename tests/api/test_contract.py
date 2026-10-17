@@ -19,6 +19,7 @@ def api_schema(client):
 schema = schemathesis.pytest.from_fixture("api_schema")
 
 
+@pytest.mark.req("REQ-API-012", "REQ-API-011")
 @schema.parametrize()
 @settings(
     # 60 keeps the suite fast; set CONTRACT_EXAMPLES=1000 for a deeper run.

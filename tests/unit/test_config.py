@@ -47,6 +47,7 @@ def test_values_come_from_environment(env):
     assert settings.poll_interval_seconds == 30
 
 
+@pytest.mark.req("REQ-OPS-003")
 @pytest.mark.parametrize("missing", sorted(REQUIRED))
 def test_missing_required_setting_fails(env, missing):
     env.delenv(missing)
@@ -54,6 +55,7 @@ def test_missing_required_setting_fails(env, missing):
         load()
 
 
+@pytest.mark.req("REQ-OPS-003")
 @pytest.mark.parametrize(
     ("name", "value"),
     [
@@ -94,6 +96,7 @@ def test_special_characters_in_password_are_escaped(env):
     assert "s3cret-p%40ss%2Fword@localhost" in rendered
 
 
+@pytest.mark.req("REQ-OPS-003")
 def test_password_never_appears_in_text_output(env):
     settings = load()
     password = REQUIRED["POSTGRES_PASSWORD"]

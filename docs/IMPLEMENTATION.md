@@ -374,6 +374,13 @@ Keep the API read-only in the initial release. It should query PostgreSQL, not t
 
 **Exit gate:** Critical end-to-end paths pass reproducibly, and test results do not depend on live earthquakes occurring during the run.
 
+**Decisions made in Milestone 5:**
+
+- **Traceability is generated, not written by hand.** Tests carry `@pytest.mark.req` markers that refer to `docs/requirements.md`. `make traceability` builds the matrix from real test outcomes and fails on any requirement without a passing test.
+- **Outage and restart checks are pytest tests** in `tests/disruptive/`, replacing the shell scripts. They stop the shared containers for real, so they only run on request (`--run-disruptive`) and as the last layer of `make regression`.
+- **The defect log records all 20 defects found so far**, 6 of them as full reports.
+- **Reports are JUnit XML plus a Markdown summary**, with no new dependency.
+
 ### Milestone 6 — Analytics, observability, and performance
 
 **Implementation**

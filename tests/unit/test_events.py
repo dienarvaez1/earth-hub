@@ -29,6 +29,7 @@ def test_valid_feed_produces_one_message_per_feature(feed_doc):
     assert parsed.generated_ms == feed_doc["metadata"]["generated"]
 
 
+@pytest.mark.req("REQ-ING-005")
 def test_message_envelope_matches_contract(feed_doc):
     feature = feed_doc["features"][0]
     message = parse(feed_doc).messages[0]
@@ -48,6 +49,7 @@ def test_message_envelope_matches_contract(feed_doc):
     }
 
 
+@pytest.mark.req("REQ-ING-005", "REQ-ING-007")
 def test_payload_is_the_unchanged_source_feature(feed_doc):
     for feature, message in zip(feed_doc["features"], parse(feed_doc).messages, strict=True):
         assert json.loads(message.to_json())["payload"] == feature
@@ -83,6 +85,7 @@ def test_edge_case_values_pass_through_unchanged(feed_doc):
     assert by_id["uw714120332"].payload["properties"]["type"] == "explosion"
 
 
+@pytest.mark.req("REQ-ING-007")
 @pytest.mark.parametrize(
     "mutate",
     [
@@ -100,6 +103,7 @@ def test_routable_features_are_published_whatever_their_data_quality(feed_doc, m
     assert parsed.rejected == []
 
 
+@pytest.mark.req("REQ-ING-007")
 @pytest.mark.parametrize(
     ("mutate", "reason"),
     [

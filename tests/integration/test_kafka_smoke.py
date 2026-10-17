@@ -9,6 +9,7 @@ pytestmark = pytest.mark.integration
 TIMEOUT_SECONDS = 30
 
 
+@pytest.mark.req("REQ-OPS-001")
 def test_raw_topic_exists_with_three_partitions(admin, settings):
     topic = admin.list_topics(topic=settings.kafka_topic_raw, timeout=10).topics[
         settings.kafka_topic_raw
@@ -17,6 +18,7 @@ def test_raw_topic_exists_with_three_partitions(admin, settings):
     assert len(topic.partitions) == 3
 
 
+@pytest.mark.req("REQ-OPS-001")
 def test_message_round_trip(settings, temp_topic):
     key, value = b"us7000smoke", f'{{"probe": "{uuid.uuid4()}"}}'.encode()
 

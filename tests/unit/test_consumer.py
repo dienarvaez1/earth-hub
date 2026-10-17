@@ -107,6 +107,7 @@ def make(kafka, store, **kwargs):
     return consumer, sleeps
 
 
+@pytest.mark.req("REQ-PER-007")
 def test_offset_committed_after_successful_processing():
     kafka, store = FakeKafka([FakeMessage(7)]), FakeStore()
     consumer, _ = make(kafka, store)
@@ -115,6 +116,7 @@ def test_offset_committed_after_successful_processing():
     assert consumer.outcomes == {"applied": 1}
 
 
+@pytest.mark.req("REQ-PER-007", "REQ-PER-008")
 def test_database_outage_retries_same_message_and_commits_only_after():
     kafka = FakeKafka([FakeMessage(7)])
     store = FakeStore(db_down(), db_down(), db_down(), ProcessResult("applied", 1))
@@ -141,6 +143,7 @@ def test_outage_backoff_is_capped():
     assert sleeps == [1, 2, 4, 8, 16, MAX_BACKOFF_S, MAX_BACKOFF_S, MAX_BACKOFF_S]
 
 
+@pytest.mark.req("REQ-PER-008")
 def test_stopping_during_outage_commits_nothing():
     kafka = FakeKafka([FakeMessage(7)])
     store = FakeStore(*[db_down()] * 5)
@@ -150,6 +153,7 @@ def test_stopping_during_outage_commits_nothing():
     assert kafka.commits == []
 
 
+@pytest.mark.req("REQ-PER-009")
 def test_unexpected_error_is_recorded_after_three_attempts_and_partition_moves_on():
     bug = ValueError("boom")
     kafka = FakeKafka([FakeMessage(7), FakeMessage(8)])
@@ -185,6 +189,7 @@ def test_outage_while_recording_an_error_is_retried():
     assert sleeps == [MAX_BACKOFF_S]
 
 
+@pytest.mark.req("REQ-PER-008")
 def test_integrity_error_is_not_an_outage():
     assert not is_infrastructure_error(IntegrityError("INSERT", {}, Exception("dup")))
     assert is_infrastructure_error(db_down())
@@ -226,6 +231,7 @@ def test_idle_pings_database_at_most_every_interval(tmp_path):
     assert store.pings == 2
 
 
+@pytest.mark.req("REQ-OPS-005")
 def test_no_heartbeat_while_idle_database_is_down(tmp_path):
     heartbeat = tmp_path / "hb"
     consumer, _ = make(FakeKafka([]), FakeStore(ping_error=db_down()), heartbeat_path=heartbeat)

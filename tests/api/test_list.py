@@ -28,6 +28,7 @@ def all_items(client, **params) -> list[dict]:
 # --- shape and defaults ----------------------------------------------------------------
 
 
+@pytest.mark.req("REQ-API-002", "REQ-API-013")
 def test_default_page(client):
     body = get(client)
     assert (body["total"], body["limit"], body["offset"]) == (VISIBLE_COUNT, 20, 0)
@@ -45,6 +46,7 @@ def test_item_fields_and_utc_times(client):
     assert item["review_status"] == "reviewed" and item["tsunami"] is False
 
 
+@pytest.mark.req("REQ-API-009")
 def test_deleted_events_are_hidden_unless_asked_for(client):
     assert "us18" not in ids(get(client, limit=500))
     with_deleted = get(client, limit=500, include_deleted=True)
@@ -56,6 +58,7 @@ def test_deleted_events_are_hidden_unless_asked_for(client):
 # --- pagination ------------------------------------------------------------------------
 
 
+@pytest.mark.req("REQ-API-002")
 def test_pages_cover_everything_once_with_no_overlap(client):
     seen = []
     for offset in range(0, VISIBLE_COUNT, 4):
@@ -66,6 +69,7 @@ def test_pages_cover_everything_once_with_no_overlap(client):
     assert seen == ids(get(client, limit=500))
 
 
+@pytest.mark.req("REQ-API-002")
 @pytest.mark.parametrize(
     ("limit", "offset", "expected"),
     [
@@ -84,6 +88,7 @@ def test_page_boundaries(client, limit, offset, expected):
 # --- sorting ---------------------------------------------------------------------------
 
 
+@pytest.mark.req("REQ-API-004")
 @pytest.mark.parametrize(
     ("sort", "field"),
     [("event_time", "event_time"), ("magnitude", "magnitude"), ("depth", "depth_km")],
@@ -98,11 +103,13 @@ def test_sorting(client, sort, field, order):
     assert items[len(items) - len(nulls) :] == nulls
 
 
+@pytest.mark.req("REQ-API-004")
 def test_missing_magnitude_sorts_last_in_both_directions(client):
     for order in ("asc", "desc"):
         assert ids(get(client, limit=500, sort="magnitude", order=order))[-1] == "us16"
 
 
+@pytest.mark.req("REQ-API-004")
 def test_ties_break_by_insertion_order_and_are_stable(client):
     # us01 and us17 share magnitude 4.4 and event time; us01 was stored first.
     for order in ("asc", "desc"):
@@ -120,6 +127,7 @@ def expected(predicate) -> set[str]:
     return {s.event_id for s in VISIBLE if predicate(s)}
 
 
+@pytest.mark.req("REQ-API-003")
 @pytest.mark.parametrize(
     ("params", "predicate"),
     [
@@ -152,6 +160,7 @@ def test_filters(client, params, predicate):
     assert set(ids(get(client, limit=500, **params))) == expected(predicate)
 
 
+@pytest.mark.req("REQ-API-003")
 def test_time_window_is_start_inclusive_end_exclusive(client):
     # ci06 and ci07 happen exactly at T0 + 5 h.
     at = (T0 + timedelta(hours=5)).isoformat()
@@ -159,6 +168,7 @@ def test_time_window_is_start_inclusive_end_exclusive(client):
     assert not {"ci06", "ci07"} & set(ids(get(client, limit=500, end_time=at)))
 
 
+@pytest.mark.req("REQ-API-003")
 def test_time_without_timezone_is_utc(client):
     with_z = ids(get(client, limit=500, start_time="2026-10-10T05:00:00Z"))
     naive = ids(get(client, limit=500, start_time="2026-10-10T05:00:00"))
@@ -166,6 +176,7 @@ def test_time_without_timezone_is_utc(client):
     assert with_z == naive == other_zone
 
 
+@pytest.mark.req("REQ-API-003")
 def test_combined_filters(client):
     body = get(
         client,
@@ -177,6 +188,7 @@ def test_combined_filters(client):
     assert set(ids(body)) == {"us02", "ak03", "ak04", "nc08", "hv11", "us12", "us13", "us14"}
 
 
+@pytest.mark.req("REQ-API-003")
 @pytest.mark.parametrize(
     ("place", "expected_ids"),
     [

@@ -12,6 +12,7 @@ from datetime import datetime, timedelta
 from confluent_kafka import Consumer, TopicPartition
 
 from earth_hub.ingestion.events import EventMessage
+from earth_hub.kafka_metadata import with_retries
 
 logger = logging.getLogger(__name__)
 
@@ -85,12 +86,16 @@ def read_topic_since(
     try:
         partitions = consumer.list_topics(topic, timeout=timeout_s).topics[topic].partitions
         since_ms = int(since.timestamp() * 1000)
-        starts = consumer.offsets_for_times(
-            [TopicPartition(topic, p, since_ms) for p in partitions], timeout=timeout_s
+        starts = with_retries(
+            lambda: consumer.offsets_for_times(
+                [TopicPartition(topic, p, since_ms) for p in partitions], timeout=timeout_s
+            )
         )
         assignments, remaining = [], {}
         for tp in starts:
-            _, high = consumer.get_watermark_offsets(tp, timeout=timeout_s)
+            _, high = with_retries(
+                lambda tp=tp: consumer.get_watermark_offsets(tp, timeout=timeout_s)
+            )
             # offset -1: no message at or after `since` in this partition.
             if tp.offset >= 0 and tp.offset < high:
                 assignments.append(tp)

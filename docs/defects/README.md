@@ -1,0 +1,67 @@
+# Defect log
+
+Every defect found while building Earth-Hub, from Milestone 1 to Milestone 5. None reached a merged release: each was found during development, fixed in the milestone where it was found, and covered by a regression test where a test could catch it.
+
+Six are written up in full, as examples of the [defect report template](#template), because they show the most instructive failure modes.
+
+## Severity and priority
+
+| Severity | Meaning |
+| --- | --- |
+| Critical | Data loss or corruption, or a security exposure, with no workaround |
+| High | A core function fails, results become unreliable, or secrets could leak |
+| Medium | A function misbehaves in specific conditions; a workaround exists |
+| Low | Cosmetic, a standards deviation, or a minor inconvenience |
+
+Priority is how urgently it had to be fixed: **P1** before anything else, **P2** within the milestone, **P3** when convenient. All 20 were fixed within their milestone.
+
+## Log
+
+| ID | Milestone | Severity | Found by | Summary | Fixed in |
+| --- | --- | --- | --- | --- | --- |
+| [DEF-001](DEF-001-password-in-test-output.md) | 1 | High | Negative test (database stopped) | The PostgreSQL password was printed in pytest tracebacks | `afc9250` |
+| DEF-002 | 1 | Medium | Smoke run | `docker compose up --wait` returned before `kafka-init` had created the topic, so tests could start too early | `afc9250` |
+| DEF-003 | 1 | Low | Configuration review | The Kafka `CLUSTER_ID` was not a valid base64 UUID | `afc9250` |
+| [DEF-004](DEF-004-ipv6-flaky-offsets.md) | 2 | High | Repeated test runs | Kafka offset lookups failed intermittently because `localhost` resolved to IPv6 `::1`, which isn't published | `e76c9df` |
+| DEF-005 | 2 | Critical | Design review, then a unit test | Recording `Last-Modified` after a failed delivery would have made the next request a `304`, losing the failed events for good | `e76c9df` |
+| [DEF-006](DEF-006-alembic-silences-logging.md) | 3 | Medium | Running all suites in one process | Alembic's `fileConfig()` disabled every existing logger, silencing the application after in-process migrations | `a71d7c1` |
+| DEF-007 | 3 | Medium | Log review of the outage check | The outage script exported `POSTGRES_DB`, so Compose recreated the Postgres container with the wrong configuration | `a71d7c1` |
+| [DEF-008](DEF-008-outage-check-false-pass.md) | 3 | High | Process check after the run | The outage check left a consumer running and still reported PASS | `a71d7c1` |
+| DEF-009 | 3 | Medium | Code review before testing | JSON `null`, `NaN` and NUL could not be stored in `jsonb`, and huge timestamps overflowed, crashing processing instead of rejecting the message | `a71d7c1` |
+| DEF-010 | 4 | Medium | Code review | FastAPI resolves dependencies before validating parameters, so an invalid request returned `503` instead of `422` whenever the database was down | `4d2748f` |
+| DEF-011 | 4 | High | First API test run | `array_agg` used `WITHIN GROUP`, which PostgreSQL rejects, so the event list returned `500` | `4d2748f` |
+| DEF-012 | 4 | High | API tests | The lookup's ID subquery was auto-correlated away by SQLAlchemy and lost its `FROM`, so lookups returned `500` | `4d2748f` |
+| DEF-013 | 4 | Low | Schemathesis | Numbers such as `start_time=0.5` were accepted as Unix timestamps, against the documented contract | `4d2748f` |
+| DEF-014 | 4 | Low | Schemathesis | `405` responses lacked the `Allow` header that HTTP requires | `4d2748f` |
+| [DEF-015](DEF-015-hourly-window-overflow.md) | 4 | Medium | Schemathesis | A lone old `start_time` made the hourly window run to "now", past the 31-day limit, so a valid request was refused | `4d2748f` |
+| [DEF-016](DEF-016-nul-in-parameters.md) | 4 | Medium | Schemathesis | A NUL character in a text parameter reached PostgreSQL and caused a `500` | `4d2748f` |
+| DEF-017 | 4 | Medium | Schemathesis (intermittent) | `end_time=0001-01-01` overflowed `datetime` when the window start was computed, causing a `500` | `4d2748f` |
+| DEF-018 | 4 | Medium | Schemathesis (intermittent) | An `offset` beyond PostgreSQL's bigint caused a `500` | `4d2748f` |
+| DEF-019 | 5 | Medium | End-to-end tests (intermittent) | Reading offsets of a brand-new topic failed with `NOT_LEADER_FOR_PARTITION`, affecting reconciliation and the poller's state rebuild | this milestone |
+| DEF-020 | 5 | Low | Disruptive tests | The test suite's admin database engine kept connections that a PostgreSQL restart had killed, so cleanup failed | this milestone |
+
+## By how they were found
+
+| Technique | Defects |
+| --- | --- |
+| Property-based contract testing (Schemathesis) | 6: DEF-013 to DEF-018 |
+| Code and design review | 4: DEF-003, DEF-005, DEF-009, DEF-010 |
+| Ordinary test runs | 3: DEF-002, DEF-011, DEF-012 |
+| Running tests repeatedly, or all together | 3: DEF-004, DEF-006, DEF-019 |
+| Fault injection (stopping services) | 2: DEF-001, DEF-020 |
+| Checking the test tooling itself | 2: DEF-007, DEF-008 |
+
+Three of the 20 only ever showed up **intermittently** (DEF-004, DEF-017, DEF-019), and two were **defects in test tooling** that made results untrustworthy (DEF-007, DEF-008). Both groups are why the regression suite includes `make flake-check` and why test scripts are themselves checked.
+
+## Template
+
+Each full report has these sections:
+
+1. **Summary** with ID, severity, priority, status, component, the milestone and commit, and how it was found
+2. **Environment**
+3. **Steps to reproduce**
+4. **Expected result** and **actual result**, with evidence
+5. **Root cause**
+6. **Fix**
+7. **Regression test**
+8. **Prevention:** what changed so the class of defect is less likely
