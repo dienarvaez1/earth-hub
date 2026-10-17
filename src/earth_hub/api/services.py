@@ -89,16 +89,21 @@ def _ids_column():
     )
 
 
+_INTERNAL_COLUMNS = (
+    "id",
+    "preferred_event_id",
+    "event_time_ms",
+    "source_updated_ms",
+    "revision_ids",
+)
+
+
 def _event_columns():
     c = earthquakes.c
     return [
         c.preferred_event_id.label("event_id"),
         _ids_column(),
-        *[
-            col
-            for col in earthquakes.c
-            if col.name not in ("id", "preferred_event_id", "event_time_ms", "source_updated_ms")
-        ],
+        *[col for col in earthquakes.c if col.name not in _INTERNAL_COLUMNS],
     ]
 
 

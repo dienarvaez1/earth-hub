@@ -86,6 +86,8 @@ One requirement per rule in [data-quality-rules.md](data-quality-rules.md).
 | REQ-DQ-PROP-002 | Reject a `status` other than `automatic`, `reviewed` or `deleted` |
 | REQ-DQ-PROP-003 | Reject optional fields with the wrong type |
 | REQ-DQ-ACC-001 | Accept values real USGS data contains: negative magnitude and depth, non-earthquake types, `deleted` status, missing optional fields |
+| REQ-DQ-DEL-001 | Accept a deletion whose magnitude or optional fields hold placeholder values, storing those values as unknown (DEF-027) |
+| REQ-DQ-DEL-002 | The deletion of a duplicate merged into another event never hides that event, whichever arrives first; backfill and catch-up decide what to publish by the same rule (DEF-026) |
 
 ## API
 

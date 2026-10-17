@@ -43,6 +43,7 @@ These values occur in real USGS data and are valid:
 | Negative depth (e.g. −0.36 km) | Events above sea level, measured from the geoid |
 | `type` other than `earthquake` (e.g. `explosion`, `quarry blast`) | Kept with `event_type`; the API filters them |
 | `status = deleted` | Stored as a status; the row is kept |
+| A deletion whose magnitude breaks `MAG-001`, or whose optional fields break `PROP-003` | A deletion only has to identify and order the event. USGS fills some deletions with placeholders (magnitude −5 on `uw` deletions), so those values are stored as unknown (`NULL`) instead of rejecting the deletion (DEF-027). Geometry, time, `type` and `status` rules still apply |
 | Missing magnitude, place, felt reports, intensity or alert level | Optional in the USGS format |
 | Different magnitude types (`ml`, `md`, `mb`, `mww`, …) | Kept in `mag_type`. Statistics that mix them should say so |
 
@@ -58,10 +59,12 @@ These values occur in real USGS data and are valid:
 
 | Outcome | Meaning |
 | --- | --- |
-| `applied` | New event, or a revision newer than the stored one |
+| `applied` | New event, or a revision newer than the stored one, or the event that absorbed a duplicate whose deletion is stored |
 | `duplicate` | Same `updated` as the stored event: nothing changes |
-| `stale` | Older than the stored event: nothing changes, but any new IDs in it are still recorded |
+| `stale` | Older than the stored event, or the deletion of a duplicate merged into it (with a reason): nothing changes, but any new IDs in it are still recorded |
 | `rejected` | Broke a rule above |
 | `error` | Failed 3 times for an unexpected reason (a bug), stored with the exception so the partition can move on |
+
+**Duplicates' deletions (DEF-026).** When USGS finds that two IDs are one event, the surviving event lists both IDs and the duplicate is deleted on its own, listing only its own ID. Both IDs point to one stored event, so a deletion that does not list the stored event's current ID is the duplicate's, and does not hide the event. Each event keeps the IDs of its current revision in `revision_ids` to tell the two cases apart. The rule is in `database/revisions.py`, shared by the consumer and by backfill and catch-up when they decide what to publish.
 
 A redelivered Kafka message (same topic, partition and offset) is recognized and skipped without a new row. Messages from backfill and catch-up (`source` is `backfill`, `sweep`, `catchup` or `deleted`) go through exactly the same rules, from the `earthquakes.backfill` topic. `make reconcile` checks that every message in the topic has exactly one `raw_events` row.
