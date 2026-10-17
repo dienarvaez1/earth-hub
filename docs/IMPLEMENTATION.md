@@ -331,6 +331,20 @@ Keep the API read-only in the initial release. It should query PostgreSQL, not t
 
 **Exit gate:** All endpoints return predictable, documented results backed by PostgreSQL, and automated tests cover normal and error behavior.
 
+**Decisions made in Milestone 4:**
+
+- **Former IDs return the event (`200`) instead of redirecting.** The body shows the current `event_id` and every former ID in `ids`.
+- **Deleted events are hidden by default.** `include_deleted=true` or `review_status=deleted` shows them. A lookup by ID always finds them.
+- **Invalid parameters return `422`** in the shared error format, listing every problem.
+- **Contract testing uses Schemathesis.** It found 6 defects, each now fixed and covered by its own test:
+  - numbers such as `0.5` accepted as times
+  - a missing `Allow` header on `405`
+  - an hourly default window that went past 31 days
+  - NUL characters reaching PostgreSQL
+  - dates near year 1 or 9999 overflowing
+  - offsets beyond bigint
+- **Schemathesis's "valid requests must be accepted" check is turned off.** Rules that compare two parameters can't be expressed in OpenAPI; they're covered by their own tests.
+
 ### Milestone 5 — End-to-end QA and regression automation
 
 **Implementation**

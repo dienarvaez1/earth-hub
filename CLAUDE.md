@@ -34,6 +34,7 @@ Local-first earthquake data platform: USGS GeoJSON feed → Python poller → Ka
 - `make migrate`: `alembic upgrade head`
 - `make ingest` / `make ingest-once`: run the pipeline (migrate, poller, consumer) on the live feed / one poller round on the host. Never part of the test suite.
 - `make reconcile`: topic-versus-database check; `make check-db-outage`: outage recovery check.
+- `make api` / `make api-dev`: serve the API (container / host with reload) at http://127.0.0.1:8000/docs.
 
 Add dependencies with `uv add <pkg>` (or `uv add --dev <pkg>`); never edit `uv.lock` by hand.
 
@@ -48,4 +49,8 @@ Add dependencies with `uv add <pkg>` (or `uv add --dev <pkg>`); never edit `uv.l
 - Schema changes: edit `database/models.py`, then `uv run alembic revision --autogenerate`, then review the file. `tests/integration/test_migrations.py` fails if models and migrations drift.
 - DB integration tests use the `db` fixture (a fresh migrated database per test); build messages with `make_envelope` / `make_feature` so tests use the poller's real contract.
 - In shell scripts, never export settings like `POSTGRES_DB`: docker compose picks them up and recreates containers. Pass them per command.
+- The API lives in `src/earth_hub/api/`: `routes.py` (parameters and validation), `services.py` (queries), `schemas.py` (response models = the OpenAPI contract), `errors.py` (the one error format). Routes take the engine and connect inside their body, never in a dependency, so invalid requests return 422 even when the database is down.
+- New fixed API paths go before `/earthquakes/{event_id}` in `routes.py`.
+- String parameters that reach SQL use the `Text` type (rejects NUL); times use `DateTime` (ISO 8601 only, years 1900–2099). Both came from Schemathesis findings.
+- API tests use the `client` / `empty_client` fixtures over the fixed dataset in `tests/api/dataset.py`.
 - Smoke tests use temporary topics and databases; never write test data to `earthquakes.raw` or the main database.
