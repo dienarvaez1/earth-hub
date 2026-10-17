@@ -24,6 +24,13 @@ PostgreSQL uses host port 5433 because 5432 is often taken by a local PostgreSQL
 
 To inspect the broker with JConsole: `jconsole 127.0.0.1:9101`, then choose *Insecure connection*. Kafka's metrics are under the `kafka.server`, `kafka.network` and `kafka.log` MBean domains.
 
+To browse messages, run `make kafka-ui` and open `http://127.0.0.1:8080`. It uses [Kafbat UI](https://github.com/kafbat/kafka-ui) (`ghcr.io/kafbat/kafka-ui:v1.5.0`, Apache 2.0), which is not started by `make up`. In it you can:
+- read messages in `earthquakes.raw`, filtered by key, partition or offset
+- see how messages are spread across partitions
+- see the `earth-hub-consumer` group's lag
+
+It runs **read-only**, so producing, deleting or changing topics is refused (`405`). It doesn't show broker JMX metrics: Kafka's JMX advertises `127.0.0.1` for JConsole on your machine, and that address isn't reachable from another container.
+
 ## Getting started
 
 ```bash
@@ -57,6 +64,7 @@ make api                 # serve the REST API at http://127.0.0.1:8000/docs
 | `make ingest-logs` / `make ingest-stop` | Follow or stop the poller and consumer |
 | `make api` / `make api-stop` | Start or stop the API container (`http://127.0.0.1:8000`) |
 | `make api-dev` | Run the API on your machine with auto-reload |
+| `make kafka-ui` / `make kafka-ui-stop` | Start or stop the read-only Kafka web viewer (`http://127.0.0.1:8080`) |
 | `make consume` | Run the consumer from your machine |
 | `make reconcile` | Check every Kafka message has a database row, and the tables' invariants |
 | `make check-db-outage` | Stop PostgreSQL mid-stream and check nothing is lost or duplicated |
