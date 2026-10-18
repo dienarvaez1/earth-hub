@@ -12,6 +12,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from earth_hub.ingestion.events import SCHEMA_VERSION
+from earth_hub.validation.places import parse_place
 
 EPOCH = datetime(1970, 1, 1, tzinfo=UTC)
 EARLIEST_EVENT_TIME = datetime(1900, 1, 1, tzinfo=UTC)
@@ -212,6 +213,7 @@ def validate(envelope: Any, *, now: datetime) -> ValidEvent:
     ids = tuple(dict.fromkeys([envelope["event_id"], *envelope["ids"]]))
     props = {k: v for k, v in props.items() if k not in cleared}
     magnitude = props.get("mag")
+    location = parse_place(props.get("place"), longitude)
     return ValidEvent(
         event_id=envelope["event_id"],
         ids=ids,
@@ -225,6 +227,9 @@ def validate(envelope: Any, *, now: datetime) -> ValidEvent:
             "magnitude": float(magnitude) if magnitude is not None else None,
             "mag_type": props.get("magType"),
             "place": props.get("place"),
+            "city": location.city,
+            "region": location.region,
+            "country": location.country,
             "longitude": longitude,
             "latitude": latitude,
             "depth_km": depth,

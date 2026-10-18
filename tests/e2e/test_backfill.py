@@ -185,3 +185,47 @@ def test_live_latency_is_unaffected_while_a_large_backfill_is_consumed(
     print(f"\nlive event latency during backfill: {latency:.2f} s, backlog still {backlog_left}")
     assert latency < 5.0
     assert backlog_left > 0, "the backfill had already finished; the test proved nothing"
+
+
+def location(pipeline, event_id) -> tuple:
+    body = pipeline.get(f"/earthquakes/{event_id}")
+    return body["city"], body["region"], body["country"]
+
+
+@pytest.mark.req("REQ-DQ-PLACE-002")
+def test_backfill_and_catch_up_store_city_region_and_country(
+    pipeline, feed, fdsn, feature_template, event
+):
+    places = {
+        "ak1": ("86 km E of Ugashik, Alaska", ("Ugashik", "Alaska", "United States")),
+        "ci1": ("10 km N of Cobb, CA", ("Cobb", "California", "United States")),
+        "mx1": ("10 km NE of Mexicali, B.C., MX", ("Mexicali", "Baja California", "Mexico")),
+        "us1": ("south of the Fiji Islands", (None, "the Fiji Islands", None)),
+        "us2": ("Fiji region", (None, None, None)),
+        "us3": (None, (None, None, None)),
+    }
+    events = [
+        event_at(feature_template, event_id, JAN_1 + timedelta(days=5 * k), place=place)
+        for k, (event_id, (place, _)) in enumerate(places.items())
+    ]
+    georgia = event_at(feature_template, "us4", SUN_4, place="15 km WNW of Ambrolauri, Georgia")
+    georgia["geometry"]["coordinates"][0] = 43.0
+    fdsn.put(*events, georgia)
+    pipeline.backfill(JAN_1, FEB_15, sweep=False)
+    pipeline.sync()
+
+    for event_id, (_, expected) in places.items():
+        assert location(pipeline, event_id) == expected, event_id
+    assert location(pipeline, "us4") == ("Ambrolauri", None, "Georgia")
+    assert pipeline.reconcile(backfill=True).ok
+
+    # A catch-up revision that moves the place moves the location with it.
+    old = event("us0001", minutes_ago=3 * 24 * 60, place="86 km E of Ugashik, Alaska")
+    feed.show(old)
+    pipeline.poll()
+    pipeline.sync()
+    month_feed = FeedServer()
+    month_feed.show(revised(old, by_s=3600, place="80 km E of Pilot Point, Alaska"))
+    assert catch_up_job(pipeline, month_feed).catch_up() == 1
+    pipeline.sync()
+    assert location(pipeline, "us0001") == ("Pilot Point", "Alaska", "United States")
