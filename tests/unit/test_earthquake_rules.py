@@ -348,3 +348,22 @@ def test_revision_ids_include_the_event_id(envelope):
     envelope["ids"] = ["ak1", "us2"]
     event = validate(envelope, now=NOW)
     assert event.fields["revision_ids"] == [event.event_id, "ak1", "us2"]
+
+
+@pytest.mark.req("REQ-DQ-PLACE-001")
+def test_location_is_derived_from_place_and_place_is_kept(envelope):
+    envelope["payload"]["properties"]["place"] = "86 km E of Ugashik, Alaska"
+    fields = validate(envelope, now=NOW).fields
+    assert fields["place"] == "86 km E of Ugashik, Alaska"
+    assert (fields["city"], fields["region"], fields["country"]) == (
+        "Ugashik",
+        "Alaska",
+        "United States",
+    )
+
+
+@pytest.mark.req("REQ-DQ-PLACE-001")
+def test_no_place_gives_no_location(envelope):
+    envelope["payload"]["properties"]["place"] = None
+    fields = validate(envelope, now=NOW).fields
+    assert (fields["city"], fields["region"], fields["country"]) == (None, None, None)

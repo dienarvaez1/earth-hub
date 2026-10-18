@@ -67,4 +67,18 @@ These values occur in real USGS data and are valid:
 
 **Duplicates' deletions (DEF-026).** When USGS finds that two IDs are one event, the surviving event lists both IDs and the duplicate is deleted on its own, listing only its own ID. Both IDs point to one stored event, so a deletion that does not list the stored event's current ID is the duplicate's, and does not hide the event. Each event keeps the IDs of its current revision in `revision_ids` to tell the two cases apart. The rule is in `database/revisions.py`, shared by the consumer and by backfill and catch-up when they decide what to publish.
 
+**City, region and country.** Each stored revision also gets `city`, `region` and `country`, derived from `place` by `validation/places.py`; they never cause a rejection, and `place` is kept exactly as USGS sent it.
+
+| `place` | `city` | `region` | `country` |
+| --- | --- | --- | --- |
+| 86 km E of Ugashik, Alaska | Ugashik | Alaska | United States |
+| 10 km N of Cobb, CA | Cobb | California | United States |
+| 10 km NE of Mexicali, B.C., MX | Mexicali | Baja California | Mexico |
+| 8 km SSE of Guarumal, Panama | Guarumal | | Panama |
+| 12 km SSE of Bak’uriani, Georgia (longitude 43.6) | Bak’uriani | | Georgia |
+| south of the Fiji Islands | | the Fiji Islands | |
+| Fiji region (no " of ") | | | |
+
+The text after the first " of " is split at commas: the first part is the city and the last the area. A US state, by name or postal code, becomes the region with country United States; otherwise the area is the country and any middle part the region. "Georgia" is the US state west of Greenwich and the country east of it. Without a comma the text names an area, not a city. US territories (Puerto Rico, Guam, U.S. Virgin Islands, Northern Mariana Islands) are kept as USGS names them.
+
 A redelivered Kafka message (same topic, partition and offset) is recognized and skipped without a new row. Messages from backfill and catch-up (`source` is `backfill`, `sweep`, `catchup` or `deleted`) go through exactly the same rules, from the `earthquakes.backfill` topic. `make reconcile` checks that every message in the topic has exactly one `raw_events` row.

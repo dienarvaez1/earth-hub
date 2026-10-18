@@ -14,6 +14,9 @@ class Earthquake(BaseModel):
     magnitude: float | None
     mag_type: str | None = Field(description="Magnitude scale, e.g. ml, mb, mww")
     place: str | None
+    city: str | None = Field(description='Nearest city, from place ("86 km E of Ugashik, ...")')
+    region: str | None = Field(description="State, province or area, from place")
+    country: str | None = Field(description="Country, from place; US states give United States")
     longitude: float
     latitude: float
     depth_km: float = Field(description="Depth in km; negative means above sea level")

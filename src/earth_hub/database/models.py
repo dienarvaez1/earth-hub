@@ -56,6 +56,10 @@ class Earthquake(Base):
     magnitude: Mapped[float | None] = mapped_column(Double)
     mag_type: Mapped[str | None] = mapped_column(Text)
     place: Mapped[str | None] = mapped_column(Text)
+    # Derived from place; see validation/places.py.
+    city: Mapped[str | None] = mapped_column(Text)
+    region: Mapped[str | None] = mapped_column(Text)
+    country: Mapped[str | None] = mapped_column(Text)
     longitude: Mapped[float] = mapped_column(Double)
     latitude: Mapped[float] = mapped_column(Double)
     depth_km: Mapped[float] = mapped_column(Double)

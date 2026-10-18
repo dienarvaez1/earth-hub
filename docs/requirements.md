@@ -88,6 +88,8 @@ One requirement per rule in [data-quality-rules.md](data-quality-rules.md).
 | REQ-DQ-ACC-001 | Accept values real USGS data contains: negative magnitude and depth, non-earthquake types, `deleted` status, missing optional fields |
 | REQ-DQ-DEL-001 | Accept a deletion whose magnitude or optional fields hold placeholder values, storing those values as unknown (DEF-027) |
 | REQ-DQ-DEL-002 | The deletion of a duplicate merged into another event never hides that event, whichever arrives first; backfill and catch-up decide what to publish by the same rule (DEF-026) |
+| REQ-DQ-PLACE-001 | Derive city, region and country from `place` (split at the first " of ", then at commas; US states give country United States) for new revisions and for events already stored, keeping `place` unchanged |
+| REQ-DQ-PLACE-002 | Events stored by backfill and catch-up get city, region and country by the same rule as the live feed, including when a revision changes `place` |
 
 ## API
 
