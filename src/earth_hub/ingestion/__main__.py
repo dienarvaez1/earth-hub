@@ -13,7 +13,7 @@ from earth_hub.ingestion.state import STATE_WINDOW, read_topic_since, state_from
 from earth_hub.ingestion.usgs_client import UsgsClient, make_http_client
 from earth_hub.logging_config import configure_logging
 
-logger = logging.getLogger("earth_hub.ingestion")
+logger = logging.getLogger(__spec__.name)  # the module name, also under `python -m`
 
 
 def main(argv: list[str] | None = None) -> int:

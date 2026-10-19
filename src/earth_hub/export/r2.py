@@ -57,7 +57,7 @@ from earth_hub.export.snapshot import (
     content_hash,
 )
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger(__spec__.name)  # the module name, also under `python -m`
 
 TABLE_PREFIX = "earthquakes/"
 MANIFEST_KEY = "_state/earthquakes-manifest.json.gz"
