@@ -188,6 +188,8 @@ Set `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY` and `R2_BUCKET` 
 | `_state/earthquakes-manifest.json.gz` | SHA-256 of each row as last uploaded |
 | `_state/lock.json` | Held while a run is in progress (expires after 2 hours if a run crashes) |
 | `runs/<run_id>.json` | One record per run: status, counts, timings, errors (also in `reports/exports/`) |
+| `analytics/earthquakes.parquet` | The whole table in one Parquet file for the dashboard: every row and column, types kept (about 7.5 MB for 115,000 rows) |
+| `analytics/meta.json` | What the snapshot holds: run, row count, size, SHA-256, column types |
 
 A run uploads rows that are new or changed since their last upload, skips unchanged ones, and deletes objects for rows that left the table (merged events). Each row is one object named by its primary key, so reruns and interrupted runs can never create duplicates; a failed upload is retried by the next run. Progress is saved every 10 pages (10,000 rows), so after an interruption the next run carries on where it stopped. `EXPORT_WORKERS` (default 64) sets how many uploads run at once: a first full export of about 115,000 rows took 98 minutes at 16. By default a run trusts the manifest to say what the bucket holds, so a run with a few changes takes about 15 s. `make export-r2 VERIFY=1` also lists the bucket (about 100 s for 115,000 objects) to delete objects the manifest does not know, re-upload any removed from the bucket by hand, and check the result against the bucket itself; a run without a readable manifest always does this. Run it now and then, or after touching the bucket outside the exporter. A run succeeds only when the bucket then holds exactly the rows it read.
 
@@ -196,6 +198,10 @@ make export-r2 DRY_RUN=1   # what would change, writing nothing
 make export-r2             # e.g. read 114731  new 0  updated 12  unchanged 114719  deleted 1  failed 0
 make export-r2-runs        # past runs; one that never finished shows as interrupted
 ```
+
+After a run that succeeded, the export rewrites the Parquet snapshot if the rows changed. It is built from the same rows the run uploaded, so it holds exactly what the bucket does; a dry run or a failed run never writes it.
+
+The dashboard's reports are SQL files in [`dashboard/queries/`](dashboard/queries): the page runs them in the browser with DuckDB-WASM over the snapshot, and `tests/unit/test_dashboard_queries.py` runs the same files on a fixed dataset with answers worked by hand. All filters live in one `filter` table, set through `set_filter.sql`; the queries take no parameters.
 
 ## Tests and QA
 

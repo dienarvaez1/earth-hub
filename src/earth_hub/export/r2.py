@@ -8,6 +8,8 @@ Bucket layout:
     _state/earthquakes-manifest.json.gz    SHA-256 of each row as last uploaded
     _state/lock.json                       held while a run is in progress
     runs/<run_id>.json                     one record per run (also kept in reports/exports/)
+    analytics/earthquakes.parquet          the whole table for the dashboard (see snapshot.py)
+    analytics/meta.json                    what the snapshot holds
 
 A run reads every row from GET /api/v1/export/earthquakes (paged by id), then:
 - uploads a row the manifest does not list (new) or lists with another fingerprint
@@ -24,7 +26,8 @@ Each row is one object named by its primary key, so a rerun or an interrupted ru
 overwrite, never duplicate. A run succeeds only when the bucket then holds exactly the rows
 read. The manifest lists only uploads that succeeded, so anything that failed is retried
 next time. It is saved every CHECKPOINT_PAGES pages and when a run stops, so the next run
-skips what an interrupted one already uploaded.
+skips what an interrupted one already uploaded. A run that succeeded then rewrites the
+analytics snapshot if the rows changed.
 """
 
 import argparse
@@ -45,6 +48,14 @@ from pathlib import Path
 import httpx
 
 from earth_hub.export.bucket import Bucket, PreconditionFailed
+from earth_hub.export.snapshot import (
+    COLUMNS,
+    META_KEY,
+    PARQUET_TYPE,
+    SNAPSHOT_KEY,
+    SnapshotFile,
+    content_hash,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -121,6 +132,7 @@ class RunRecord:
     duration_s: float | None = None
     counts: Counts = field(default_factory=Counts)
     verification: dict | None = None
+    snapshot: dict | None = None
     errors: list[str] = field(default_factory=list)
 
     def error(self, message: str) -> None:
@@ -199,7 +211,6 @@ class Exporter:
     # The export itself.
 
     def _export(self, record: RunRecord, *, dry_run: bool, verify: bool) -> None:
-        counts = record.counts
         manifest = self._load_manifest()
         self._saved = manifest  # the manifest as last written to the bucket
         # Without a manifest nothing says what the bucket holds, so the bucket is listed.
@@ -211,8 +222,19 @@ class Exporter:
         # updated as uploads are confirmed. A failed upload leaves the object, and its entry,
         # as they were.
         known = dict(manifest)
+        snapshot = None if dry_run else SnapshotFile()
         try:
-            self._upload_changes(record, manifest, known, read, failed_ids, dry_run=dry_run)
+            self._sync(record, manifest, known, read, failed_ids, snapshot, verify=verify)
+        finally:
+            if snapshot is not None:
+                snapshot.close()
+
+    def _sync(self, record, manifest, known, read, failed_ids, snapshot, *, verify) -> None:
+        """Upload, delete, save the manifest, check, then write the snapshot."""
+        counts = record.counts
+        dry_run = snapshot is None
+        try:
+            self._upload_changes(record, manifest, known, read, failed_ids, snapshot)
         except BaseException:
             if not dry_run and known != self._saved:
                 self._checkpoint(known, record)
@@ -241,6 +263,47 @@ class Exporter:
         record.verification = self._verify(read, stored, listed=verify)
         if not record.verification["match"]:
             record.error("the bucket does not hold exactly the rows read; see verification")
+        if not record.errors:  # only a bucket that holds exactly the rows read
+            self._write_snapshot(record, rows, snapshot)
+
+    def _write_snapshot(self, record: RunRecord, rows: dict[int, str], snapshot) -> None:
+        content = content_hash(rows)
+        meta = self._load_meta()
+        if meta and meta.get("content_sha256") == content:
+            record.snapshot = {"written": False, "rows": meta.get("rows"), "reason": "unchanged"}
+            return
+        if snapshot.rows != len(rows):
+            record.error(f"snapshot has {snapshot.rows} rows, the bucket {len(rows)}; not written")
+            return
+        try:
+            body = snapshot.build()
+            self.bucket.put(SNAPSHOT_KEY, body, content_type=PARQUET_TYPE)
+            meta = {
+                "table": "earthquakes",
+                "run_id": record.run_id,
+                "written_at": _iso(self.clock()),
+                "rows": len(rows),
+                "bytes": len(body),
+                "sha256": hashlib.sha256(body).hexdigest(),
+                "content_sha256": content,
+                "columns": COLUMNS,
+            }
+            # After the file: meta.json never describes a snapshot that is not there.
+            self.bucket.put(META_KEY, json.dumps(meta, indent=2).encode())
+        except Exception as exc:
+            record.error(f"snapshot not written: {type(exc).__name__}: {exc}")
+            return
+        record.snapshot = {"written": True, "rows": len(rows), "bytes": len(body)}
+        logger.info("snapshot written: %d rows, %d bytes", len(rows), len(body))
+
+    def _load_meta(self) -> dict | None:
+        found = self.bucket.get(META_KEY)
+        if found is None:
+            return None
+        try:
+            return json.loads(found[0])
+        except ValueError:
+            return None  # unreadable: the snapshot is rewritten
 
     def _repair(self, record: RunRecord, ids: set[int], known: dict[int, str]) -> set[int]:
         """Fetch and upload rows the manifest wrongly listed as stored; returns those uploaded."""
@@ -266,8 +329,10 @@ class Exporter:
             logger.warning("%d rows listed in the manifest were missing; uploaded", len(repaired))
         return repaired
 
-    def _upload_changes(self, record, manifest, known, read, failed_ids, *, dry_run: bool) -> None:
+    def _upload_changes(self, record, manifest, known, read, failed_ids, snapshot) -> None:
+        """Upload what changed. `snapshot` collects every row read; None on a dry run."""
         counts = record.counts
+        dry_run = snapshot is None
         unsaved = 0  # uploads confirmed since the manifest was last saved
         with ThreadPoolExecutor(self.workers) as pool:
             for number, page in enumerate(self._pages(), start=1):
@@ -278,6 +343,8 @@ class Exporter:
                     digest = fingerprint(body)
                     read.add(row_id)
                     counts.read += 1
+                    if snapshot is not None:
+                        snapshot.add(body)
                     if manifest.get(row_id) == digest:
                         counts.unchanged += 1
                     else:

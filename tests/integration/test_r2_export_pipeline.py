@@ -1,12 +1,14 @@
 """The R2 export end to end: PostgreSQL -> the real API -> the exporter -> S3 (moto).
 
-After every run, each object must equal its `earthquakes` row in every column and type.
+After every run, each object, and the analytics snapshot, must equal its `earthquakes` row
+in every column and type.
 """
 
 import json
 from datetime import UTC, datetime, timedelta
 
 import boto3
+import duckdb
 import pytest
 from fastapi.testclient import TestClient
 from moto import mock_aws
@@ -17,6 +19,7 @@ from earth_hub.database.models import Earthquake
 from earth_hub.database.repository import IncomingMessage, process_message
 from earth_hub.export.bucket import Bucket
 from earth_hub.export.r2 import Exporter, key_row_id
+from earth_hub.export.snapshot import SNAPSHOT_KEY
 
 pytestmark = pytest.mark.integration
 
@@ -61,9 +64,30 @@ def export(db, s3, tmp_path, minute=0):
         return exporter.run()
 
 
-def assert_bucket_equals_table(db, s3):
+def table_rows(db) -> dict[int, dict]:
     with db.connect() as conn:
-        table = {r["id"]: dict(r) for r in conn.execute(select(Earthquake.__table__)).mappings()}
+        return {r["id"]: dict(r) for r in conn.execute(select(Earthquake.__table__)).mappings()}
+
+
+def assert_snapshot_equals_table(db, s3, tmp_path):
+    path = tmp_path / "snapshot.parquet"
+    path.write_bytes(s3.get_object(Bucket=BUCKET, Key=SNAPSHOT_KEY)["Body"].read())
+    con = duckdb.connect()
+    relation = con.sql(f"SELECT * FROM '{path}'")
+    snapshot = [dict(zip(relation.columns, r, strict=True)) for r in relation.fetchall()]
+    con.close()
+    table = table_rows(db)
+    assert [r["id"] for r in snapshot] == sorted(table)
+    for got in snapshot:
+        row = table[got["id"]]
+        assert list(got) == list(row)
+        for column, value in row.items():
+            assert got[column] == value, (got["id"], column)
+            assert type(got[column]) is type(value), (got["id"], column)
+
+
+def assert_bucket_equals_table(db, s3):
+    table = table_rows(db)
     objects = {}
     for item in s3.list_objects_v2(Bucket=BUCKET, Prefix="earthquakes/").get("Contents", []):
         objects[key_row_id(item["Key"])] = json.loads(
@@ -81,7 +105,7 @@ def assert_bucket_equals_table(db, s3):
             assert type(got) is type(value), (row_id, column)
 
 
-@pytest.mark.req("REQ-EXP-001", "REQ-EXP-002", "REQ-EXP-003", "REQ-EXP-004")
+@pytest.mark.req("REQ-EXP-001", "REQ-EXP-002", "REQ-EXP-003", "REQ-EXP-004", "REQ-EXP-009")
 def test_the_bucket_matches_the_table_through_revisions_deletions_and_merges(
     db, make_envelope, make_feature, s3, tmp_path
 ):
@@ -97,6 +121,7 @@ def test_the_bucket_matches_the_table_through_revisions_deletions_and_merges(
     assert first.status == "succeeded"
     assert (first.counts.read, first.counts.new) == (5, 5)
     assert_bucket_equals_table(db, s3)
+    assert_snapshot_equals_table(db, s3, tmp_path)
 
     second = export(db, s3, tmp_path, minute=1)
     assert (second.counts.unchanged, second.counts.new, second.counts.updated) == (5, 0, 0)
@@ -113,5 +138,7 @@ def test_the_bucket_matches_the_table_through_revisions_deletions_and_merges(
     c = third.counts
     assert (c.read, c.new, c.updated, c.unchanged, c.deleted, c.failed) == (5, 1, 3, 1, 1, 0)
     assert_bucket_equals_table(db, s3)
+    assert third.snapshot["written"]
+    assert_snapshot_equals_table(db, s3, tmp_path)
     runs = s3.list_objects_v2(Bucket=BUCKET, Prefix="runs/")["KeyCount"]
     assert runs == 3
