@@ -1,13 +1,19 @@
 """Run the whole regression suite, layer by layer, and write reports/.
 
     uv run python scripts/regression.py            # or: make regression
+    uv run python scripts/regression.py --skip performance     # CI (.github/workflows/ci.yml)
 
 Layers run in order and the run stops at the first failing one, so a broken unit test
 doesn't spend minutes restarting containers. Each pytest layer writes JUnit XML and
 requirement traces; coverage accumulates across layers. The summary goes to
 reports/regression-summary.md and the traceability matrix to docs/.
+
+`--skip` leaves out layers by choice: CI skips performance, whose timings shared runners
+cannot repeat. Skipped layers are listed as such and do not fail the run; requirements
+covered only by their tests show as not run, not as gaps.
 """
 
+import argparse
 import json
 import os
 import platform
@@ -35,6 +41,7 @@ LAYERS = [
     ("disruptive", ["tests/disruptive", "--run-disruptive"]),
     ("performance", ["tests/performance", "--run-performance"]),
 ]
+NAMES = [name for name, _ in LAYERS]
 
 
 @dataclass
@@ -125,7 +132,11 @@ def coverage_total() -> str | None:
 
 
 def summary(
-    results: list[Result], skipped_layers: list[str], coverage: str | None, trace_ok: bool | None
+    results: list[Result],
+    skipped_layers: list[str],
+    coverage: str | None,
+    trace_ok: bool | None,
+    left_out: tuple[str, ...] = (),
 ) -> str:
     passed = all(r.ok for r in results) and not skipped_layers and trace_ok is not False
     lines = [
@@ -149,6 +160,8 @@ def summary(
         )
     for layer in skipped_layers:
         lines.append(f"| {layer} | not run | | | | | |")
+    for layer in left_out:
+        lines.append(f"| {layer} | skipped (`--skip`) | | | | | |")
     total = sum(r.tests for r in results)
     lines += ["", f"Total tests run: {total}. Line coverage across layers: {coverage or 'n/a'}."]
     if trace_ok is not None:
@@ -171,7 +184,17 @@ def summary(
     return "\n".join(lines) + "\n"
 
 
-def main() -> int:
+def layer_dirs(names: tuple[str, ...]) -> list[str]:
+    """The test directories of these layers, for the traceability check."""
+    return [args[0] for name, args in LAYERS if name in names and args]
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description="Run every test layer and write reports/.")
+    parser.add_argument(
+        "--skip", nargs="+", default=[], choices=NAMES, metavar="LAYER", help="layers to leave out"
+    )
+    left_out = tuple(parser.parse_args(argv).skip)
     shutil.rmtree(REPORTS, ignore_errors=True)
     REPORTS.mkdir()
     (REPO / ".coverage").unlink(missing_ok=True)
@@ -179,7 +202,8 @@ def main() -> int:
 
     results: list[Result] = []
     first_pytest = True
-    for index, (layer, args) in enumerate(LAYERS):
+    layers = [(name, args) for name, args in LAYERS if name not in left_out]
+    for index, (layer, args) in enumerate(layers):
         print(f"\n=== {layer} ===", flush=True)
         if args is None:
             result = run_lint()
@@ -188,7 +212,7 @@ def main() -> int:
             first_pytest = False
         results.append(result)
         if not result.ok:
-            skipped = [name for name, _ in LAYERS[index + 1 :]]
+            skipped = [name for name, _ in layers[index + 1 :]]
             break
     else:
         skipped = []
@@ -196,9 +220,10 @@ def main() -> int:
     coverage = coverage_total()
     trace_ok = None
     if not skipped and all(r.ok for r in results):
-        trace_ok = run(["uv", "run", "python", "scripts/traceability.py"]) == 0
+        not_run = [f"--not-run={d}" for d in layer_dirs(left_out)]
+        trace_ok = run(["uv", "run", "python", "scripts/traceability.py", *not_run]) == 0
 
-    text = summary(results, skipped, coverage, trace_ok)
+    text = summary(results, skipped, coverage, trace_ok, left_out)
     (REPORTS / "regression-summary.md").write_text(text)
     (REPORTS / "regression-summary.json").write_text(
         json.dumps([r.__dict__ for r in results], indent=2, default=list)

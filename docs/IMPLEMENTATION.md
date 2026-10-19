@@ -447,18 +447,24 @@ Revised on 2026-10-19: reports are built from the R2 bucket, not PostgreSQL, and
 
 ### Milestone 7 — CI/CD, documentation, and portfolio release
 
+Revised on 2026-10-19: the release (license, public repository, branch protection, `USGS_CONTACT`, removing the dashboard's preview marking) and the pre-release audit are deferred to a later step. Until then the repository stays private and the dashboard public, marked as a preview and kept out of search engines. The demo is a written walkthrough.
+
 **Implementation**
 
-- Add GitHub Actions for linting, unit tests, and selected integration tests.
-- Publish test and coverage reports as workflow artifacts.
-- Document the architecture, schema, API contracts, setup, and recovery behavior.
-- Add example requests, responses, and SQL queries.
-- Document test execution, known limitations, and troubleshooting.
-- Prepare a short end-to-end demo.
+1. **CI** (`.github/workflows/ci.yml`, [ci.md](ci.md)): on every pull request and push to `main`, a quick job (lint, unit tests) and a regression job running `scripts/regression.py --skip performance` from the example settings, with no secrets; reports kept as artifacts and the summary on the run page; actions pinned to commit SHAs, read-only token. Performance stays local: shared runners cannot repeat its timings. Also in this step: the third-party licenses the public page must carry (DEF-035), and the page's preview marking.
+2. **Documentation and demo:** architecture diagrams (pipeline, topics and consumer groups, export and dashboard, recovery), the schema, API examples replayed by a test, SQL report examples, known limitations, a README written as the reviewer's entry point (including how Claude Code was used and which QA decisions stayed with the author), and `docs/demo.md`, a walkthrough of about 10 minutes.
+3. **Release (deferred):** the audit (a secret scan of the whole history, the author emails of three early commits), a LICENSE, the repository made public, branch protection requiring CI, `USGS_CONTACT`, and the preview marking removed.
+
+**QA work**
+
+- Test the workflow file itself: triggers, the commands each job runs, no secrets, pinned actions, read-only token, reports kept even when a run fails.
+- Prove the gate: a deliberately failing pull request shows a red check (blocking the merge needs branch protection, at the release).
+- The regression job runs the README's quick start on a clean runner.
+- Relative links in `docs/` are checked, and documented API examples are replayed against the fixed dataset.
 
 **QA deliverables:** CI workflow, README, architecture diagrams, test documentation, traceability matrix, quality reports, and demo instructions.
 
-**Exit gate:** A reviewer can clone Earth-Hub, start it, run tests, inspect persisted records, query the API, and understand the quality controls.
+**Exit gate:** A reviewer can clone Earth-Hub, start it, run tests, inspect persisted records, query the API, and understand the quality controls; every pull request is checked by CI.
 
 ## 5. Recommended repository structure
 

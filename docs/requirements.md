@@ -145,6 +145,8 @@ The dashboard's SQL lives in `dashboard/queries/`; the page runs it in the brows
 | REQ-DASH-013 | Each bar of the magnitude chart takes the map's color for the middle of its bin, from the same color stops as the map and its legend |
 | REQ-DASH-014 | Each bar of the events-over-time chart is split by magnitude level, the bands of the map's legend: below 2.5, 2.5 to 4.5, 4.5 to 6, 6 and above (each including its lower edge), plus no magnitude; the levels add up to the period's events and use the legend's colors, with grey for no magnitude |
 | REQ-DASH-015 | The custom calendar allows only days from the first day with data to today (others greyed out; a typed day outside is moved to the nearest allowed one), and the magnitude filter is two lists of the legend's boundaries: Min (Below 2.5, 2.5, 4.5, 6) and Max, meaning below (2.5, 4.5, 6, 6 and above), the open ends named after the end bands and chosen by default; choices that would select nothing are greyed out |
+| REQ-DASH-016 | The page links to `third-party-licenses.txt`, generated at build time with the license of every package bundled into the page and of the DuckDB extension it serves; the build fails if a package's license text is missing (DEF-035) |
+| REQ-DASH-017 | Until the release, the page is marked "Preview — in development" and kept out of search engines: `X-Robots-Tag: noindex, nofollow` on every response (page, files and `/data/*`), a `robots` meta tag, and a `robots.txt` that disallows everything |
 
 ## Observability
 
@@ -153,6 +155,17 @@ The dashboard's SQL lives in `dashboard/queries/`; the page runs it in the brows
 | REQ-OBS-001 | Every pipeline log line has a `stage` (`fetch`, `parse`, `publish`, `persist`), and every line about one event has its `event_id`: the poller logs each event it publishes, and the consumer each rejection and error (in batches; every message when one at a time), with the event's Kafka position |
 | REQ-OBS-002 | The consumer logs a summary every minute (configurable): outcome counts since the last summary and since start, and its lag per partition; the poller's round line keeps totals since start |
 | REQ-OBS-003 | An event the pipeline rejects can be diagnosed from the logs alone: filtering on its event ID shows it published and then rejected, with the rule and reason, and the consumer's summary counts it and shows the lag back at 0 |
+
+## Continuous integration
+
+`.github/workflows/ci.yml`; how it works is in [ci.md](ci.md).
+
+| ID | Requirement |
+| --- | --- |
+| REQ-CI-001 | Every pull request and push to `main` runs lint and the unit tests, and the regression of every layer but performance followed by the traceability check, on a clean runner from the example settings, with no secrets |
+| REQ-CI-002 | Each run keeps its reports (JUnit, coverage, traceability matrix, regression summary) as artifacts for 30 days and shows the regression summary on the run's page |
+| REQ-CI-003 | A layer left out with `regression.py --skip` is reported as skipped and does not fail the run; requirements covered only by its tests are listed as not run; any layer that runs and fails, or a requirement left without a passing test otherwise, still fails it |
+| REQ-CI-004 | The workflow's actions are pinned to commit SHAs and its token can only read the repository |
 
 ## End-to-end scenarios
 
