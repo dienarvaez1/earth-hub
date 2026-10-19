@@ -78,6 +78,42 @@ def test_events_per_iso_week_and_month(dash):
     assert months == [("2024-02-01", 3), ("2024-03-01", 3), ("2024-04-01", 1)]
 
 
+LEVELS = ("below_2_5", "from_2_5", "from_4_5", "from_6", "no_magnitude")
+
+
+@pytest.mark.req("REQ-DASH-014")
+def test_each_period_is_counted_by_magnitude_level(dash):
+    dash.set_filter(time_bucket="month")
+    months = {r["period"].date().isoformat(): r for r in dash.query("over_time")}
+    levels = {month: [r[k] for k in LEVELS] for month, r in months.items()}
+    # February: 2.49, 2.5 and 4.5, each band including its lower edge.
+    assert levels["2024-02-01"] == [1, 1, 1, 0, 0]
+    # March: no magnitude, -0.43, 5.2 (the deleted 3.0 is left out).
+    assert levels["2024-03-01"] == [1, 0, 1, 0, 1]
+    assert levels["2024-04-01"] == [1, 0, 0, 0, 0]  # 1.0
+    for row in months.values():
+        assert sum(row[k] for k in LEVELS) == row["events"]
+
+
+@pytest.mark.req("REQ-DASH-014")
+def test_empty_periods_have_every_level_at_zero(dash):
+    dash.set_filter(time_bucket="day")
+    empty = [r for r in dash.query("over_time") if r["events"] == 0]
+    assert empty and all(r[k] == 0 for r in empty for k in LEVELS)
+
+
+@pytest.mark.req("REQ-DASH-014")
+def test_six_and_above_has_its_own_level(tmp_path):
+    rows = [event(1, "2024-06-24T22:05:04", 7.5, "Venezuela", None)]
+    rows += [event(2, "2024-06-24T22:04:31", 6.0, "Venezuela", None)]
+    rows += [event(3, "2024-06-25T00:00:00", 5.99, "Venezuela", None)]
+    dash = Dashboard(build(tmp_path, rows))
+    dash.set_filter(time_bucket="month")
+    (june,) = dash.query("over_time")
+    assert [june[k] for k in LEVELS] == [0, 0, 1, 2, 0]
+    dash.close()
+
+
 @pytest.mark.req("REQ-DASH-002")
 def test_the_highest_magnitude_per_period(dash):
     dash.set_filter(time_bucket="month")

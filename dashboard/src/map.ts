@@ -5,6 +5,7 @@ import * as maplibregl from "maplibre-gl";
 import type { GeoJSONSource, MapGeoJSONFeature, MapLayerMouseEvent } from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import workerUrl from "maplibre-gl/dist/maplibre-gl-worker.mjs?url";
+import { MAGNITUDE_STOPS } from "./colors";
 import type { Row } from "./db";
 
 // MapLibre 6 runs its tile work in a separate worker file, served with the page.
@@ -17,10 +18,43 @@ export const CLUSTER_ABOVE = 5000;
 /** Events at or above this magnitude are never clustered. */
 export const STRONG_MAGNITUDE = 6;
 
-// Magnitude colors, light to dark, for points (their magnitude) and clusters (their
-// strongest event's).
+// Points take their magnitude's color, clusters their strongest event's (colors.ts).
 function color(magnitude: maplibregl.ExpressionSpecification): maplibregl.ExpressionSpecification {
-  return ["interpolate", ["linear"], magnitude, 0, "#fed976", 2.5, "#fd8d3c", 4.5, "#e31a1c", 6, "#800026"];
+  return ["interpolate", ["linear"], magnitude, ...MAGNITUDE_STOPS.flat()] as maplibregl.ExpressionSpecification;
+}
+
+/** The color legend: a bar blending the stops, labelled at each; below the first stop and
+ * above the last, colors stay at the end ones. */
+export function legend(): HTMLElement {
+  const low = MAGNITUDE_STOPS[0][0];
+  const high = MAGNITUDE_STOPS[MAGNITUDE_STOPS.length - 1][0];
+  const at = (m: number) => ((m - low) / (high - low)) * 100;
+  const box = document.createElement("div");
+  box.className = "legend";
+  box.dataset.stops = JSON.stringify(MAGNITUDE_STOPS);
+  const title = document.createElement("span");
+  title.className = "legend-title";
+  title.textContent = "Magnitude";
+  const scale = document.createElement("span");
+  scale.className = "legend-scale";
+  const bar = document.createElement("span");
+  bar.className = "legend-bar";
+  bar.style.background = `linear-gradient(to right, ${MAGNITUDE_STOPS.map(([m, c]) => `${c} ${at(m)}%`).join(", ")})`;
+  scale.append(bar);
+  const labels: string[] = [];
+  MAGNITUDE_STOPS.forEach(([m], i) => {
+    const text = i === 0 ? `≤${m}` : i === MAGNITUDE_STOPS.length - 1 ? `${m}+` : String(m);
+    labels.push(text);
+    const tick = document.createElement("span");
+    tick.className = `legend-tick${i === 0 ? " start" : i === MAGNITUDE_STOPS.length - 1 ? " end" : ""}`;
+    tick.style.left = `${at(m)}%`;
+    tick.textContent = text;
+    scale.append(tick);
+  });
+  box.append(title, scale);
+  box.setAttribute("role", "img");
+  box.setAttribute("aria-label", `Dot color by magnitude, light to dark: ${labels.join(", ")}`);
+  return box;
 }
 const MAGNITUDE: maplibregl.ExpressionSpecification = ["coalesce", ["get", "magnitude"], 0];
 const POINT_PAINT = {

@@ -141,6 +141,9 @@ The dashboard's SQL lives in `dashboard/queries/`; the page runs it in the brows
 | REQ-DASH-009 | Up to 5,000 filtered events, the map shows every event as its own point; above that it clusters them when zoomed out, except events of magnitude 6 or more, which always stay single points drawn above the clusters; each cluster is colored by its strongest event |
 | REQ-DASH-010 | The time filter offers Today (the default), This week (from Monday), This month, Last 3 months, This year, Last 3 years and Custom: each preset is whole UTC days from its first day through today, month and year steps landing on the last day of a shorter month; Custom shows From and To calendars (To inclusive), starting from the last preset's days; each preset picks a fitting chart grouping |
 | REQ-DASH-011 | The event type filter starts on `earthquake`, and Reset returns to it; other types (quarry blasts, explosions and so on) appear only when chosen, or with All; when the data has no earthquakes it starts on All |
+| REQ-DASH-012 | A legend beside the map's note shows how dot color follows magnitude: one bar blending the map's own color stops, labelled ≤0, 2.5, 4.5 and 6+, readable by screen readers; it wraps under the note on narrow screens |
+| REQ-DASH-013 | Each bar of the magnitude chart takes the map's color for the middle of its bin, from the same color stops as the map and its legend |
+| REQ-DASH-014 | Each bar of the events-over-time chart is split by magnitude level, the bands of the map's legend: below 2.5, 2.5 to 4.5, 4.5 to 6, 6 and above (each including its lower edge), plus no magnitude; the levels add up to the period's events and use the legend's colors, with grey for no magnitude |
 
 ## End-to-end scenarios
 

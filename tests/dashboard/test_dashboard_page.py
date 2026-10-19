@@ -1,6 +1,7 @@
 """The dashboard page in Chromium: DuckDB-WASM's answers against DuckDB's in Python on the
 same snapshot, the form, the drawing, phone width and the empty state."""
 
+import json
 from datetime import datetime, timedelta
 
 import pytest
@@ -83,15 +84,14 @@ def test_the_charts_are_drawn_from_the_results(dash):
     page = dash.page
     status = dash.after_update(lambda: page.select_option("select[name=time_bucket]", "day"))
     assert status["error"] is None
-    assert (
-        len(page.query_selector_all('#chart-time g[aria-label="rect"] rect')) == 12
-    )  # to 10 March
+    # One segment per day and magnitude level with events: 6 events, 28 Feb to 10 Mar.
+    assert len(page.query_selector_all('#chart-time g[aria-label="rect"] rect')) == 6
     assert len(page.query_selector_all('#chart-magnitude g[aria-label="rect"] rect')) == 12
     countries = page.query_selector_all('#chart-countries g[aria-label="bar"] rect')
     assert len(countries) == 4
     for figure in ("time", "magnitude", "depth", "countries", "regions"):
-        svg = page.query_selector(f"#chart-{figure} svg")
-        assert svg.get_attribute("role") == "img" and svg.get_attribute("aria-label")
+        svg = page.query_selector(f"#chart-{figure} svg[role=img]")
+        assert svg is not None and svg.get_attribute("aria-label"), figure
 
 
 @pytest.mark.req("REQ-DASH-001")
@@ -275,3 +275,114 @@ def test_earthquakes_are_the_default_type(dash):
     page.click("button[type=reset]")
     page.wait_for_function("window.__earthHub.summary.events === 0")  # Today, 2 April
     assert page.input_value("select[name=event_type]") == "earthquake"
+
+
+STOPS = [[0, "#fed976"], [2.5, "#fd8d3c"], [4.5, "#e31a1c"], [6, "#800026"]]
+
+
+def rgb(hex_color: str) -> str:
+    r, g, b = (int(hex_color[i : i + 2], 16) for i in (1, 3, 5))
+    return f"rgb({r}, {g}, {b})"
+
+
+@pytest.mark.req("REQ-DASH-012")
+def test_the_legend_shows_the_magnitude_colors_beside_the_map_note(dash):
+    page = dash.page
+    legend = page.query_selector(".map-foot .legend")
+    assert legend.is_visible()
+    assert page.inner_text(".legend-title") == "Magnitude"
+    ticks = page.eval_on_selector_all(".legend-tick", "ts => ts.map(t => t.textContent)")
+    assert ticks == ["≤0", "2.5", "4.5", "6+"]
+    assert legend.get_attribute("aria-label") == (
+        "Dot color by magnitude, light to dark: ≤0, 2.5, 4.5, 6+"
+    )
+    # Drawn from the map's own stops, each at its place on a bar from 0 to 6.
+    assert json.loads(legend.get_attribute("data-stops")) == STOPS
+    gradient = page.eval_on_selector(".legend-bar", "b => getComputedStyle(b).backgroundImage")
+    places = ["0%", "41.6667%", "75%", "100%"]
+    expected = ", ".join(f"{rgb(c)} {at}" for (_, c), at in zip(STOPS, places, strict=True))
+    assert gradient == f"linear-gradient(to right, {expected})"
+    # On the note's line, to its right.
+    note = page.query_selector(".map-foot .note").bounding_box()
+    box = legend.bounding_box()
+    assert box["x"] > note["x"] + note["width"]
+    assert box["y"] < note["y"] + note["height"] and note["y"] < box["y"] + box["height"]
+
+
+@pytest.mark.req("REQ-DASH-012")
+def test_the_legend_fits_a_phone(browser_page, server):
+    browser_page.page.set_viewport_size({"width": 390, "height": 844})
+    browser_page.open(server.url)
+    box = browser_page.page.query_selector(".legend").bounding_box()
+    assert box["x"] >= 16 and box["x"] + box["width"] <= 390 - 16
+    assert browser_page.page.evaluate("document.documentElement.scrollWidth") <= 390
+
+
+def color_at(magnitude: float) -> str:
+    """The map's color blend, worked out independently: linear in RGB between the stops."""
+    if magnitude <= STOPS[0][0]:
+        return STOPS[0][1]
+    for (m0, c0), (m1, c1) in zip(STOPS, STOPS[1:], strict=False):
+        if magnitude <= m1:
+            t = (magnitude - m0) / (m1 - m0)
+            a = [int(c0[i : i + 2], 16) for i in (1, 3, 5)]
+            b = [int(c1[i : i + 2], 16) for i in (1, 3, 5)]
+            # Math.round: halves round up.
+            return "#" + "".join(
+                f"{int(x + (y - x) * t + 0.5):02x}" for x, y in zip(a, b, strict=True)
+            )
+    return STOPS[-1][1]
+
+
+@pytest.mark.req("REQ-DASH-013")
+def test_magnitude_bars_take_the_map_color_of_their_bin(dash, expected):
+    expected.set_filter(event_type="earthquake", start_time=datetime(2021, 4, 2))
+    bins = expected.query("magnitude_bins")
+    fills = dash.page.eval_on_selector_all(
+        '#chart-magnitude g[aria-label="rect"] rect', "rs => rs.map(r => r.getAttribute('fill'))"
+    )
+    assert fills == [color_at((b["bin_start"] + b["bin_end"]) / 2) for b in bins]
+    assert fills[0] == "#fed976"  # -0.5 to 0: below the first stop
+    assert fills[-1] == color_at(5.25)  # 5.0 to 5.5: between red and dark red
+    assert len(set(fills)) == len(fills)  # each bin its own shade
+
+
+def test_the_color_blend_matches_the_stops():
+    assert [color_at(m) for m, _ in STOPS] == [c for _, c in STOPS]
+    assert color_at(-3) == "#fed976" and color_at(9) == "#800026"
+
+
+LEVELS = [
+    ("below_2_5", "Below 2.5", "#fed976"),
+    ("from_2_5", "2.5 to 4.5", "#fd8d3c"),
+    ("from_4_5", "4.5 to 6", "#e31a1c"),
+    ("from_6", "6 and above", "#800026"),
+    ("no_magnitude", "No magnitude", "#a8a29e"),
+]
+
+
+@pytest.mark.req("REQ-DASH-014")
+@pytest.mark.parametrize("bucket", ["day", "month"])
+def test_time_bars_are_split_by_magnitude_level(dash, expected, bucket):
+    page = dash.page
+    dash.after_update(lambda: page.select_option("select[name=time_bucket]", bucket))
+    expected.set_filter(
+        event_type="earthquake", start_time=datetime(2021, 4, 2), time_bucket=bucket
+    )
+    want = sorted(
+        color for row in expected.query("over_time") for key, _, color in LEVELS if row[key] > 0
+    )
+    fills = page.eval_on_selector_all(
+        '#chart-time g[aria-label="rect"] rect', "rs => rs.map(r => r.getAttribute('fill'))"
+    )
+    assert sorted(fills) == want  # one segment per period and level, in the level's color
+    # The chart's own legend: every level, bottom to top, in the map legend's colors.
+    swatches = page.eval_on_selector_all(
+        "#chart-time [class*=swatch] > :is(span, div)", "els => els.map(e => e.textContent.trim())"
+    )
+    assert [label for _, label, _ in LEVELS] == [s for s in swatches if s]
+
+
+@pytest.mark.req("REQ-DASH-014")
+def test_the_levels_use_the_map_legend_colors():
+    assert [c for _, _, c in LEVELS[:4]] == [c for _, c in STOPS]

@@ -195,6 +195,55 @@ button {
   gap: 6px;
 }
 
+.map-foot {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  margin-top: 6px;
+}
+
+.map-foot .note {
+  margin: 0;
+}
+
+.legend {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.75rem;
+  color: var(--muted);
+  padding-bottom: 14px; /* room for the labels under the bar */
+}
+
+.legend-scale {
+  position: relative;
+  width: 160px;
+}
+
+.legend-bar {
+  display: block;
+  height: 10px;
+  border-radius: 5px;
+  border: 1px solid var(--line);
+}
+
+.legend-tick {
+  position: absolute;
+  top: 12px;
+  transform: translateX(-50%);
+  white-space: nowrap;
+}
+
+.legend-tick.start {
+  transform: none; /* the end labels stay inside the bar's width */
+}
+
+.legend-tick.end {
+  transform: translateX(-100%);
+}
+
 #map {
   height: 460px;
   border-radius: 8px;

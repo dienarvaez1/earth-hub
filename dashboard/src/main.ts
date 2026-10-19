@@ -3,7 +3,7 @@
 import "./style.css";
 import * as charts from "./charts";
 import { DEFAULT_FILTER, Db, type Filter, type Row } from "./db";
-import { EventMap } from "./map";
+import { EventMap, legend } from "./map";
 import { BUCKET, DEFAULT_PERIOD, type Period, day, firstDay } from "./periods";
 
 interface Meta {
@@ -66,6 +66,7 @@ async function fetchOk(path: string): Promise<Response> {
 async function start(): Promise<void> {
   const t0 = performance.now();
   const map = new EventMap($("#map"));
+  $("#legend").replaceWith(legend());
   const meta = fetchOk("/data/meta.json").then((r) => r.json() as Promise<Meta>);
   const parquet = fetchOk("/data/earthquakes.parquet").then(async (r) => {
     const bytes = new Uint8Array(await r.arrayBuffer());

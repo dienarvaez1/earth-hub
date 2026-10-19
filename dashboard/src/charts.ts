@@ -1,5 +1,6 @@
 // The charts, drawn with Observable Plot from the query results.
 import * as Plot from "@observablehq/plot";
+import { LEVELS, colorAt } from "./colors";
 import type { Row } from "./db";
 
 const ACCENT = "#c2410c";
@@ -13,10 +14,12 @@ function draw(figure: HTMLElement, rows: Row[], chart: (width: number) => Elemen
     figure.append(empty);
     return;
   }
-  const svg = chart(Math.max(280, figure.clientWidth || 600));
+  const plot = chart(Math.max(280, figure.clientWidth || 600));
+  // With a color legend Plot returns a <figure> around the legend and the chart's <svg>.
+  const svg = plot.tagName.toLowerCase() === "svg" ? plot : (plot.querySelector(":scope > svg") ?? plot);
   svg.setAttribute("role", "img");
   svg.setAttribute("aria-label", label);
-  figure.append(svg);
+  figure.append(plot);
 }
 
 // Plot's own interval names; ISO weeks start on Monday, like the SQL's.
@@ -25,24 +28,44 @@ function interval(bucket: string): "day" | "monday" | "month" {
 }
 
 export function overTime(figure: HTMLElement, rows: Row[], bucket: string): void {
-  const data = rows.map((r) => ({ ...r, period: new Date(r.period as number) }));
+  // One segment per period and level with events, stacked bottom to top in LEVELS' order.
+  const order = LEVELS.map((l) => l.label);
+  const data = rows.flatMap((r) =>
+    LEVELS.filter((l) => (r[l.key] as number) > 0).map((l) => ({
+      period: new Date(r.period as number),
+      level: l.label,
+      events: r[l.key] as number,
+    })),
+  );
   draw(
     figure,
     rows,
     (width) =>
       Plot.plot({
         width,
-        height: 240,
+        height: 260,
         marginLeft: 50,
         x: { type: "utc", label: null },
         y: { label: `Events per ${bucket}`, grid: true },
+        color: {
+          domain: order,
+          range: LEVELS.map((l) => l.color),
+          legend: true,
+          label: "Magnitude",
+        },
         marks: [
-          Plot.rectY(data, { x: "period", y: "events", interval: interval(bucket), fill: ACCENT }),
+          Plot.rectY(data, {
+            x: "period",
+            y: "events",
+            fill: "level",
+            order,
+            interval: interval(bucket),
+            tip: true,
+          }),
           Plot.ruleY([0]),
-          Plot.tip(data, Plot.pointerX({ x: "period", y: "events", interval: interval(bucket) })),
         ],
       }),
-    `Events per ${bucket}`,
+    `Events per ${bucket}, split by magnitude level`,
   );
 }
 
@@ -58,7 +81,14 @@ export function magnitudes(figure: HTMLElement, rows: Row[]): void {
         x: { label: "Magnitude" },
         y: { label: "Events", grid: true },
         marks: [
-          Plot.rectY(rows, { x1: "bin_start", x2: "bin_end", y: "events", fill: ACCENT, inset: 0.5 }),
+          // Each bar in the map's color for the middle of its bin, as in the map's legend.
+          Plot.rectY(rows, {
+            x1: "bin_start",
+            x2: "bin_end",
+            y: "events",
+            fill: (r: Row) => colorAt(((r.bin_start as number) + (r.bin_end as number)) / 2),
+            inset: 0.5,
+          }),
           Plot.ruleY([0]),
           Plot.tip(rows, Plot.pointerX({ x: (r: Row) => ((r.bin_start as number) + (r.bin_end as number)) / 2, y: "events" })),
         ],
