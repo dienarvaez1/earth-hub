@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Earth-Hub Earthquakes</title>
+    <meta
+      name="description"
+      content="Every earthquake Earth-Hub has stored from the USGS feed: an interactive map and charts."
+    />
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='14' fill='%23c2410c'/%3E%3Cpath d='M4 17h6l3-7 4 13 3-9 2 3h6' fill='none' stroke='white' stroke-width='2.4' stroke-linejoin='round'/%3E%3C/svg%3E" />
+  </head>
+  <body>
+    <header class="top">
+      <div>
+        <h1>Earth-Hub earthquakes</h1>
+        <p class="subtitle" id="as-of" aria-live="polite">Loading data…</p>
+      </div>
+      <a class="source" href="https://earthquake.usgs.gov/" rel="noopener">Data: USGS</a>
+    </header>
+
+    <main>
+      <form class="filters" id="filters" aria-label="Filters">
+        <fieldset>
+          <legend>Time (UTC)</legend>
+          <label>From <input type="date" name="start" /></label>
+          <label>To <input type="date" name="end" /></label>
+        </fieldset>
+        <fieldset>
+          <legend>Magnitude</legend>
+          <label>Min <input type="number" name="min_magnitude" step="0.1" inputmode="decimal" /></label>
+          <label>Max <input type="number" name="max_magnitude" step="0.1" inputmode="decimal" /></label>
+        </fieldset>
+        <fieldset>
+          <legend>Place</legend>
+          <label>Country <select name="country"><option value="">All</option></select></label>
+          <label>Region <select name="region"><option value="">All</option></select></label>
+        </fieldset>
+        <fieldset>
+          <legend>Events</legend>
+          <label>Type <select name="event_type"><option value="">All</option></select></label>
+          <label class="check"><input type="checkbox" name="include_deleted" /> Include deleted</label>
+        </fieldset>
+        <button type="reset">Reset</button>
+      </form>
+
+      <section class="summary" id="summary" aria-live="polite" aria-label="Summary"></section>
+
+      <section class="panel map-panel">
+        <h2>Map</h2>
+        <div id="map" role="region" aria-label="Map of the filtered earthquakes"></div>
+        <p class="note">Clusters show counts; zoom in for single events, then select one for details.</p>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head">
+          <h2>Events over time</h2>
+          <label>Per
+            <select name="time_bucket" form="filters">
+              <option value="day">day</option>
+              <option value="week">week</option>
+              <option value="month" selected>month</option>
+            </select>
+          </label>
+        </div>
+        <figure id="chart-time"></figure>
+      </section>
+
+      <div class="grid">
+        <section class="panel">
+          <h2>Magnitude</h2>
+          <figure id="chart-magnitude"></figure>
+        </section>
+        <section class="panel">
+          <h2>Depth against magnitude</h2>
+          <figure id="chart-depth"></figure>
+        </section>
+        <section class="panel">
+          <h2>Top countries</h2>
+          <figure id="chart-countries"></figure>
+        </section>
+        <section class="panel">
+          <h2>Top regions</h2>
+          <figure id="chart-regions"></figure>
+        </section>
+      </div>
+
+      <section class="panel">
+        <h2>Latest significant events <span class="note">(magnitude 4.5 and above)</span></h2>
+        <div class="table-wrap"><table id="significant"></table></div>
+      </section>
+    </main>
+
+    <footer>
+      Built from the Earth-Hub export in Cloudflare R2. Times are UTC. Map ©
+      <a href="https://openfreemap.org/" rel="noopener">OpenFreeMap</a>, ©
+      <a href="https://www.openmaptiles.org/" rel="noopener">OpenMapTiles</a>, data ©
+      <a href="https://www.openstreetmap.org/copyright" rel="noopener">OpenStreetMap</a>.
+    </footer>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

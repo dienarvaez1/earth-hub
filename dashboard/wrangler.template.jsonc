@@ -1,0 +1,15 @@
+// The template for wrangler.jsonc, which `make dashboard-dev` / `make dashboard-deploy`
+// write with the bucket from R2_BUCKET in .env (scripts/dashboard_config.py). Not edited by
+// hand: wrangler.jsonc is generated and not committed.
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "earth-hub",
+  "main": "src/worker.ts",
+  "compatibility_date": "2026-10-01",
+  "workers_dev": true,
+  // Static files first; a path that is not one goes to the Worker (src/worker.ts).
+  "assets": { "directory": "./dist" },
+  // remote: `wrangler dev` reads the real bucket (make dashboard-dev); tests use a simulated one.
+  "r2_buckets": [{ "binding": "SNAPSHOTS", "bucket_name": "{{R2_BUCKET}}", "remote": {{REMOTE}} }],
+  "observability": { "enabled": true }
+}

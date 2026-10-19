@@ -4,54 +4,11 @@ The page runs these same files in the browser (DuckDB-WASM); here DuckDB runs th
 snapshot built by the exporter's own code.
 """
 
-from datetime import UTC, datetime
+from datetime import datetime
 
 import pytest
 from support.analytics import Dashboard
-from support.export import make_row
-
-from earth_hub.export.r2 import encode
-from earth_hub.export.snapshot import SnapshotFile
-
-
-def event(row_id, when, magnitude, country, region, **changes):
-    moment = datetime.fromisoformat(when).replace(tzinfo=UTC)
-    return make_row(
-        row_id,
-        event_time=moment.isoformat().replace("+00:00", "Z"),
-        event_time_ms=int(moment.timestamp() * 1000),
-        magnitude=magnitude,
-        country=country,
-        region=region,
-        place=f"place {row_id}",
-        **changes,
-    )
-
-
-# 29 February and the midnights around it, a Sunday at the end of an ISO week, bin edges,
-# a negative magnitude, missing values, a deletion and another event type.
-EVENTS = [
-    event(1, "2024-02-28T23:59:59.999", 2.49, "United States", "Alaska"),
-    event(2, "2024-02-29T00:00:00", 2.5, "United States", "Alaska"),
-    event(3, "2024-02-29T12:00:00", 4.5, "Mexico", "Baja California"),
-    event(4, "2024-03-01T00:00:00", None, None, None),
-    event(5, "2024-03-04T06:00:00", -0.43, "United States", "California"),
-    event(6, "2024-03-10T23:00:00", 5.2, "Japan", None),  # a Sunday
-    event(7, "2024-03-10T08:00:00", 3.0, "United States", "Alaska", review_status="deleted"),
-    event(8, "2024-04-02T10:00:00", 1.0, "United States", "Alaska", event_type="quarry blast"),
-]
-
-
-def build(tmp_path, rows):
-    snapshot = SnapshotFile()
-    try:
-        for row in rows:
-            snapshot.add(encode(row))
-        path = tmp_path / "earthquakes.parquet"
-        path.write_bytes(snapshot.build())
-    finally:
-        snapshot.close()
-    return path
+from support.dashboard_data import EVENTS, build, event
 
 
 @pytest.fixture
@@ -220,6 +177,29 @@ def test_no_events_give_empty_results_and_a_zero_summary(tmp_path, rows):
     (summary,) = dash.query("summary")
     assert (summary["events"], summary["max_magnitude"], summary["first_event"]) == (0, None, None)
     dash.close()
+
+
+@pytest.mark.req("REQ-DASH-001")
+def test_filter_options_list_every_value(dash):
+    dash.set_filter()
+    assert dash.query("countries") == [
+        {"country": "Japan", "events": 1},
+        {"country": "Mexico", "events": 1},
+        {"country": "United States", "events": 5},  # the deleted event too: options, not counts
+        {"country": "Unknown", "events": 1},
+    ]
+    assert [r["region"] for r in dash.query("regions")] == [
+        "Alaska",
+        "Baja California",
+        "California",
+        "Unknown",
+    ]
+    dash.set_filter(country="United States")
+    assert [r["region"] for r in dash.query("regions")] == ["Alaska", "California"]
+    assert dash.query("event_types") == [
+        {"event_type": "earthquake", "events": 7},
+        {"event_type": "quarry blast", "events": 1},
+    ]
 
 
 @pytest.mark.req("REQ-DASH-001")

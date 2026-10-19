@@ -31,3 +31,11 @@ data/
 .vscode/
 .idea/
 .DS_Store
+
+# Dashboard (Node): dependencies, build output, generated config, local wrangler state
+dashboard/node_modules/
+dashboard/wrangler.jsonc
+dashboard/.wrangler/
+.wrangler/
+dashboard/public/duckdb-extensions/
+dashboard/wrangler.test-*.jsonc

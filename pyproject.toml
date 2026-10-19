@@ -37,6 +37,7 @@ markers = [
     "e2e: whole pipeline, feed to API, on temporary topics and databases (needs make up)",
     "disruptive: stops and starts shared containers; runs only with --run-disruptive",
     "performance: a full year of synthetic data; runs only with --run-performance",
+    "dashboard: the dashboard served by wrangler dev in a browser (needs make dashboard-install)",
     "req(*ids): requirements from docs/requirements.md that this test verifies",
 ]
 
@@ -46,6 +47,7 @@ dev = [
     "moto[s3]>=5.2.4",
     "pytest>=9.1.1",
     "pytest-cov>=7.1.0",
+    "pytest-playwright>=0.10.0",
     "pytz>=2026.5",
     "ruff>=0.17.1",
     "schemathesis>=4.31.1",

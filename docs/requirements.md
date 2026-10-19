@@ -135,6 +135,9 @@ The dashboard's SQL lives in `dashboard/queries/`; the page runs it in the brows
 | REQ-DASH-003 | Magnitudes are counted in bins of 0.5 holding `bin_start <= magnitude < bin_end`, empty bins between the lowest and highest listed with 0, events without a magnitude left out |
 | REQ-DASH-004 | The top countries and regions are ranked by number of events, ties in alphabetical order, limited to the requested number |
 | REQ-DASH-005 | The summary (counts, highest magnitude and its place, first and last event, countries, deletions), the latest significant events and the map points are computed from the filtered events; no events give empty results and a zero summary |
+| REQ-DASH-006 | The Worker serves only `analytics/earthquakes.parquet` and `analytics/meta.json` (as `/data/...`), read-only, with `ETag`, `304 Not Modified`, byte ranges and a 5-minute browser cache; nothing else in the bucket is reachable; without a snapshot it answers 404 saying so |
+| REQ-DASH-007 | The page shows the summary, map, charts and significant events for the filters, with DuckDB-WASM giving the same answers as the tests' DuckDB on the same snapshot; it works at phone width, labels every control, and reports a missing snapshot; nothing it loads comes from outside its own origin except the DuckDB-WASM engine and map tiles |
+| REQ-DASH-008 | Load and filter times are measured at 115k and 1M rows, three runs each, and kept in `reports/`: the first map within the limits in `tests/performance/test_dashboard_load.py`, each filter change within its limit, and runs within ±15% of their median |
 
 ## End-to-end scenarios
 

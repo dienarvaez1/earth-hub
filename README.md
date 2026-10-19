@@ -75,6 +75,8 @@ make api                 # serve the REST API at http://127.0.0.1:8000/docs
 | `make test-performance` | A full year of synthetic backfill through the pipeline, timed |
 | `make consume` | Run the consumer from your machine |
 | `make reconcile` | Check every Kafka message has a database row, and the tables' invariants |
+| `make dashboard-install` / `make dashboard-dev` / `make dashboard-deploy` | Install the dashboard's Node dependencies and test browser / serve it locally over the real bucket / publish it to Cloudflare Workers |
+| `make test-dashboard` | The dashboard in Chromium against a simulated R2 (no Cloudflare) |
 | `make export-r2 [DRY_RUN=1] [VERIFY=1]` / `make export-r2-runs` | Copy the `earthquakes` table to Cloudflare R2 through the API, uploading only new and changed rows / list past runs |
 | `make check-db-outage` | Stop PostgreSQL mid-stream and check nothing is lost or duplicated (disruptive) |
 | `make coverage` | Unit tests with a coverage report |
@@ -203,6 +205,35 @@ After a run that succeeded, the export rewrites the Parquet snapshot if the rows
 
 The dashboard's reports are SQL files in [`dashboard/queries/`](dashboard/queries): the page runs them in the browser with DuckDB-WASM over the snapshot, and `tests/unit/test_dashboard_queries.py` runs the same files on a fixed dataset with answers worked by hand. All filters live in one `filter` table, set through `set_filter.sql`; the queries take no parameters.
 
+## Dashboard
+
+A public page with an interactive map and charts of every stored earthquake, built only from the R2 export, served by a Cloudflare Worker at `https://earth-hub.<your-subdomain>.workers.dev` on the free plan.
+
+| Part | What it does |
+| --- | --- |
+| `dashboard/src/worker.ts` | Serves `/data/earthquakes.parquet` and `/data/meta.json` from the bucket through an R2 binding, with `ETag`, `304`, byte ranges and a 5-minute browser cache. Nothing else in the bucket is reachable, and the page holds no credentials |
+| `dashboard/index.html`, `dashboard/src/` | The page: DuckDB-WASM runs `dashboard/queries/*.sql` over the snapshot in the browser; MapLibre GL draws the map on OpenFreeMap tiles; Observable Plot draws the charts |
+| `scripts/fetch_duckdb_extensions.py` | Downloads DuckDB's Parquet extension (pinned by SHA-256) so the page serves it itself |
+| `scripts/dashboard_config.py` | Writes `dashboard/wrangler.jsonc` with the bucket from `R2_BUCKET` |
+
+```bash
+make dashboard-install   # once: npm ci and the test browser
+make dashboard-dev       # http://127.0.0.1:8787, over the real bucket (read-only)
+npx wrangler login       # once, before the first deploy
+make dashboard-deploy    # publish; prints the workers.dev address
+```
+
+The page loads two things from elsewhere: the DuckDB-WASM engine from jsDelivr (its 35 MB WebAssembly file is over a Worker's 25 MiB limit for static files) and the map tiles from OpenFreeMap. Everything else, including the snapshot, comes from the Worker.
+
+**Measured** (`reports/dashboard-performance.json`, three cold runs in headless Chromium on a developer machine, data served locally):
+
+| Rows | Snapshot | First map | Filter change |
+| --- | --- | --- | --- |
+| 115,000 | 6.0 MB | about 5 s | about 140 ms |
+| 1,000,000 | 36 MB | about 11 s | about 850 ms |
+
+About 3–4 s of the first map is the browser compiling DuckDB's engine; browsers cache that between visits, which the tests do not measure. At 1M rows, building the map's points is the next thing to make faster.
+
 ## Tests and QA
 
 Run everything with **`make regression`**: lint, unit, integration, API, contract, end-to-end, disruptive and performance tests, in that order, stopping at the first failing layer. It takes about 3 minutes and writes:
@@ -217,6 +248,7 @@ Run everything with **`make regression`**: lint, unit, integration, API, contrac
 | Integration | `tests/integration/` | Real Kafka and PostgreSQL on temporary topics and databases: smoke tests, migrations, redelivery, revisions, ID changes and merges, concurrency, constraints, reconciliation |
 | API | `tests/api/` | Every endpoint over a fixed set of 20 events stored through the real consumer code; statistics and summaries checked against separate SQL |
 | Contract | `tests/api/test_contract.py` | Schemathesis generates requests from the OpenAPI schema (`CONTRACT_EXAMPLES=1000` for a deeper run) |
+| Dashboard | `tests/dashboard/` | The built page and Worker under `wrangler dev` over a simulated R2, in Chromium, offline: the Worker's headers, ranges and 404s; DuckDB-WASM's answers against Python's on every report for nine filters; the form, the charts, empty results, labels, phone width, a missing snapshot. Needs `make dashboard-install` |
 | End-to-end | `tests/e2e/` | Mock USGS feed → real poller → Kafka → real consumer → PostgreSQL → API, checked only through the API. These are the plan's scenarios: new, duplicate, revised, invalid, merged and deleted events, consumer and poller restarts, an empty database, invalid requests, and a reconciled batch of 55 messages |
 | Performance | `tests/performance/` | **A full year of synthetic history** (139,579 events) through backfill, Kafka, the batched consumer and the API, with a 3-minute budget; about 42 s. Runs only with `--run-performance` |
 | Disruptive | `tests/disruptive/` | **Stops and starts the shared containers:** PostgreSQL stopped while events arrive, a Kafka restart, data surviving a restart of both. Runs only with `--run-disruptive` |

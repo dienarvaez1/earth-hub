@@ -37,6 +37,8 @@ Local-first earthquake data platform: USGS GeoJSON feed → Python poller → Ka
 - `make backfill START=2026-01-01 [END=...]`, `make catchup-once`, `make test-performance` (a year of synthetic backfill, timed).
 - `make test-e2e`, `make test-disruptive` (stops shared containers), `make flake-check` (end-to-end suite ×5), `make traceability`.
 - `make reconcile`: topic-versus-database check.
+- `make dashboard-install` / `make dashboard-build` / `make dashboard-dev` / `make test-dashboard`: the dashboard's Node setup, build, local server over the real bucket, browser tests.
+- `make dashboard-deploy`: publish the dashboard to Cloudflare Workers. Only when the user asks; never part of the tests.
 - `make export-r2 [DRY_RUN=1] [VERIFY=1]` / `make export-r2-runs`: on-demand copy of `earthquakes` to R2 through the API / list runs. Never part of the test suite.
 - `make api` / `make api-dev`: serve the API (container / host with reload) at http://127.0.0.1:8000/docs.
 
@@ -68,5 +70,7 @@ Add dependencies with `uv add <pkg>` (or `uv add --dev <pkg>`); never edit `uv.l
 - The mock FDSN service (`tests/support/fdsn.py`) reproduces the real one's boundary semantics; keep it faithful when changing either.
 - The R2 exporter (`export/r2.py`, `export/bucket.py`) reads only `GET /api/v1/export/earthquakes`, never PostgreSQL. `EarthquakeRow` in `api/schemas.py` must list every `earthquakes` column, in order (a test checks it). Tests use moto, never real R2. Shared test pieces are in `tests/support/export.py`, fixtures in `tests/unit/conftest.py`.
 - The analytics snapshot (`export/snapshot.py`) is written only after a run that succeeded. `COLUMNS` there must match `EarthquakeRow` (a test checks it); a new column needs both.
+- The dashboard (`dashboard/`): `src/worker.ts` exposes only the two files in `OBJECTS`; never widen it to other bucket keys. Dashboard tests (`tests/dashboard/`, marker `dashboard`) run `wrangler dev --local` over a simulated R2 and block every request off the machine (`support/dashboard.route_offline`); they fail on any browser console error. `dashboard/wrangler.jsonc` is generated (`scripts/dashboard_config.py`), never committed.
+- DuckDB-WASM is pinned in `dashboard/package.json`; its engine version must match `ENGINE` in `scripts/fetch_duckdb_extensions.py` (the browser tests fail otherwise). Add Node packages with `npm install --save-exact` in `dashboard/`.
 - Dashboard reports are the SQL files in `dashboard/queries/`, run unchanged by the page and by `tests/support/analytics.py`. Bucket times from `event_time_ms` as a plain UTC `TIMESTAMP`, never through time zones. A new report needs a test with hand-worked answers in `tests/unit/test_dashboard_queries.py`.
 - Smoke tests use temporary topics and databases; never write test data to `earthquakes.raw` or the main database.
