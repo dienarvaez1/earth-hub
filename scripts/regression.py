@@ -23,7 +23,7 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[1]
 REPORTS = REPO / "reports"
 
-UNIT = "not integration and not e2e and not disruptive and not performance"
+UNIT = "not integration and not e2e and not disruptive and not performance and not dashboard"
 LAYERS = [
     ("lint", None),
     ("unit", ["-m", UNIT]),
@@ -31,6 +31,7 @@ LAYERS = [
     ("api", ["tests/api", "-m", "integration", "--deselect", "tests/api/test_contract.py"]),
     ("contract", ["tests/api/test_contract.py", "-m", "integration"]),
     ("e2e", ["tests/e2e", "-m", "e2e"]),
+    ("dashboard", ["tests/dashboard", "-m", "dashboard"]),
     ("disruptive", ["tests/disruptive", "--run-disruptive"]),
     ("performance", ["tests/performance", "--run-performance"]),
 ]

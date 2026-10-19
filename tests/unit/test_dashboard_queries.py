@@ -4,54 +4,11 @@ The page runs these same files in the browser (DuckDB-WASM); here DuckDB runs th
 snapshot built by the exporter's own code.
 """
 
-from datetime import UTC, datetime
+from datetime import datetime
 
 import pytest
 from support.analytics import Dashboard
-from support.export import make_row
-
-from earth_hub.export.r2 import encode
-from earth_hub.export.snapshot import SnapshotFile
-
-
-def event(row_id, when, magnitude, country, region, **changes):
-    moment = datetime.fromisoformat(when).replace(tzinfo=UTC)
-    return make_row(
-        row_id,
-        event_time=moment.isoformat().replace("+00:00", "Z"),
-        event_time_ms=int(moment.timestamp() * 1000),
-        magnitude=magnitude,
-        country=country,
-        region=region,
-        place=f"place {row_id}",
-        **changes,
-    )
-
-
-# 29 February and the midnights around it, a Sunday at the end of an ISO week, bin edges,
-# a negative magnitude, missing values, a deletion and another event type.
-EVENTS = [
-    event(1, "2024-02-28T23:59:59.999", 2.49, "United States", "Alaska"),
-    event(2, "2024-02-29T00:00:00", 2.5, "United States", "Alaska"),
-    event(3, "2024-02-29T12:00:00", 4.5, "Mexico", "Baja California"),
-    event(4, "2024-03-01T00:00:00", None, None, None),
-    event(5, "2024-03-04T06:00:00", -0.43, "United States", "California"),
-    event(6, "2024-03-10T23:00:00", 5.2, "Japan", None),  # a Sunday
-    event(7, "2024-03-10T08:00:00", 3.0, "United States", "Alaska", review_status="deleted"),
-    event(8, "2024-04-02T10:00:00", 1.0, "United States", "Alaska", event_type="quarry blast"),
-]
-
-
-def build(tmp_path, rows):
-    snapshot = SnapshotFile()
-    try:
-        for row in rows:
-            snapshot.add(encode(row))
-        path = tmp_path / "earthquakes.parquet"
-        path.write_bytes(snapshot.build())
-    finally:
-        snapshot.close()
-    return path
+from support.dashboard_data import EVENTS, build, event
 
 
 @pytest.fixture
@@ -79,7 +36,8 @@ def at(text):
         # start inclusive, end exclusive, in UTC: 23:59:59.999 and the next midnight are out
         ({"start_time": at("2024-02-29"), "end_time": at("2024-03-01")}, [2, 3]),
         ({"min_magnitude": 2.5}, [2, 3, 6]),  # inclusive; no magnitude: left out
-        ({"max_magnitude": 2.5}, [1, 2, 5, 8]),
+        ({"max_magnitude": 2.5}, [1, 5, 8]),  # exclusive, like the bands: 2.5 is left out
+        ({"min_magnitude": 2.5, "max_magnitude": 4.5}, [2]),  # the 2.5 to 4.5 band
         ({"min_magnitude": -1, "max_magnitude": 10}, [1, 2, 3, 5, 6, 8]),
         ({"country": "Unknown"}, [4]),
         ({"country": "United States"}, [1, 2, 5, 8]),
@@ -119,6 +77,42 @@ def test_events_per_iso_week_and_month(dash):
     dash.set_filter(time_bucket="month")
     months = [(r["period"].date().isoformat(), r["events"]) for r in dash.query("over_time")]
     assert months == [("2024-02-01", 3), ("2024-03-01", 3), ("2024-04-01", 1)]
+
+
+LEVELS = ("below_2_5", "from_2_5", "from_4_5", "from_6", "no_magnitude")
+
+
+@pytest.mark.req("REQ-DASH-014")
+def test_each_period_is_counted_by_magnitude_level(dash):
+    dash.set_filter(time_bucket="month")
+    months = {r["period"].date().isoformat(): r for r in dash.query("over_time")}
+    levels = {month: [r[k] for k in LEVELS] for month, r in months.items()}
+    # February: 2.49, 2.5 and 4.5, each band including its lower edge.
+    assert levels["2024-02-01"] == [1, 1, 1, 0, 0]
+    # March: no magnitude, -0.43, 5.2 (the deleted 3.0 is left out).
+    assert levels["2024-03-01"] == [1, 0, 1, 0, 1]
+    assert levels["2024-04-01"] == [1, 0, 0, 0, 0]  # 1.0
+    for row in months.values():
+        assert sum(row[k] for k in LEVELS) == row["events"]
+
+
+@pytest.mark.req("REQ-DASH-014")
+def test_empty_periods_have_every_level_at_zero(dash):
+    dash.set_filter(time_bucket="day")
+    empty = [r for r in dash.query("over_time") if r["events"] == 0]
+    assert empty and all(r[k] == 0 for r in empty for k in LEVELS)
+
+
+@pytest.mark.req("REQ-DASH-014")
+def test_six_and_above_has_its_own_level(tmp_path):
+    rows = [event(1, "2024-06-24T22:05:04", 7.5, "Venezuela", None)]
+    rows += [event(2, "2024-06-24T22:04:31", 6.0, "Venezuela", None)]
+    rows += [event(3, "2024-06-25T00:00:00", 5.99, "Venezuela", None)]
+    dash = Dashboard(build(tmp_path, rows))
+    dash.set_filter(time_bucket="month")
+    (june,) = dash.query("over_time")
+    assert [june[k] for k in LEVELS] == [0, 0, 1, 2, 0]
+    dash.close()
 
 
 @pytest.mark.req("REQ-DASH-002")
@@ -189,6 +183,37 @@ def test_significant_events_newest_first(dash):
 
 
 @pytest.mark.req("REQ-DASH-005")
+def test_largest_events_strongest_first(dash):
+    dash.set_filter(significant_magnitude=1.0)
+    assert [(r["id"], r["magnitude"]) for r in dash.query("largest")] == [
+        (6, 5.2),
+        (3, 4.5),
+        (2, 2.5),
+        (1, 2.49),
+        (8, 1.0),
+    ]
+    dash.set_filter(significant_magnitude=1.0, top_n=2)
+    assert [r["id"] for r in dash.query("largest")] == [6, 3]
+
+
+@pytest.mark.req("REQ-DASH-005")
+def test_largest_breaks_ties_newest_first(tmp_path):
+    rows = [
+        event(1, "2024-01-01T00:00:00", 7.0, "Panama", None),
+        event(2, "2024-06-24T22:05:04", 7.5, "Venezuela", None),
+        event(3, "2024-06-24T22:04:31", 7.2, "Venezuela", None),
+        event(4, "2024-03-01T00:00:00", 7.0, "Colombia", None),
+        *(event(10 + i, f"2024-10-{i + 1:02d}T00:00:00", 6.0, "Russia", None) for i in range(12)),
+    ]
+    dash = Dashboard(build(tmp_path, rows))
+    dash.set_filter(min_magnitude=6.0, max_magnitude=9.0)
+    # The ten latest are all October's; the largest are June's two and the 7.0s.
+    assert {r["id"] for r in dash.query("significant")} == set(range(12, 22))
+    assert [r["id"] for r in dash.query("largest")][:4] == [2, 3, 4, 1]
+    dash.close()
+
+
+@pytest.mark.req("REQ-DASH-005")
 def test_map_points_carry_what_the_map_shows(dash):
     dash.set_filter()
     point = dash.query("map_points")[0]
@@ -219,6 +244,45 @@ def test_no_events_give_empty_results_and_a_zero_summary(tmp_path, rows):
         assert dash.query(name) == [], name
     (summary,) = dash.query("summary")
     assert (summary["events"], summary["max_magnitude"], summary["first_event"]) == (0, None, None)
+    dash.close()
+
+
+@pytest.mark.req("REQ-DASH-001")
+def test_filter_options_list_every_value(dash):
+    dash.set_filter()
+    assert dash.query("countries") == [
+        {"country": "Japan", "events": 1},
+        {"country": "Mexico", "events": 1},
+        {"country": "United States", "events": 5},  # the deleted event too: options, not counts
+        {"country": "Unknown", "events": 1},
+    ]
+    assert [r["region"] for r in dash.query("regions")] == [
+        "Alaska",
+        "Baja California",
+        "California",
+        "Unknown",
+    ]
+    dash.set_filter(country="United States")
+    assert [r["region"] for r in dash.query("regions")] == ["Alaska", "California"]
+    assert dash.query("event_types") == [
+        {"event_type": "earthquake", "events": 7},
+        {"event_type": "quarry blast", "events": 1},
+    ]
+
+
+@pytest.mark.req("REQ-DASH-015")
+def test_the_date_range_runs_from_the_first_event_to_the_last(dash):
+    dash.set_filter()
+    assert dash.query("date_range") == [
+        {"first_event": at("2024-02-28T23:59:59.999"), "last_event": at("2024-04-02T10:00:00")}
+    ]
+
+
+@pytest.mark.req("REQ-DASH-015")
+def test_an_empty_table_has_no_date_range(tmp_path):
+    dash = Dashboard(build(tmp_path, []))
+    dash.set_filter()
+    assert dash.query("date_range") == [{"first_event": None, "last_event": None}]
     dash.close()
 
 

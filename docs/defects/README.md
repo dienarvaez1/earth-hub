@@ -13,7 +13,7 @@ Six are written up in full, as examples of the [defect report template](#templat
 | Medium | A function misbehaves in specific conditions; a workaround exists |
 | Low | Cosmetic, a standards deviation, or a minor inconvenience |
 
-Priority is how urgently it had to be fixed: **P1** before anything else, **P2** within the milestone, **P3** when convenient. All 30 were fixed within their milestone, or in a follow-up straight after.
+Priority is how urgently it had to be fixed: **P1** before anything else, **P2** within the milestone, **P3** when convenient. All 33 were fixed within their milestone, or in a follow-up straight after.
 
 ## Log
 
@@ -49,6 +49,9 @@ Priority is how urgently it had to be fixed: **P1** before anything else, **P2**
 | DEF-028 | R2 export | Low | The regression run on Sunday 18 October | The year-backfill performance test backfills from 1 January to *now* but expected exactly 42 weekly windows, so it failed as soon as a new week began. The expected count now comes from `weekly_windows`, the function the backfill uses | `06700d5` |
 | DEF-029 | R2 export | Low | A test run after R2 settings were added to `.env` | The missing-settings test built `Settings()`, which reads the developer's `.env`, so it passed only while R2 was not configured. It now passes `_env_file=None` | `06700d5` |
 | DEF-030 | R2 export | Medium | Timing each step of a real `make export-r2` that took 388 s for 2 changed rows | Building the final manifest tested `k in read & stored` for every row, rebuilding the intersection of two 115k-row sets each time (about 190 s). The run also re-uploaded the 5 MB manifest at every checkpoint even when nothing had changed (12 × ~7 s). The intersection is now built once, and the manifest is saved only when uploads changed it | `06700d5` |
+| DEF-031 | 6 | Medium | Worker tests against a simulated R2 | A `Range` starting past the end of the snapshot was answered `206 Partial Content` with the whole 7.5 MB file, because the storage ignores such a range and returns the whole object. The Worker now checks the start against the size and answers `416` with `Content-Range: bytes */<size>` | dashboard-page |
+| DEF-032 | 6 | High | The first run of the page in a browser | With DuckDB-WASM 1.32.0, the newest release not marked dev, every query failed with `function signature mismatch` in current Chromium, so the page never loaded. It now uses 1.33.1-dev65.0 (npm's "next" tag, DuckDB 1.5.6, the same engine as the Python tests), and the browser tests compare its answers with Python's on every report | dashboard-page |
+| DEF-033 | 6 | Medium | The first run of the page in a browser | The map stayed empty with "Worker failed to load": MapLibre 6 runs its tile work in a separate worker file that the page did not point to. The page now sets it with `setWorkerUrl`, and the browser tests fail on any console error | dashboard-page |
 
 ## By how they were found
 
@@ -57,12 +60,12 @@ Priority is how urgently it had to be fixed: **P1** before anything else, **P2**
 | Property-based contract testing (Schemathesis) | 6: DEF-013 to DEF-018 |
 | Code and design review | 4: DEF-003, DEF-005, DEF-009, DEF-010 |
 | Running against the live service | 5: DEF-021, DEF-023, DEF-026, DEF-027, DEF-030 |
-| Ordinary test runs | 7: DEF-002, DEF-011, DEF-012, DEF-022, DEF-024, DEF-028, DEF-029 |
+| Ordinary test runs | 10: DEF-002, DEF-011, DEF-012, DEF-022, DEF-024, DEF-028, DEF-029, DEF-031, DEF-032, DEF-033 |
 | Running tests repeatedly, or all together | 3: DEF-004, DEF-006, DEF-019 |
 | Fault injection (stopping services) | 2: DEF-001, DEF-020 |
 | Checking the test tooling itself | 3: DEF-007, DEF-008, DEF-025 |
 
-Three of the 30 only ever showed up **intermittently** (DEF-004, DEF-017, DEF-019), and five were **defects in test tooling** that made results untrustworthy (DEF-007, DEF-008, DEF-025, DEF-028, DEF-029). Both groups are why the regression suite includes `make flake-check` and why test scripts are themselves checked.
+Three of the 33 only ever showed up **intermittently** (DEF-004, DEF-017, DEF-019), and five were **defects in test tooling** that made results untrustworthy (DEF-007, DEF-008, DEF-025, DEF-028, DEF-029). Both groups are why the regression suite includes `make flake-check` and why test scripts are themselves checked.
 
 ## Template
 

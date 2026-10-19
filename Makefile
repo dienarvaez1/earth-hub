@@ -1,4 +1,4 @@
-.PHONY: help install up down reset ingest ingest-once ingest-logs ingest-stop api api-dev api-stop kafka-ui kafka-ui-stop backfill catchup-once consume reconcile export-r2 export-r2-runs check-db-outage lint format test test-integration test-e2e test-disruptive test-performance test-all regression flake-check traceability smoke smoke-restart migrate coverage
+.PHONY: help install up down reset ingest ingest-once ingest-logs ingest-stop api api-dev api-stop kafka-ui kafka-ui-stop backfill catchup-once consume reconcile export-r2 export-r2-runs dashboard-install dashboard-build dashboard-dev dashboard-deploy test-dashboard check-db-outage lint format test test-integration test-e2e test-disruptive test-performance test-all regression flake-check traceability smoke smoke-restart migrate coverage
 
 help: ## List the available commands
 	@grep -E '^[a-z0-9-]+:.*## ' $(MAKEFILE_LIST) | awk -F ':.*## ' '{printf "  %-17s %s\n", $$1, $$2}'
@@ -61,6 +61,22 @@ export-r2: ## Upload new and changed earthquakes rows to R2 through the API: mak
 export-r2-runs: ## List the latest R2 export runs and their counts
 	uv run python -m earth_hub.export.r2 runs
 
+dashboard-install: ## Install the dashboard's Node dependencies (dashboard/package-lock.json) and the test browser
+	cd dashboard && npm ci
+	uv run playwright install chromium
+
+dashboard-build: ## Build the dashboard page into dashboard/dist
+	uv run python scripts/fetch_duckdb_extensions.py
+	cd dashboard && npm run -s build
+
+dashboard-dev: dashboard-build ## Serve the dashboard at http://127.0.0.1:8787, reading the real R2 bucket
+	uv run python scripts/dashboard_config.py
+	cd dashboard && npx --no-install wrangler dev --ip 127.0.0.1 --port 8787
+
+dashboard-deploy: dashboard-build ## Publish the dashboard to Cloudflare Workers (*.workers.dev). Never part of the tests
+	uv run python scripts/dashboard_config.py
+	cd dashboard && npx --no-install wrangler deploy
+
 reconcile: ## Check every Kafka message has a database row, and the tables' invariants
 	uv run python -m earth_hub.reconcile
 
@@ -76,7 +92,10 @@ format: ## Fix style and formatting
 	uv run ruff format .
 
 test: ## Run unit tests (no Docker or network needed)
-	uv run pytest -m "not integration and not e2e and not disruptive and not performance"
+	uv run pytest -m "not integration and not e2e and not disruptive and not performance and not dashboard"
+
+test-dashboard: ## Run the dashboard in a browser against a simulated R2 (needs make dashboard-install)
+	uv run pytest tests/dashboard -m dashboard
 
 test-integration: ## Run integration tests (needs `make up`)
 	uv run pytest -m integration
