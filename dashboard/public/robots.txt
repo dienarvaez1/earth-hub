@@ -1,0 +1,3 @@
+# A preview until the project's release: not for search engines.
+User-agent: *
+Disallow: /

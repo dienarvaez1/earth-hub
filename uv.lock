@@ -301,6 +301,7 @@ dev = [
     { name = "pytest-cov" },
     { name = "pytest-playwright" },
     { name = "pytz" },
+    { name = "pyyaml" },
     { name = "ruff" },
     { name = "schemathesis" },
 ]
@@ -327,6 +328,7 @@ dev = [
     { name = "pytest-cov", specifier = ">=7.1.0" },
     { name = "pytest-playwright", specifier = ">=0.10.0" },
     { name = "pytz", specifier = ">=2026.5" },
+    { name = "pyyaml", specifier = ">=6.0.3" },
     { name = "ruff", specifier = ">=0.17.1" },
     { name = "schemathesis", specifier = ">=4.31.1" },
 ]

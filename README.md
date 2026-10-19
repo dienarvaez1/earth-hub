@@ -223,6 +223,8 @@ npx wrangler login       # once, before the first deploy
 make dashboard-deploy    # publish; prints the workers.dev address
 ```
 
+The page is marked **Preview — in development** and asks search engines not to index it (`X-Robots-Tag: noindex` on every response, a `robots` meta tag, a disallow-all `robots.txt`) until the project's release. Its footer links to `third-party-licenses.txt`, the licenses of the software it ships, which the build writes from the bundled packages (a package without a license text fails the build; see `dashboard/licenses/`).
+
 The page loads two things from elsewhere: the DuckDB-WASM engine from jsDelivr (its 35 MB WebAssembly file is over a Worker's 25 MiB limit for static files) and the map tiles from OpenFreeMap. Everything else, including the snapshot, comes from the Worker.
 
 **Measured** (`reports/dashboard-performance.json`, medians of five cold runs in headless Chromium on a developer machine, data served locally):
@@ -271,9 +273,11 @@ Other test commands:
 
 **QA documents** in `docs/`:
 - [test strategy](docs/test-strategy.md) and [test plan](docs/test-plan.md)
-- [requirements](docs/requirements.md) (74, each with an ID) and the generated [traceability matrix](docs/traceability-matrix.md)
-- the [defect log](docs/defects/README.md): 20 defects found and fixed, 6 with full reports
+- [requirements](docs/requirements.md) (131, each with an ID) and the generated [traceability matrix](docs/traceability-matrix.md)
+- the [defect log](docs/defects/README.md): 35 defects found and fixed, 6 with full reports
 - the [data-quality rules](docs/data-quality-rules.md)
+
+**CI:** GitHub Actions runs lint and unit tests, then this regression without the performance layer (shared runners cannot repeat its timings), on every pull request and push to `main`, and keeps the reports as artifacts. No secrets are needed. See [docs/ci.md](docs/ci.md).
 
 Tests declare what they verify with `@pytest.mark.req("REQ-...")`. `make traceability` fails if a requirement has no passing test, and a marker naming an unknown requirement fails at collection.
 

@@ -1,6 +1,6 @@
 # Defect log
 
-Every defect found while building Earth-Hub, from Milestone 1 to the backfill and catch-up milestone. None reached a merged release: each was found during development, fixed in the milestone where it was found, and covered by a regression test where a test could catch it.
+Every defect found while building Earth-Hub, from Milestone 1 to Milestone 7. Each was fixed in the milestone where it was found and covered by a regression test where a test could catch it. All but two were found before their code was merged: DEF-034 was found in the live logs after its pull request was merged, and DEF-035 in the public dashboard.
 
 Six are written up in full, as examples of the [defect report template](#template), because they show the most instructive failure modes.
 
@@ -13,7 +13,7 @@ Six are written up in full, as examples of the [defect report template](#templat
 | Medium | A function misbehaves in specific conditions; a workaround exists |
 | Low | Cosmetic, a standards deviation, or a minor inconvenience |
 
-Priority is how urgently it had to be fixed: **P1** before anything else, **P2** within the milestone, **P3** when convenient. All 34 were fixed within their milestone, or in a follow-up straight after.
+Priority is how urgently it had to be fixed: **P1** before anything else, **P2** within the milestone, **P3** when convenient. All 35 were fixed within their milestone, or in a follow-up straight after.
 
 ## Log
 
@@ -53,20 +53,21 @@ Priority is how urgently it had to be fixed: **P1** before anything else, **P2**
 | DEF-032 | 6 | High | The first run of the page in a browser | With DuckDB-WASM 1.32.0, the newest release not marked dev, every query failed with `function signature mismatch` in current Chromium, so the page never loaded. It now uses 1.33.1-dev65.0 (npm's "next" tag, DuckDB 1.5.6, the same engine as the Python tests), and the browser tests compare its answers with Python's on every report | `f004426` |
 | DEF-033 | 6 | Medium | The first run of the page in a browser | The map stayed empty with "Worker failed to load": MapLibre 6 runs its tile work in a separate worker file that the page did not point to. The page now sets it with `setWorkerUrl`, and the browser tests fail on any console error | `f004426` |
 | DEF-034 | 6 | Low | Reading the live logs after `make ingest` | Lines from the modules run with `python -m` had no `stage`: there `__name__` is `__main__`, so catch-up and backfill logged as `__main__`, and the poller's entry point named its logger `earth_hub.ingestion` by hand, which the stage defaults did not match (`state rebuilt from topic`). Modules that run as scripts now name their logger `__spec__.name`, and a test checks every module's logger name and that each pipeline module that logs has a default stage | #15 |
+| DEF-035 | 7 | Medium | License review while choosing the project's license | The public page bundles MapLibre (BSD-3-Clause), Observable Plot and d3 (ISC), Apache Arrow (Apache-2.0) and others, whose licenses require their notices in copies, but the build stripped them all, and DuckDB-WASM's package ships no license text. The build now writes `third-party-licenses.txt` from the bundled packages, plus DuckDB's for the Parquet extension the page serves, linked from the footer; a package without a text fails the build | #16 |
 
 ## By how they were found
 
 | Technique | Defects |
 | --- | --- |
 | Property-based contract testing (Schemathesis) | 6: DEF-013 to DEF-018 |
-| Code and design review | 4: DEF-003, DEF-005, DEF-009, DEF-010 |
+| Code and design review | 5: DEF-003, DEF-005, DEF-009, DEF-010, DEF-035 |
 | Running against the live service | 6: DEF-021, DEF-023, DEF-026, DEF-027, DEF-030, DEF-034 |
 | Ordinary test runs | 10: DEF-002, DEF-011, DEF-012, DEF-022, DEF-024, DEF-028, DEF-029, DEF-031, DEF-032, DEF-033 |
 | Running tests repeatedly, or all together | 3: DEF-004, DEF-006, DEF-019 |
 | Fault injection (stopping services) | 2: DEF-001, DEF-020 |
 | Checking the test tooling itself | 3: DEF-007, DEF-008, DEF-025 |
 
-Three of the 34 only ever showed up **intermittently** (DEF-004, DEF-017, DEF-019), and five were **defects in test tooling** that made results untrustworthy (DEF-007, DEF-008, DEF-025, DEF-028, DEF-029). Both groups are why the regression suite includes `make flake-check` and why test scripts are themselves checked.
+Three of the 35 only ever showed up **intermittently** (DEF-004, DEF-017, DEF-019), and five were **defects in test tooling** that made results untrustworthy (DEF-007, DEF-008, DEF-025, DEF-028, DEF-029). Both groups are why the regression suite includes `make flake-check` and why test scripts are themselves checked.
 
 ## Template
 

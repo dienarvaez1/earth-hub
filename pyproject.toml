@@ -49,6 +49,7 @@ dev = [
     "pytest-cov>=7.1.0",
     "pytest-playwright>=0.10.0",
     "pytz>=2026.5",
+    "pyyaml>=6.0.3",
     "ruff>=0.17.1",
     "schemathesis>=4.31.1",
 ]

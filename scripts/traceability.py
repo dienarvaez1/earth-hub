@@ -4,8 +4,12 @@
 
 The traces are reports/trace-<layer>.json, written by `pytest --trace-out` during
 `make regression`. Exits 1 if any requirement has no passing test, or no traces exist.
+
+`--not-run DIR` (from `regression.py --skip`): a requirement whose only tests are in DIR,
+a layer left out on purpose, is listed as not run instead of failing the check.
 """
 
+import argparse
 import json
 import re
 import subprocess
@@ -53,6 +57,15 @@ def collapse(tests: dict[str, str]) -> list[tuple[str, int, str]]:
     )
 
 
+def marked_in(directories: list[str]) -> set[str]:
+    """Requirement IDs named by the tests in these directories."""
+    found: set[str] = set()
+    for directory in directories:
+        for path in (REPO / directory).rglob("*.py"):
+            found |= set(re.findall(r"REQ-[A-Z0-9]+-\d+", path.read_text()))
+    return found
+
+
 def status(tests: dict[str, str]) -> str:
     outcomes = set(tests.values())
     if "failed" in outcomes:
@@ -62,7 +75,10 @@ def status(tests: dict[str, str]) -> str:
     return "**NOT COVERED**"
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description="Build docs/traceability-matrix.md.")
+    parser.add_argument("--not-run", action="append", default=[], metavar="DIR")
+    not_run_dirs = parser.parse_args(argv).not_run
     requirements = load_requirements()
     traces = load_traces()
     if not traces:
@@ -76,7 +92,11 @@ def main() -> int:
     if git("status", "--porcelain"):
         commit += " plus uncommitted changes"
     statuses = {req: status(traces.get(req, {})) for _, req, _ in requirements}
+    for req in marked_in(not_run_dirs):
+        if statuses.get(req) == "**NOT COVERED**":
+            statuses[req] = "not run (layer skipped)"
     covered = sum(s == "covered" for s in statuses.values())
+    not_run = sum(s.startswith("not run") for s in statuses.values())
     test_count = len({n for tests in traces.values() for n in tests})
 
     lines = [
@@ -88,7 +108,13 @@ def main() -> int:
         "",
         f"**{covered} of {len(requirements)} requirements covered by at least one passing "
         f"test**, using {test_count} marked test cases. Parametrized tests are listed once, "
-        "with the number of cases.",
+        "with the number of cases."
+        + (
+            f" {not_run} more are covered only by layers this run left out "
+            f"({', '.join(f'`{d}`' for d in not_run_dirs)})."
+            if not_run
+            else ""
+        ),
     ]
     section = None
     for sec, req, text in requirements:
@@ -114,10 +140,11 @@ def main() -> int:
         lines.append(f"| **{req}** {text} | {statuses[req]} | {cells} |")
 
     MATRIX.write_text("\n".join(lines) + "\n")
-    gaps = [req for req, s in statuses.items() if s != "covered"]
+    gaps = [req for req, s in statuses.items() if s != "covered" and not s.startswith("not run")]
     print(
-        f"traceability: {covered}/{len(requirements)} requirements covered "
-        f"-> {MATRIX.relative_to(REPO)}"
+        f"traceability: {covered}/{len(requirements)} requirements covered"
+        + (f", {not_run} not run (layers skipped)" if not_run else "")
+        + f" -> {MATRIX.relative_to(REPO)}"
     )
     if gaps:
         print("not covered or failing: " + ", ".join(gaps), file=sys.stderr)
