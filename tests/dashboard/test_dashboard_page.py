@@ -17,6 +17,7 @@ REPORTS = [
     "significant",
     "largest",
     "map_points",
+    "date_range",
     "countries",
     "regions",
     "event_types",
@@ -44,7 +45,8 @@ def as_page(value):
         {"country": "United States", "region": "Alaska"},
         {"country": "Unknown"},
         {"event_type": "quarry blast", "significant_magnitude": 0.5},
-        {"min_magnitude": 9.0},
+        {"min_magnitude": 6.0},
+        {"max_magnitude": 2.5},
     ],
     ids=lambda f: ",".join(f) or "defaults",
 )
@@ -111,9 +113,9 @@ def test_the_form_filters_the_page(dash):
     page.wait_for_function("window.__earthHub.summary.events === 0")
     dash.after_update(lambda: page.select_option("select[name=period]", "last_3_years"))
 
-    dash.after_update(lambda: page.fill("input[name=min_magnitude]", "2.5"))
+    dash.after_update(lambda: page.select_option("select[name=min_magnitude]", "2.5"))
     assert events() == 3
-    dash.after_update(lambda: page.fill("input[name=min_magnitude]", ""))
+    dash.after_update(lambda: page.select_option("select[name=min_magnitude]", ""))
     dash.after_update(lambda: page.check("input[name=include_deleted]"))
     assert events() == 7
     dash.after_update(lambda: page.uncheck("input[name=include_deleted]"))
@@ -126,7 +128,7 @@ def test_the_form_filters_the_page(dash):
 
 def test_no_matching_events_says_so(dash):
     page = dash.page
-    dash.after_update(lambda: page.fill("input[name=min_magnitude]", "9"))
+    dash.after_update(lambda: page.select_option("select[name=min_magnitude]", "6"))
     assert dash.status()["summary"]["events"] == 0
     assert dash.status()["mapFeatures"] == 0
     for figure in ("time", "magnitude", "countries"):
@@ -386,3 +388,76 @@ def test_time_bars_are_split_by_magnitude_level(dash, expected, bucket):
 @pytest.mark.req("REQ-DASH-014")
 def test_the_levels_use_the_map_legend_colors():
     assert [c for _, _, c in LEVELS[:4]] == [c for _, c in STOPS]
+
+
+@pytest.mark.req("REQ-DASH-015")
+def test_custom_days_run_from_the_first_day_with_data_to_today(browser_page, server):
+    # 2 April 2024, the dataset's last day; Last 3 years starts in 2021.
+    browser_page.open(server.url, now="2024-04-02T12:00:00+00:00", period="last_3_years")
+    page = browser_page.page
+    browser_page.after_update(lambda: page.select_option("select[name=period]", "custom"))
+    for name in ("start", "end"):
+        assert page.get_attribute(f"input[name={name}]", "min") == "2024-02-28"
+        assert page.get_attribute(f"input[name={name}]", "max") == "2024-04-02"
+    # Custom starts from the last preset's days, moved up to the first day with data.
+    assert page.input_value("input[name=start]") == "2024-02-28"
+    # A day typed outside the limits moves to the nearest allowed one.
+    browser_page.after_update(lambda: page.fill("input[name=start]", "2019-06-01"))
+    assert page.input_value("input[name=start]") == "2024-02-28"
+    browser_page.after_update(lambda: page.fill("input[name=end]", "2030-01-01"))
+    assert page.input_value("input[name=end]") == "2024-04-02"
+    assert browser_page.status()["summary"]["events"] == 6
+
+
+def magnitude_options(page, name):
+    return page.eval_on_selector_all(
+        f"select[name={name}] option", "os => os.map(o => [o.value, o.textContent, o.disabled])"
+    )
+
+
+@pytest.mark.req("REQ-DASH-015")
+def test_magnitude_lists_are_the_legend_boundaries(dash):
+    page = dash.page
+    # The open ends are named after the end bands, at their ends of the lists.
+    assert magnitude_options(page, "min_magnitude") == [
+        ["", "Below 2.5", False],
+        ["2.5", "2.5", False],
+        ["4.5", "4.5", False],
+        ["6", "6", False],
+    ]
+    assert magnitude_options(page, "max_magnitude") == [
+        ["2.5", "2.5", False],
+        ["4.5", "4.5", False],
+        ["6", "6", False],
+        ["", "6 and above", False],
+    ]
+    assert page.input_value("select[name=min_magnitude]") == ""  # no limits by default
+    assert page.input_value("select[name=max_magnitude]") == ""
+    assert [b for _, _, b in LEVELS[:4]] == [c for _, c in STOPS]  # the legend's colors
+
+    def events():
+        return dash.status()["summary"]["events"]
+
+    # 2.5 to 4.5, the orange band: only 2.5 itself (4.5 belongs to the next band).
+    dash.after_update(lambda: page.select_option("select[name=min_magnitude]", "2.5"))
+    dash.after_update(lambda: page.select_option("select[name=max_magnitude]", "4.5"))
+    assert events() == 1
+    dash.after_update(lambda: page.select_option("select[name=max_magnitude]", "6"))
+    assert events() == 3  # 2.5, 4.5, 5.2
+    dash.after_update(lambda: page.select_option("select[name=max_magnitude]", ""))
+    dash.after_update(lambda: page.select_option("select[name=min_magnitude]", ""))
+    dash.after_update(lambda: page.select_option("select[name=max_magnitude]", "2.5"))
+    assert events() == 2  # 2.49 and -0.43 (no magnitude is left out)
+
+
+@pytest.mark.req("REQ-DASH-015")
+def test_choices_that_select_nothing_are_greyed_out(dash):
+    page = dash.page
+    dash.after_update(lambda: page.select_option("select[name=min_magnitude]", "4.5"))
+    assert [v for v, _, off in magnitude_options(page, "max_magnitude") if off] == ["2.5", "4.5"]
+    dash.after_update(lambda: page.select_option("select[name=max_magnitude]", "6"))
+    assert [v for v, _, off in magnitude_options(page, "min_magnitude") if off] == ["6"]
+    page.click("button[type=reset]")
+    page.wait_for_function("window.__earthHub.summary.events === 0")
+    for name in ("min_magnitude", "max_magnitude"):
+        assert not any(off for _, _, off in magnitude_options(page, name))

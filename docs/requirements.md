@@ -130,7 +130,7 @@ The dashboard's SQL lives in `dashboard/queries/`; the page runs it in the brows
 
 | ID | Requirement |
 | --- | --- |
-| REQ-DASH-001 | Filters select events by time (start inclusive, end exclusive, UTC), magnitude (bounds inclusive; a bound leaves out events without a magnitude), country and region (missing ones shown and selected as `Unknown`) and event type; deleted events are left out unless included; invalid filter values are rejected |
+| REQ-DASH-001 | Filters select events by time (start inclusive, end exclusive, UTC), magnitude (minimum inclusive, maximum exclusive, like the legend's bands; a bound leaves out events without a magnitude), country and region (missing ones shown and selected as `Unknown`) and event type; deleted events are left out unless included; invalid filter values are rejected |
 | REQ-DASH-002 | Events are counted per day, ISO week (from Monday) or month in UTC, with the highest magnitude per period, from the first period with an event to the last, empty periods listed with 0 |
 | REQ-DASH-003 | Magnitudes are counted in bins of 0.5 holding `bin_start <= magnitude < bin_end`, empty bins between the lowest and highest listed with 0, events without a magnitude left out |
 | REQ-DASH-004 | The top countries and regions are ranked by number of events, ties in alphabetical order, limited to the requested number |
@@ -144,6 +144,7 @@ The dashboard's SQL lives in `dashboard/queries/`; the page runs it in the brows
 | REQ-DASH-012 | A legend beside the map's note shows how dot color follows magnitude: one bar blending the map's own color stops, labelled ≤0, 2.5, 4.5 and 6+, readable by screen readers; it wraps under the note on narrow screens |
 | REQ-DASH-013 | Each bar of the magnitude chart takes the map's color for the middle of its bin, from the same color stops as the map and its legend |
 | REQ-DASH-014 | Each bar of the events-over-time chart is split by magnitude level, the bands of the map's legend: below 2.5, 2.5 to 4.5, 4.5 to 6, 6 and above (each including its lower edge), plus no magnitude; the levels add up to the period's events and use the legend's colors, with grey for no magnitude |
+| REQ-DASH-015 | The custom calendar allows only days from the first day with data to today (others greyed out; a typed day outside is moved to the nearest allowed one), and the magnitude filter is two lists of the legend's boundaries: Min (Below 2.5, 2.5, 4.5, 6) and Max, meaning below (2.5, 4.5, 6, 6 and above), the open ends named after the end bands and chosen by default; choices that would select nothing are greyed out |
 
 ## End-to-end scenarios
 

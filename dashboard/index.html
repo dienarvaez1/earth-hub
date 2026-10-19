@@ -39,8 +39,24 @@
         </fieldset>
         <fieldset>
           <legend>Magnitude</legend>
-          <label>Min <input type="number" name="min_magnitude" step="0.1" inputmode="decimal" /></label>
-          <label>Max <input type="number" name="max_magnitude" step="0.1" inputmode="decimal" /></label>
+          <!-- The bands of the events-over-time legend: Min is inclusive, Max exclusive. The
+               open ends (no limit) are named after the end bands, at their ends of the lists. -->
+          <label>Min
+            <select name="min_magnitude">
+              <option value="" selected>Below 2.5</option>
+              <option value="2.5">2.5</option>
+              <option value="4.5">4.5</option>
+              <option value="6">6</option>
+            </select>
+          </label>
+          <label>Max (below)
+            <select name="max_magnitude">
+              <option value="2.5">2.5</option>
+              <option value="4.5">4.5</option>
+              <option value="6">6</option>
+              <option value="" selected>6 and above</option>
+            </select>
+          </label>
         </fieldset>
         <fieldset>
           <legend>Place</legend>

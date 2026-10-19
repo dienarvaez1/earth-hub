@@ -36,7 +36,8 @@ def at(text):
         # start inclusive, end exclusive, in UTC: 23:59:59.999 and the next midnight are out
         ({"start_time": at("2024-02-29"), "end_time": at("2024-03-01")}, [2, 3]),
         ({"min_magnitude": 2.5}, [2, 3, 6]),  # inclusive; no magnitude: left out
-        ({"max_magnitude": 2.5}, [1, 2, 5, 8]),
+        ({"max_magnitude": 2.5}, [1, 5, 8]),  # exclusive, like the bands: 2.5 is left out
+        ({"min_magnitude": 2.5, "max_magnitude": 4.5}, [2]),  # the 2.5 to 4.5 band
         ({"min_magnitude": -1, "max_magnitude": 10}, [1, 2, 3, 5, 6, 8]),
         ({"country": "Unknown"}, [4]),
         ({"country": "United States"}, [1, 2, 5, 8]),
@@ -267,6 +268,22 @@ def test_filter_options_list_every_value(dash):
         {"event_type": "earthquake", "events": 7},
         {"event_type": "quarry blast", "events": 1},
     ]
+
+
+@pytest.mark.req("REQ-DASH-015")
+def test_the_date_range_runs_from_the_first_event_to_the_last(dash):
+    dash.set_filter()
+    assert dash.query("date_range") == [
+        {"first_event": at("2024-02-28T23:59:59.999"), "last_event": at("2024-04-02T10:00:00")}
+    ]
+
+
+@pytest.mark.req("REQ-DASH-015")
+def test_an_empty_table_has_no_date_range(tmp_path):
+    dash = Dashboard(build(tmp_path, []))
+    dash.set_filter()
+    assert dash.query("date_range") == [{"first_event": None, "last_event": None}]
+    dash.close()
 
 
 @pytest.mark.req("REQ-DASH-001")

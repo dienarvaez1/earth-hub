@@ -46,6 +46,7 @@ const REPORTS = [
   "significant",
   "largest",
   "map_points",
+  "date_range",
   "countries",
   "regions",
   "event_types",
@@ -109,6 +110,10 @@ async function start(): Promise<void> {
     }
     if (target.name === "start" || target.name === "end") {
       select("period").value = "custom"; // picking a day is a custom period
+      clampDay(target);
+    }
+    if (target.name === "min_magnitude" || target.name === "max_magnitude") {
+      greyMagnitudes();
     }
     if (target.name === "period") {
       periodChanged();
@@ -119,6 +124,7 @@ async function start(): Promise<void> {
   form.addEventListener("reset", () =>
     window.setTimeout(() => {
       periodChanged();
+      greyMagnitudes();
       update();
     }, 0),
   );
@@ -138,6 +144,13 @@ async function start(): Promise<void> {
 
 async function fillOptions(db: Db): Promise<void> {
   await db.setFilter(DEFAULT_FILTER);
+  // Custom days run from the first day with data to today; the calendar greys out the rest.
+  const [range] = await db.query("date_range");
+  for (const name of ["start", "end"]) {
+    const input = form.elements.namedItem(name) as HTMLInputElement;
+    if (range.first_event !== null) input.min = day(new Date(range.first_event as number));
+    input.max = day(new Date());
+  }
   fill("country", await db.query("countries"), (r) => String(r.country));
   fill("event_type", await db.query("event_types"), (r) => String(r.event_type), DEFAULT_EVENT_TYPE);
   fill("region", await db.query("regions"), (r) => String(r.region));
@@ -176,11 +189,32 @@ function periodChanged(): void {
   if (custom && !start.value && !end.value) {
     start.value = firstDay(lastPreset, new Date()) ?? "";
     end.value = day(new Date());
+    clampDay(start);
+    clampDay(end);
   }
   if (!custom) {
     lastPreset = period;
     start.value = end.value = "";
     (document.querySelector('select[name="time_bucket"]') as HTMLSelectElement).value = BUCKET[period];
+  }
+}
+
+/** Keeps a typed day within the calendar's limits (picked days already are). */
+function clampDay(input: HTMLInputElement): void {
+  if (!input.value) return;
+  if (input.min && input.value < input.min) input.value = input.min;
+  if (input.max && input.value > input.max) input.value = input.max;
+}
+
+/** Greys out the magnitude choices that would select nothing: Max at or below Min. */
+function greyMagnitudes(): void {
+  const min = select("min_magnitude");
+  const max = select("max_magnitude");
+  for (const option of max.options) {
+    option.disabled = option.value !== "" && min.value !== "" && Number(option.value) <= Number(min.value);
+  }
+  for (const option of min.options) {
+    option.disabled = option.value !== "" && max.value !== "" && Number(option.value) >= Number(max.value);
   }
 }
 

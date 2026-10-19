@@ -9,7 +9,7 @@ CREATE OR REPLACE TABLE filter (
     start_time TIMESTAMP,             -- inclusive; NULL: no lower bound
     end_time TIMESTAMP,               -- exclusive; NULL: no upper bound
     min_magnitude DOUBLE,             -- inclusive; a bound leaves out events without one
-    max_magnitude DOUBLE,             -- inclusive
+    max_magnitude DOUBLE,             -- exclusive, like the legend's bands
     country VARCHAR,                  -- as shown, so 'Unknown' selects events without one
     region VARCHAR,
     event_type VARCHAR,
@@ -34,7 +34,7 @@ FROM events AS e, filter AS f
 WHERE (f.start_time IS NULL OR e.event_ts >= f.start_time)
   AND (f.end_time IS NULL OR e.event_ts < f.end_time)
   AND (f.min_magnitude IS NULL OR e.magnitude >= f.min_magnitude)
-  AND (f.max_magnitude IS NULL OR e.magnitude <= f.max_magnitude)
+  AND (f.max_magnitude IS NULL OR e.magnitude < f.max_magnitude)
   AND (f.country IS NULL OR e.country_name = f.country)
   AND (f.region IS NULL OR e.region_name = f.region)
   AND (f.event_type IS NULL OR e.event_type = f.event_type)
