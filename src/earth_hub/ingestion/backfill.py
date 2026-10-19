@@ -32,7 +32,7 @@ from earth_hub.ingestion.fdsn import MAX_RESULTS, FdsnClient, FdsnTooSlow, FdsnU
 from earth_hub.ingestion.producer import EventPublisher
 from earth_hub.ingestion.windows import Window, floor_to_second, weekly_windows
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger(__spec__.name)  # the module name, also under `python -m`
 
 
 WINDOW_ATTEMPTS = 3

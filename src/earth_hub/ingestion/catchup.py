@@ -26,7 +26,7 @@ from earth_hub.ingestion.producer import EventPublisher
 from earth_hub.ingestion.usgs_client import FeedUnavailable, UsgsClient
 from earth_hub.ingestion.windows import Window, floor_to_second
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger(__spec__.name)  # the module name, also under `python -m`
 
 DELETED_LOOKBACK = timedelta(days=366)
 FIRST_DELETED_CHECK = timedelta(days=30)
