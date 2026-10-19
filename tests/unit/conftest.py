@@ -1,4 +1,9 @@
+import boto3
 import pytest
+from moto import mock_aws
+from support.export import BUCKET, NOW, FakeApi, FlakyBucket, make_row
+
+from earth_hub.export.r2 import Exporter
 
 
 class FakeProducer:
@@ -41,3 +46,43 @@ def fake_producer_cls() -> type[FakeProducer]:
 @pytest.fixture
 def fake_producer() -> FakeProducer:
     return FakeProducer()
+
+
+# The R2 exporter: a fake export API and an in-memory S3 (moto).
+
+
+@pytest.fixture
+def s3():
+    with mock_aws():
+        client = boto3.client("s3", region_name="us-east-1")
+        client.create_bucket(Bucket=BUCKET)
+        yield client
+
+
+@pytest.fixture
+def bucket(s3):
+    return FlakyBucket(s3, BUCKET, failing=set())
+
+
+@pytest.fixture
+def api():
+    return FakeApi([make_row(i) for i in range(1, 8)])
+
+
+@pytest.fixture
+def export(api, bucket, tmp_path):
+    def run(*, clock=lambda: NOW, page_size=3, checkpoint_pages=1, **kwargs):
+        exporter = Exporter(
+            api.client(),
+            bucket,
+            api_url="http://api.test/api/v1",
+            workers=4,
+            page_size=page_size,
+            checkpoint_pages=checkpoint_pages,
+            clock=clock,
+            git_commit="abc1234",
+            local_dir=tmp_path / "exports",
+        )
+        return exporter.run(**kwargs)
+
+    return run

@@ -121,6 +121,20 @@ One requirement per rule in [data-quality-rules.md](data-quality-rules.md).
 | REQ-EXP-006 | Only one export runs at a time; the lock is taken atomically, and a lock left by a crashed run expires |
 | REQ-EXP-007 | A dry run reports what would change without writing to the bucket; missing R2 settings stop the command with a clear message |
 | REQ-EXP-008 | By default a run decides uploads and deletions from the manifest without listing the bucket; `make export-r2 VERIFY=1`, and any run without a readable manifest, lists the bucket once after the uploads, deletes objects the manifest does not know and re-uploads rows whose object is missing |
+| REQ-EXP-009 | After a run that succeeded, the export writes `analytics/earthquakes.parquet`: every row it read and every column, with the same values and types (timestamps with time zone, lists as lists), in `id` order; it is rewritten only when the rows changed or the snapshot is missing; dry runs and failed runs never write it |
+| REQ-EXP-010 | `analytics/meta.json` describes the snapshot (run, time, row count, size, SHA-256 of the file, the rows' fingerprint, column types) and is written only after the file; a missing or unreadable `meta.json` makes the next run rewrite both |
+
+## Dashboard
+
+The dashboard's SQL lives in `dashboard/queries/`; the page runs it in the browser over the R2 snapshot, and the tests run the same files.
+
+| ID | Requirement |
+| --- | --- |
+| REQ-DASH-001 | Filters select events by time (start inclusive, end exclusive, UTC), magnitude (bounds inclusive; a bound leaves out events without a magnitude), country and region (missing ones shown and selected as `Unknown`) and event type; deleted events are left out unless included; invalid filter values are rejected |
+| REQ-DASH-002 | Events are counted per day, ISO week (from Monday) or month in UTC, with the highest magnitude per period, from the first period with an event to the last, empty periods listed with 0 |
+| REQ-DASH-003 | Magnitudes are counted in bins of 0.5 holding `bin_start <= magnitude < bin_end`, empty bins between the lowest and highest listed with 0, events without a magnitude left out |
+| REQ-DASH-004 | The top countries and regions are ranked by number of events, ties in alphabetical order, limited to the requested number |
+| REQ-DASH-005 | The summary (counts, highest magnitude and its place, first and last event, countries, deletions), the latest significant events and the map points are computed from the filtered events; no events give empty results and a zero summary |
 
 ## End-to-end scenarios
 

@@ -425,25 +425,25 @@ Loads history from the USGS FDSN event service, and recovers what the live polle
 | A full year of synthetic history (139,579 events) through the whole pipeline | About 42 s (budget: 3 min) |
 | A live event during a 20,000-event backfill | Reached the API in 0.7 s |
 
-### Milestone 6 — Analytics, observability, and performance
+### Milestone 6 — Analytics dashboard from R2, observability, and performance
+
+Revised on 2026-10-19: reports are built from the R2 bucket, not PostgreSQL, and shown on a public dashboard hosted on Cloudflare Workers (free tier). API load testing was dropped; observability was kept small.
 
 **Implementation**
 
-- Add SQL reports for hourly counts, magnitude distribution, geographic summaries, and recent activity.
-- Record ingestion counts, validation failures, consumer lag, and persistence errors.
-- Add structured logs linked by event ID and processing stage.
-- Load-test common API endpoints using Locust or k6.
-- Test query behavior at increasing synthetic data volumes.
-- Tune indexes based on observed query plans and measurements.
+- After each export run that succeeded, write the whole table as one Parquet file (`analytics/earthquakes.parquet`) with `analytics/meta.json`, from the rows the run uploaded.
+- Write the reports as SQL files (`dashboard/queries/`): events over time, magnitude bins, top countries and regions, significant events, summary numbers, map points, all over one set of filters.
+- Serve a static dashboard from a Cloudflare Worker at `*.workers.dev`, public. The Worker reads the snapshot from R2 through a binding (no credentials in the page, bucket stays private) with caching and HTTP Range support. The browser runs the SQL with DuckDB-WASM and shows an interactive map (MapLibre GL) and charts.
+- Observability, small: event ID and processing stage on every pipeline log line; periodic count summaries from the poller and consumer; one controlled failure diagnosed from the logs.
 
 **QA work**
 
-- Verify analytics against deterministic datasets.
-- Measure response latency, throughput, and error rates.
-- Test pagination and filters against larger datasets.
-- Introduce a controlled failure and demonstrate diagnosis using logs and metrics.
+- Verify every report against fixed datasets with answers worked by hand, running the same SQL files the page runs.
+- Check the snapshot equals the table, every row, column and type.
+- Test the Worker locally (`wrangler dev`) and the page in a browser (Playwright through pytest): filters, totals, map points, no console errors, phone width.
+- Measure snapshot size, time to first map and time per filter change at 115k and 1M rows, three runs each.
 
-**Exit gate:** Analytics are correct, performance results are repeatable, and bottlenecks can be investigated with evidence.
+**Exit gate:** The dashboard is live and shows the latest export; its totals match the database; reports pass on fixed datasets; performance results are repeatable within ±15%; the month's Cloudflare bill is $0.
 
 ### Milestone 7 — CI/CD, documentation, and portfolio release
 
