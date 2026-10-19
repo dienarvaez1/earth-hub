@@ -1,5 +1,6 @@
-// The map: MapLibre GL on OpenFreeMap tiles, one GeoJSON source of the filtered events,
-// clustered when zoomed out.
+// The map: MapLibre GL on OpenFreeMap tiles. Small result sets show every event as its own
+// point; large ones are clustered when zoomed out, except strong events, which are always
+// single points drawn on top, so a cluster can never hide them.
 import * as maplibregl from "maplibre-gl";
 import type { GeoJSONSource, MapGeoJSONFeature, MapLayerMouseEvent } from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
@@ -11,21 +12,30 @@ maplibregl.setWorkerUrl(workerUrl);
 
 export const STYLE_URL = "https://tiles.openfreemap.org/styles/positron";
 
-// Magnitude colors, light to dark; also used in the legend-less popup text.
-const MAGNITUDE_COLOR: maplibregl.ExpressionSpecification = [
-  "interpolate",
-  ["linear"],
-  ["coalesce", ["get", "magnitude"], 0],
-  0, "#fed976",
-  2.5, "#fd8d3c",
-  4.5, "#e31a1c",
-  6, "#800026",
-];
+/** Up to this many events, none is clustered. */
+export const CLUSTER_ABOVE = 5000;
+/** Events at or above this magnitude are never clustered. */
+export const STRONG_MAGNITUDE = 6;
+
+// Magnitude colors, light to dark, for points (their magnitude) and clusters (their
+// strongest event's).
+function color(magnitude: maplibregl.ExpressionSpecification): maplibregl.ExpressionSpecification {
+  return ["interpolate", ["linear"], magnitude, 0, "#fed976", 2.5, "#fd8d3c", 4.5, "#e31a1c", 6, "#800026"];
+}
+const MAGNITUDE: maplibregl.ExpressionSpecification = ["coalesce", ["get", "magnitude"], 0];
+const POINT_PAINT = {
+  "circle-color": color(MAGNITUDE),
+  "circle-radius": ["interpolate", ["linear"], MAGNITUDE, 0, 3, 7, 14] as maplibregl.ExpressionSpecification,
+  "circle-stroke-width": 0.5,
+  "circle-stroke-color": "#44403c",
+};
 
 export class EventMap {
   private readonly map: maplibregl.Map;
   private readonly ready: Promise<void>;
   featureCount = 0;
+  clustered = false; // whether the last result set was clustered
+  singleCount = 0; // events drawn as single points whatever the zoom
 
   constructor(container: HTMLElement) {
     this.map = new maplibregl.Map({
@@ -41,21 +51,24 @@ export class EventMap {
   }
 
   private addLayers(done: () => void): void {
-    this.map.addSource("events", {
+    const empty = { type: "FeatureCollection" as const, features: [] };
+    this.map.addSource("clustered", {
       type: "geojson",
-      data: { type: "FeatureCollection", features: [] },
+      data: empty,
       cluster: true,
       clusterMaxZoom: 6,
       clusterRadius: 40,
+      clusterProperties: { max_magnitude: ["max", MAGNITUDE] },
     });
+    this.map.addSource("single", { type: "geojson", data: empty });
     this.map.addLayer({
       id: "clusters",
       type: "circle",
-      source: "events",
+      source: "clustered",
       filter: ["has", "point_count"],
       paint: {
-        "circle-color": "#fd8d3c",
-        "circle-opacity": 0.75,
+        "circle-color": color(["get", "max_magnitude"]),
+        "circle-opacity": 0.8,
         "circle-radius": ["step", ["get", "point_count"], 12, 100, 18, 1000, 26, 10000, 34],
         "circle-stroke-width": 1,
         "circle-stroke-color": "#ffffff",
@@ -64,29 +77,34 @@ export class EventMap {
     this.map.addLayer({
       id: "cluster-count",
       type: "symbol",
-      source: "events",
+      source: "clustered",
       filter: ["has", "point_count"],
       layout: {
         "text-field": ["get", "point_count_abbreviated"],
         "text-size": 11,
         "text-font": ["Noto Sans Regular"],
       },
+      paint: { "text-color": ["case", [">=", ["get", "max_magnitude"], 4.5], "#ffffff", "#1c1917"] },
     });
     this.map.addLayer({
       id: "points",
       type: "circle",
-      source: "events",
+      source: "clustered",
       filter: ["!", ["has", "point_count"]],
-      paint: {
-        "circle-color": MAGNITUDE_COLOR,
-        "circle-radius": ["interpolate", ["linear"], ["coalesce", ["get", "magnitude"], 0], 0, 3, 7, 14],
-        "circle-stroke-width": 0.5,
-        "circle-stroke-color": "#44403c",
-      },
+      paint: POINT_PAINT,
+    });
+    this.map.addLayer({
+      id: "single-points",
+      type: "circle",
+      source: "single",
+      layout: { "circle-sort-key": MAGNITUDE }, // the strongest on top
+      paint: POINT_PAINT,
     });
     this.map.on("click", "clusters", (event: MapLayerMouseEvent) => this.zoomInto(event.features?.[0]));
-    this.map.on("click", "points", (event: MapLayerMouseEvent) => this.showPopup(event.features?.[0]));
-    for (const layer of ["clusters", "points"]) {
+    for (const layer of ["points", "single-points"]) {
+      this.map.on("click", layer, (event: MapLayerMouseEvent) => this.showPopup(event.features?.[0]));
+    }
+    for (const layer of ["clusters", "points", "single-points"]) {
       this.map.on("mouseenter", layer, () => (this.map.getCanvas().style.cursor = "pointer"));
       this.map.on("mouseleave", layer, () => (this.map.getCanvas().style.cursor = ""));
     }
@@ -109,8 +127,14 @@ export class EventMap {
         deleted: p.review_status === "deleted",
       },
     }));
-    (this.map.getSource("events") as GeoJSONSource).setData({ type: "FeatureCollection", features });
+    this.clustered = features.length > CLUSTER_ABOVE;
+    const strong = (f: (typeof features)[number]) => (f.properties.magnitude as number | null) !== null && (f.properties.magnitude as number) >= STRONG_MAGNITUDE;
+    const single = this.clustered ? features.filter(strong) : features;
+    const rest = this.clustered ? features.filter((f) => !strong(f)) : [];
+    (this.map.getSource("single") as GeoJSONSource).setData({ type: "FeatureCollection", features: single });
+    (this.map.getSource("clustered") as GeoJSONSource).setData({ type: "FeatureCollection", features: rest });
     this.featureCount = features.length;
+    this.singleCount = single.length;
   }
 
   /** Resolves once the map has drawn what it was last given. */
@@ -127,7 +151,7 @@ export class EventMap {
 
   private async zoomInto(feature: MapGeoJSONFeature | undefined): Promise<void> {
     if (feature === undefined) return;
-    const source = this.map.getSource("events") as GeoJSONSource;
+    const source = this.map.getSource("clustered") as GeoJSONSource;
     const zoom = await source.getClusterExpansionZoom(feature.properties.cluster_id as number);
     const [lon, lat] = (feature.geometry as { coordinates: number[] }).coordinates;
     this.map.easeTo({ center: [lon, lat], zoom });

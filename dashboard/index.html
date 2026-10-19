@@ -23,8 +23,19 @@
       <form class="filters" id="filters" aria-label="Filters">
         <fieldset>
           <legend>Time (UTC)</legend>
-          <label>From <input type="date" name="start" /></label>
-          <label>To <input type="date" name="end" /></label>
+          <label>Period
+            <select name="period">
+              <option value="today" selected>Today</option>
+              <option value="this_week">This week</option>
+              <option value="this_month">This month</option>
+              <option value="last_3_months">Last 3 months</option>
+              <option value="this_year">This year</option>
+              <option value="last_3_years">Last 3 years</option>
+              <option value="custom">Custom</option>
+            </select>
+          </label>
+          <label class="custom-date" hidden>From <input type="date" name="start" /></label>
+          <label class="custom-date" hidden>To <input type="date" name="end" /></label>
         </fieldset>
         <fieldset>
           <legend>Magnitude</legend>
@@ -57,9 +68,9 @@
           <h2>Events over time</h2>
           <label>Per
             <select name="time_bucket" form="filters">
-              <option value="day">day</option>
+              <option value="day" selected>day</option>
               <option value="week">week</option>
-              <option value="month" selected>month</option>
+              <option value="month">month</option>
             </select>
           </label>
         </div>
@@ -76,17 +87,24 @@
           <figure id="chart-depth"></figure>
         </section>
         <section class="panel">
-          <h2>Top countries</h2>
+          <h2>Top 10 countries</h2>
           <figure id="chart-countries"></figure>
         </section>
         <section class="panel">
-          <h2>Top regions</h2>
+          <h2>Top 10 regions</h2>
           <figure id="chart-regions"></figure>
         </section>
       </div>
 
       <section class="panel">
-        <h2>Latest significant events <span class="note">(magnitude 4.5 and above)</span></h2>
+        <div class="panel-head">
+          <h2>Significant events <span class="note">(magnitude 4.5 and above, top 10)</span></h2>
+          <fieldset class="toggle">
+            <legend class="visually-hidden">Order</legend>
+            <label class="check"><input type="radio" name="order" value="latest" form="filters" checked /> Latest</label>
+            <label class="check"><input type="radio" name="order" value="largest" form="filters" /> Largest</label>
+          </fieldset>
+        </div>
         <div class="table-wrap"><table id="significant"></table></div>
       </section>
     </main>

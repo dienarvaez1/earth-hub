@@ -146,6 +146,37 @@ def test_significant_events_newest_first(dash):
 
 
 @pytest.mark.req("REQ-DASH-005")
+def test_largest_events_strongest_first(dash):
+    dash.set_filter(significant_magnitude=1.0)
+    assert [(r["id"], r["magnitude"]) for r in dash.query("largest")] == [
+        (6, 5.2),
+        (3, 4.5),
+        (2, 2.5),
+        (1, 2.49),
+        (8, 1.0),
+    ]
+    dash.set_filter(significant_magnitude=1.0, top_n=2)
+    assert [r["id"] for r in dash.query("largest")] == [6, 3]
+
+
+@pytest.mark.req("REQ-DASH-005")
+def test_largest_breaks_ties_newest_first(tmp_path):
+    rows = [
+        event(1, "2024-01-01T00:00:00", 7.0, "Panama", None),
+        event(2, "2024-06-24T22:05:04", 7.5, "Venezuela", None),
+        event(3, "2024-06-24T22:04:31", 7.2, "Venezuela", None),
+        event(4, "2024-03-01T00:00:00", 7.0, "Colombia", None),
+        *(event(10 + i, f"2024-10-{i + 1:02d}T00:00:00", 6.0, "Russia", None) for i in range(12)),
+    ]
+    dash = Dashboard(build(tmp_path, rows))
+    dash.set_filter(min_magnitude=6.0, max_magnitude=9.0)
+    # The ten latest are all October's; the largest are June's two and the 7.0s.
+    assert {r["id"] for r in dash.query("significant")} == set(range(12, 22))
+    assert [r["id"] for r in dash.query("largest")][:4] == [2, 3, 4, 1]
+    dash.close()
+
+
+@pytest.mark.req("REQ-DASH-005")
 def test_map_points_carry_what_the_map_shows(dash):
     dash.set_filter()
     point = dash.query("map_points")[0]

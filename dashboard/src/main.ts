@@ -4,6 +4,7 @@ import "./style.css";
 import * as charts from "./charts";
 import { DEFAULT_FILTER, Db, type Filter, type Row } from "./db";
 import { EventMap } from "./map";
+import { BUCKET, DEFAULT_PERIOD, type Period, day, firstDay } from "./periods";
 
 interface Meta {
   run_id: string;
@@ -19,17 +20,21 @@ interface Status {
   updates: number;
   timings: Record<string, number>;
   mapFeatures: number;
+  mapClustered: boolean;
+  mapSinglePoints: number;
   summary: Row | null;
   // Runs every report for a filter, then restores the form's: lets the browser tests compare
   // DuckDB-WASM's answers with DuckDB's in Python on the same file. Read-only.
   queryAll?: (filter: Partial<Filter>) => Promise<Record<string, Row[]>>;
+  // Resolves once the map has drawn what it was last given (its clustering runs in a worker).
+  mapIdle?: () => Promise<void>;
 }
 declare global {
   interface Window {
     __earthHub: Status;
   }
 }
-const status: Status = { ready: false, error: null, updates: 0, timings: {}, mapFeatures: 0, summary: null };
+const status: Status = { ready: false, error: null, updates: 0, timings: {}, mapFeatures: 0, mapClustered: false, mapSinglePoints: 0, summary: null };
 window.__earthHub = status;
 
 const REPORTS = [
@@ -39,6 +44,7 @@ const REPORTS = [
   "top_countries",
   "top_regions",
   "significant",
+  "largest",
   "map_points",
   "countries",
   "regions",
@@ -90,6 +96,8 @@ async function start(): Promise<void> {
       return results;
     });
 
+  status.mapIdle = () => map.idle();
+
   let pending: number | undefined;
   // On the document: the time bucket select sits outside the form (form="filters").
   document.addEventListener("input", (event) => {
@@ -98,10 +106,21 @@ async function start(): Promise<void> {
     if (target.name === "country") {
       select("region").value = "";
     }
+    if (target.name === "start" || target.name === "end") {
+      select("period").value = "custom"; // picking a day is a custom period
+    }
+    if (target.name === "period") {
+      periodChanged();
+    }
     window.clearTimeout(pending);
     pending = window.setTimeout(update, 150);
   });
-  form.addEventListener("reset", () => window.setTimeout(update, 0));
+  form.addEventListener("reset", () =>
+    window.setTimeout(() => {
+      periodChanged();
+      update();
+    }, 0),
+  );
   let width = window.innerWidth;
   window.addEventListener("resize", () => {
     if (Math.abs(window.innerWidth - width) < 40) return;
@@ -119,18 +138,63 @@ async function start(): Promise<void> {
 async function fillOptions(db: Db): Promise<void> {
   await db.setFilter(DEFAULT_FILTER);
   fill("country", await db.query("countries"), (r) => String(r.country));
-  fill("event_type", await db.query("event_types"), (r) => String(r.event_type));
+  fill("event_type", await db.query("event_types"), (r) => String(r.event_type), DEFAULT_EVENT_TYPE);
   fill("region", await db.query("regions"), (r) => String(r.region));
 }
 
-function fill(name: string, rows: Row[], value: (r: Row) => string): void {
+// The type shown at first and after Reset: other types (quarry blasts, explosions...) only
+// when chosen. "All" when the data has no earthquakes.
+const DEFAULT_EVENT_TYPE = "earthquake";
+
+/** Fills a select's options, keeping its choice; `initial` is chosen on the first fill and
+ * is the form's default (what Reset returns to). */
+function fill(name: string, rows: Row[], value: (r: Row) => string, initial = ""): void {
   const element = select(name);
-  const current = element.value;
-  element.replaceChildren(new Option("All", ""));
+  const first = element.dataset.filled === undefined;
+  const current = first ? initial : element.value;
+  const all = new Option("All", "", initial === "");
+  element.replaceChildren(all);
   for (const row of rows) {
-    element.append(new Option(`${value(row)} (${numbers.format(row.events as number)})`, value(row)));
+    const v = value(row);
+    element.append(new Option(`${v} (${numbers.format(row.events as number)})`, v, v === initial));
   }
   element.value = rows.some((r) => value(r) === current) ? current : "";
+  if (element.value === "") all.defaultSelected = true; // the initial type is not in the data
+  element.dataset.filled = "true";
+}
+
+// The period last chosen from the presets: Custom starts from its days.
+let lastPreset: Period = DEFAULT_PERIOD;
+
+function periodChanged(): void {
+  const period = select("period").value as Period;
+  const custom = period === "custom";
+  for (const label of form.querySelectorAll<HTMLElement>(".custom-date")) label.hidden = !custom;
+  const start = form.elements.namedItem("start") as HTMLInputElement;
+  const end = form.elements.namedItem("end") as HTMLInputElement;
+  if (custom && !start.value && !end.value) {
+    start.value = firstDay(lastPreset, new Date()) ?? "";
+    end.value = day(new Date());
+  }
+  if (!custom) {
+    lastPreset = period;
+    start.value = end.value = "";
+    (document.querySelector('select[name="time_bucket"]') as HTMLSelectElement).value = BUCKET[period];
+  }
+}
+
+/** The filter's time bounds: a preset as of now, or the custom days (either may be empty). */
+function timeBounds(data: FormData): [string | null, string | null] {
+  const period = ((data.get("period") as string | null) || DEFAULT_PERIOD) as Period;
+  const midnight = (d: string | null) => (d ? `${d} 00:00:00` : null);
+  const today = day(new Date());
+  if (period !== "custom") {
+    return [midnight(firstDay(period, new Date())), midnight(nextDay(today))];
+  }
+  const start = (data.get("start") as string | null) || null;
+  const end = (data.get("end") as string | null) || null;
+  // The "To" day is included: the filter's end is the next midnight, exclusive.
+  return [midnight(start), midnight(end && nextDay(end))];
 }
 
 function readFilter(): Filter {
@@ -140,12 +204,11 @@ function readFilter(): Filter {
     const value = text(name);
     return value === null || Number.isNaN(Number(value)) ? null : Number(value);
   };
-  const end = text("end");
+  const [start_time, end_time] = timeBounds(data);
   return {
     ...DEFAULT_FILTER,
-    start_time: text("start") && `${text("start")} 00:00:00`,
-    // The "To" day is included: the filter's end is the next midnight, exclusive.
-    end_time: end && `${nextDay(end)} 00:00:00`,
+    start_time,
+    end_time,
     min_magnitude: number("min_magnitude"),
     max_magnitude: number("max_magnitude"),
     country: text("country"),
@@ -172,7 +235,7 @@ async function render(db: Db, map: EventMap): Promise<void> {
   const bins = await db.query("magnitude_bins");
   const countries = await db.query("top_countries");
   const regions = await db.query("top_regions");
-  const significant = await db.query("significant");
+  const significant = await db.query(new FormData(form).get("order") === "largest" ? "largest" : "significant");
   const regionOptions = await db.query("regions");
   status.timings.last_query_ms = performance.now() - t0;
 
@@ -193,6 +256,8 @@ async function render(db: Db, map: EventMap): Promise<void> {
 
   status.timings.last_update_ms = performance.now() - t0;
   status.mapFeatures = map.featureCount;
+  status.mapClustered = map.clustered;
+  status.mapSinglePoints = map.singleCount;
   status.summary = summary;
   status.updates += 1;
 }

@@ -225,14 +225,16 @@ make dashboard-deploy    # publish; prints the workers.dev address
 
 The page loads two things from elsewhere: the DuckDB-WASM engine from jsDelivr (its 35 MB WebAssembly file is over a Worker's 25 MiB limit for static files) and the map tiles from OpenFreeMap. Everything else, including the snapshot, comes from the Worker.
 
-**Measured** (`reports/dashboard-performance.json`, three cold runs in headless Chromium on a developer machine, data served locally):
+**Measured** (`reports/dashboard-performance.json`, medians of five cold runs in headless Chromium on a developer machine, data served locally):
 
-| Rows | Snapshot | First map | Filter change |
-| --- | --- | --- | --- |
-| 115,000 | 6.0 MB | about 5 s | about 140 ms |
-| 1,000,000 | 36 MB | about 11 s | about 850 ms |
+| Rows | Snapshot | First map (Today) | All events (Last 3 years) | Filter change |
+| --- | --- | --- | --- | --- |
+| 115,000 | 6.0 MB | about 4 s | about 0.5 s | about 140 ms |
+| 1,000,000 | 36 MB | about 4.5 s | about 3.7 s | about 900 ms |
 
 About 3–4 s of the first map is the browser compiling DuckDB's engine; browsers cache that between visits, which the tests do not measure. At 1M rows, building the map's points is the next thing to make faster.
+
+**Time presets:** Today (the default), This week (from Monday), This month, Last 3 months, This year, Last 3 years, and Custom with From and To calendars. Every period is whole UTC days through today; each preset picks a chart grouping (per day, week or month). Up to 5,000 events the map shows every event as its own point; above that it clusters them, except events of magnitude 6 or more, which always stay single points on top.
 
 ## Tests and QA
 
