@@ -1,7 +1,7 @@
-.PHONY: help install up down reset ingest ingest-once ingest-logs ingest-stop api api-dev api-stop kafka-ui kafka-ui-stop backfill catchup-once consume reconcile check-db-outage lint format test test-integration test-e2e test-disruptive test-performance test-all regression flake-check traceability smoke smoke-restart migrate coverage
+.PHONY: help install up down reset ingest ingest-once ingest-logs ingest-stop api api-dev api-stop kafka-ui kafka-ui-stop backfill catchup-once consume reconcile export-r2 export-r2-runs check-db-outage lint format test test-integration test-e2e test-disruptive test-performance test-all regression flake-check traceability smoke smoke-restart migrate coverage
 
 help: ## List the available commands
-	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F ':.*## ' '{printf "  %-17s %s\n", $$1, $$2}'
+	@grep -E '^[a-z0-9-]+:.*## ' $(MAKEFILE_LIST) | awk -F ':.*## ' '{printf "  %-17s %s\n", $$1, $$2}'
 
 install: ## Install dependencies into .venv from uv.lock
 	uv sync --locked
@@ -54,6 +54,12 @@ catchup-once: up ## One catch-up pass (all_month feed) and one deleted-events ch
 
 consume: ## Run the consumer from this machine (Ctrl+C to stop)
 	uv run python -m earth_hub.consumers
+
+export-r2: ## Upload new and changed earthquakes rows to R2 through the API: make export-r2 [DRY_RUN=1] [VERIFY=1]
+	uv run python -m earth_hub.export.r2 $(if $(DRY_RUN),--dry-run) $(if $(VERIFY),--verify)
+
+export-r2-runs: ## List the latest R2 export runs and their counts
+	uv run python -m earth_hub.export.r2 runs
 
 reconcile: ## Check every Kafka message has a database row, and the tables' invariants
 	uv run python -m earth_hub.reconcile

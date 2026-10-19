@@ -75,6 +75,7 @@ make api                 # serve the REST API at http://127.0.0.1:8000/docs
 | `make test-performance` | A full year of synthetic backfill through the pipeline, timed |
 | `make consume` | Run the consumer from your machine |
 | `make reconcile` | Check every Kafka message has a database row, and the tables' invariants |
+| `make export-r2 [DRY_RUN=1] [VERIFY=1]` / `make export-r2-runs` | Copy the `earthquakes` table to Cloudflare R2 through the API, uploading only new and changed rows / list past runs |
 | `make check-db-outage` | Stop PostgreSQL mid-stream and check nothing is lost or duplicated (disruptive) |
 | `make coverage` | Unit tests with a coverage report |
 
@@ -173,6 +174,27 @@ Missing magnitudes sort last, and ties break by storage order, so pages are stab
 ```bash
 curl -s 'http://127.0.0.1:8000/api/v1/earthquakes?min_magnitude=4&sort=magnitude&limit=5'
 curl -s 'http://127.0.0.1:8000/api/v1/earthquakes/summary/hourly?start_time=2026-10-16T00:00:00Z'
+```
+
+## Export to R2
+
+`make export-r2` copies the `earthquakes` table to a Cloudflare R2 bucket, on demand only. It reads through the API (`GET /api/v1/export/earthquakes`, every column exactly as stored, paged by `id`), never from PostgreSQL, so the API must be running (`make api`).
+
+Set `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY` and `R2_BUCKET` in `.env`, from an R2 API token with Object Read & Write on the bucket.
+
+| In the bucket | What it is |
+| --- | --- |
+| `earthquakes/<id>.json` | One object per row, every column |
+| `_state/earthquakes-manifest.json.gz` | SHA-256 of each row as last uploaded |
+| `_state/lock.json` | Held while a run is in progress (expires after 2 hours if a run crashes) |
+| `runs/<run_id>.json` | One record per run: status, counts, timings, errors (also in `reports/exports/`) |
+
+A run uploads rows that are new or changed since their last upload, skips unchanged ones, and deletes objects for rows that left the table (merged events). Each row is one object named by its primary key, so reruns and interrupted runs can never create duplicates; a failed upload is retried by the next run. Progress is saved every 10 pages (10,000 rows), so after an interruption the next run carries on where it stopped. `EXPORT_WORKERS` (default 64) sets how many uploads run at once: a first full export of about 115,000 rows took 98 minutes at 16. By default a run trusts the manifest to say what the bucket holds, so a run with a few changes takes about 15 s. `make export-r2 VERIFY=1` also lists the bucket (about 100 s for 115,000 objects) to delete objects the manifest does not know, re-upload any removed from the bucket by hand, and check the result against the bucket itself; a run without a readable manifest always does this. Run it now and then, or after touching the bucket outside the exporter. A run succeeds only when the bucket then holds exactly the rows it read.
+
+```bash
+make export-r2 DRY_RUN=1   # what would change, writing nothing
+make export-r2             # e.g. read 114731  new 0  updated 12  unchanged 114719  deleted 1  failed 0
+make export-r2-runs        # past runs; one that never finished shows as interrupted
 ```
 
 ## Tests and QA

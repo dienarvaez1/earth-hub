@@ -52,6 +52,19 @@ class Settings(BaseSettings):
     # Optional contact sent in the User-Agent so USGS can reach the operator, e.g. a repo URL.
     usgs_contact: str = Field(default="", max_length=200)
 
+    # On-demand export of the earthquakes table to Cloudflare R2 (make export-r2). It reads
+    # through this API, never from PostgreSQL. R2_ENDPOINT_URL overrides the endpoint
+    # built from R2_ACCOUNT_ID, e.g. for a local S3-compatible store.
+    export_api_url: HttpUrl = HttpUrl("http://127.0.0.1:8000/api/v1")
+    r2_account_id: str = ""
+    r2_access_key_id: SecretStr = SecretStr("")
+    r2_secret_access_key: SecretStr = SecretStr("")
+    r2_bucket: str = ""
+    r2_endpoint_url: str = ""
+    # Uploads in flight at once. Each is one HTTPS request to R2 (~0.6 s measured), so the
+    # first full export is bound by this; later runs upload only changes.
+    export_workers: int = Field(default=64, ge=1, le=256)
+
     @property
     def consumer_topic(self) -> str:
         return self.kafka_consumer_topic or self.kafka_topic_raw
