@@ -516,6 +516,8 @@ def _merge(conn: Connection, survivor: int, others: list[int]) -> None:
     logger.info(
         "merged event records",
         extra={
+            "stage": "persist",
+            "event_id": by_id[newest["id"]]["preferred_event_id"],
             "survivor": survivor,
             "merged": others,
             "preferred_event_id": by_id[newest["id"]]["preferred_event_id"],

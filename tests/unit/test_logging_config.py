@@ -53,3 +53,28 @@ def restore_root_logger():
     handlers, level = root.handlers[:], root.level
     yield
     root.handlers[:], root.level = handlers, level
+
+
+@pytest.mark.req("REQ-OBS-001")
+@pytest.mark.parametrize(
+    ("logger", "stage"),
+    [
+        ("earth_hub.ingestion.usgs_client", "fetch"),
+        ("earth_hub.ingestion.backfill", "fetch"),
+        ("earth_hub.ingestion.state", "publish"),
+        ("earth_hub.consumers.earthquake_consumer", "persist"),
+        ("earth_hub.database.repository", "persist"),
+    ],
+)
+def test_pipeline_lines_without_a_stage_get_their_modules(logger, stage):
+    record = make_record()
+    record.name = logger
+    assert json.loads(JsonFormatter().format(record))["stage"] == stage
+
+
+@pytest.mark.req("REQ-OBS-001")
+def test_a_stated_stage_wins_and_other_loggers_get_none():
+    record = make_record(stage="publish")
+    record.name = "earth_hub.ingestion.backfill"
+    assert json.loads(JsonFormatter().format(record))["stage"] == "publish"
+    assert "stage" not in json.loads(JsonFormatter().format(make_record()))  # earth_hub.test

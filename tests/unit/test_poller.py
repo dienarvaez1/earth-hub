@@ -244,3 +244,36 @@ def test_jitter_stays_within_bounds():
     expires = NOW + timedelta(seconds=30)
     waits = [next_wait(expires, NOW, 60.0, lambda r=r: r / 10) for r in range(11)]
     assert min(waits) == pytest.approx(32.0) and max(waits) == pytest.approx(35.0)
+
+
+@pytest.mark.req("REQ-OBS-001")
+def test_each_published_event_gets_a_line_with_its_id_and_stage(feed_doc, fake_producer, caplog):
+    caplog.set_level("INFO")
+    result = make_poller(FakeFeed(feed_doc), fake_producer).run_round()
+    lines = [r for r in caplog.records if r.getMessage() == "event published"]
+    assert sorted(r.event_id for r in lines) == sorted(published_ids(fake_producer))
+    assert len(lines) == result.published and all(r.stage == "publish" for r in lines)
+
+
+@pytest.mark.req("REQ-OBS-001")
+def test_every_poller_line_has_a_stage(feed_doc, fake_producer, caplog):
+    caplog.set_level("DEBUG", logger="earth_hub.ingestion.poller")
+    del feed_doc["features"][0]["properties"]["updated"]
+    make_poller(FakeFeed(feed_doc), fake_producer).run_round()
+    poller_lines = [r for r in caplog.records if r.name == "earth_hub.ingestion.poller"]
+    assert poller_lines and all(getattr(r, "stage", None) for r in poller_lines)
+    (rejected,) = [r for r in poller_lines if r.getMessage() == "feature rejected"]
+    assert rejected.stage == "parse" and rejected.event_id
+
+
+@pytest.mark.req("REQ-OBS-002")
+def test_the_round_summary_keeps_totals_since_start(feed_doc, fake_producer, caplog):
+    caplog.set_level("INFO")
+    feed = FakeFeed(feed_doc)
+    poller = make_poller(feed, fake_producer)
+    first = poller.run_round()
+    feed.change(revise(feed_doc, feed_doc["features"][0]["id"]), "v2")
+    poller.run_round()
+    rounds = [r for r in caplog.records if r.getMessage() == "round complete"]
+    assert rounds[-1].stage == "publish"
+    assert rounds[-1].totals["published"] == first.published + 1

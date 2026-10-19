@@ -2,6 +2,11 @@
 
 Delivery is at-least-once: a crash between the database commit and the offset commit
 redelivers the message, which the raw_events offset key then recognizes and skips.
+
+Logging (docs/observability.md): every line about a message has its event_id, stage
+"persist" and Kafka position. Rejections and errors always get a line of their own; other
+outcomes do too one message at a time, but only at debug level in batches (a backfill is
+100k messages). A summary line with counts and lag follows every SUMMARY_INTERVAL_S.
 """
 
 import logging
@@ -17,6 +22,7 @@ from sqlalchemy.exc import DBAPIError, OperationalError
 
 from earth_hub.database import repository
 from earth_hub.database.repository import IncomingMessage, ProcessResult
+from earth_hub.observability import SUMMARY_INTERVAL_S, Summary
 
 logger = logging.getLogger(__name__)
 
@@ -89,6 +95,7 @@ class EarthquakeConsumer:
         sleep: Callable[[float], None] | None = None,
         monotonic: Callable[[], float] = time.monotonic,
         batch_size: int = 1,
+        summary_interval_s: float = SUMMARY_INTERVAL_S,
     ):
         self._consumer = consumer
         self._store = store
@@ -99,22 +106,62 @@ class EarthquakeConsumer:
         self._monotonic = monotonic
         self._last_ping = float("-inf")
         self.outcomes: dict[str, int] = {}
+        self.summary = Summary(summary_interval_s, monotonic)
 
     def run_forever(self) -> None:
-        logger.info("consumer started")
+        logger.info("consumer started", extra={"stage": "persist"})
         try:
             while not self.stop_event.is_set():
                 self.run_once()
         finally:
             self._consumer.close()
-            logger.info("consumer stopped", extra={"outcomes": self.outcomes})
+            logger.info("consumer stopped", extra={"stage": "persist", "outcomes": self.outcomes})
 
     def run_once(self, timeout_s: float = 1.0) -> int:
         """Handle the next message, or the next batch of up to batch_size messages.
         Returns how many were processed and committed (0 when idle)."""
-        if self.batch_size > 1:
-            return self._run_batch(timeout_s)
-        return int(self._run_single(timeout_s))
+        done = (
+            self._run_batch(timeout_s) if self.batch_size > 1 else int(self._run_single(timeout_s))
+        )
+        if self.summary.due():
+            self.log_summary()
+        return done
+
+    def log_summary(self) -> None:
+        """Counts since the last summary and since start, and how far behind Kafka it is."""
+        logger.info(
+            "consumer summary", extra={"stage": "persist", **self.summary.take(), **self._lag()}
+        )
+
+    def _lag(self) -> dict:
+        """Messages left to read on each assigned partition: the end offset minus this
+        consumer's position. None when Kafka cannot say (no assignment yet, or a fake)."""
+        try:
+            positions = self._consumer.position(self._consumer.assignment())
+            lag = {}
+            for tp in positions:
+                low, high = self._consumer.get_watermark_offsets(tp, timeout=5, cached=False)
+                lag[f"{tp.topic}[{tp.partition}]"] = high - (tp.offset if tp.offset >= 0 else low)
+        except (AttributeError, KafkaException, TypeError):
+            return {"lag": None}
+        return {"lag": sum(lag.values()) if lag else None, "lag_by_partition": lag}
+
+    def _counted(self, incoming: IncomingMessage, result: ProcessResult, routine: int) -> None:
+        """Counts a result and logs it; routine outcomes at `routine` level."""
+        self.outcomes[result.outcome] = self.outcomes.get(result.outcome, 0) + 1
+        self.summary.count(result.outcome)
+        fields = {
+            **_where(incoming),
+            "outcome": result.outcome,
+            "earthquake_id": result.earthquake_id,
+            "reason": result.reason,
+        }
+        if result.outcome == "rejected":
+            logger.warning("message rejected", extra=fields)
+        elif result.outcome == "error":
+            logger.error("message failed", extra=fields)
+        else:
+            logger.log(routine, "message processed", extra=fields)
 
     def _run_batch(self, timeout_s: float) -> int:
         messages = self._consumer.consume(num_messages=self.batch_size, timeout=timeout_s)
@@ -122,7 +169,9 @@ class EarthquakeConsumer:
         for message in messages:
             if message.error():
                 if message.error().code() != KafkaError._PARTITION_EOF:
-                    logger.error("kafka error", extra={"error": str(message.error())})
+                    logger.error(
+                        "kafka error", extra={"stage": "persist", "error": str(message.error())}
+                    )
             else:
                 good.append(message)
         if not good:
@@ -136,11 +185,7 @@ class EarthquakeConsumer:
             return 0
         self._commit(good[: len(results)])
         for message, result in zip(incoming, results, strict=False):
-            self.outcomes[result.outcome] = self.outcomes.get(result.outcome, 0) + 1
-            logger.debug(
-                "message processed",
-                extra={**_where(message), "event_id": _key(message), "outcome": result.outcome},
-            )
+            self._counted(message, result, routine=logging.DEBUG)
         logger.info(
             "batch processed",
             extra={
@@ -163,7 +208,11 @@ class EarthquakeConsumer:
                 if not is_infrastructure_error(exc):
                     logger.warning(
                         "batch failed, processing its messages one at a time",
-                        extra={"messages": len(incoming), "error": f"{type(exc).__name__}: {exc}"},
+                        extra={
+                            **_where(incoming[0]),
+                            "messages": len(incoming),
+                            "error": f"{type(exc).__name__}: {exc}",
+                        },
                     )
                     break
                 outage_attempt += 1
@@ -193,7 +242,7 @@ class EarthquakeConsumer:
             self._consumer.commit(offsets=offsets, asynchronous=False)
         except KafkaException as exc:
             # The rows are committed; redelivered messages will be recognized and skipped.
-            logger.warning("offset commit failed", extra={"error": str(exc)})
+            logger.warning("offset commit failed", extra={"stage": "persist", "error": str(exc)})
 
     def _run_single(self, timeout_s: float) -> bool:
         message = self._consumer.poll(timeout_s)
@@ -202,7 +251,9 @@ class EarthquakeConsumer:
             return False
         if message.error():
             if message.error().code() != KafkaError._PARTITION_EOF:
-                logger.error("kafka error", extra={"error": str(message.error())})
+                logger.error(
+                    "kafka error", extra={"stage": "persist", "error": str(message.error())}
+                )
             return False
 
         incoming = _incoming(message)
@@ -215,18 +266,7 @@ class EarthquakeConsumer:
         except KafkaException as exc:
             # The row is committed; a redelivery will be recognized and skipped.
             logger.warning("offset commit failed", extra={"error": str(exc), **_where(incoming)})
-        self.outcomes[result.outcome] = self.outcomes.get(result.outcome, 0) + 1
-        logger.info(
-            "message processed",
-            extra={
-                **_where(incoming),
-                "event_id": _key(incoming),
-                "stage": "persist",
-                "outcome": result.outcome,
-                "earthquake_id": result.earthquake_id,
-                "reason": result.reason,
-            },
-        )
+        self._counted(incoming, result, routine=logging.INFO)
         self._beat()
         return True
 
@@ -277,7 +317,9 @@ class EarthquakeConsumer:
         try:
             self._store.ping()
         except Exception as exc:
-            logger.error("database ping failed while idle", extra={"error": str(exc)})
+            logger.error(
+                "database ping failed while idle", extra={"stage": "persist", "error": str(exc)}
+            )
             return
         self._last_ping = now
         self._beat()
@@ -306,7 +348,13 @@ def _tally(outcomes) -> dict[str, int]:
 
 
 def _where(incoming: IncomingMessage) -> dict:
-    return {"partition": incoming.partition, "offset": incoming.offset}
+    """What every line about a message carries: its event and where it is in Kafka."""
+    return {
+        "stage": "persist",
+        "event_id": _key(incoming),
+        "partition": incoming.partition,
+        "offset": incoming.offset,
+    }
 
 
 def _key(incoming: IncomingMessage) -> str | None:

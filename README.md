@@ -236,6 +236,15 @@ About 3–4 s of the first map is the browser compiling DuckDB's engine; browser
 
 **Time presets:** Today (the default), This week (from Monday), This month, Last 3 months, This year, Last 3 years, and Custom with From and To calendars. Every period is whole UTC days through today; each preset picks a chart grouping (per day, week or month). Up to 5,000 events the map shows every event as its own point; above that it clusters them, except events of magnitude 6 or more, which always stay single points on top.
 
+## Observability
+
+Every service logs JSON lines. Every pipeline line has a `stage` (`fetch`, `parse`, `publish`, `persist`), and every line about one event has its `event_id`, so one event can be followed from the feed to the database. The consumer logs a summary every minute with its outcome counts and its lag behind Kafka. [docs/observability.md](docs/observability.md) has the fields, `jq` recipes, and a controlled failure diagnosed from the logs alone (also an end-to-end test).
+
+```bash
+docker compose logs --no-log-prefix poller consumer | jq -cR 'fromjson? | select(.event_id == "us7000abcd")'
+docker compose logs --no-log-prefix consumer | jq -cR 'fromjson? | select(.message == "consumer summary") | {ts, lag, outcomes}'
+```
+
 ## Tests and QA
 
 Run everything with **`make regression`**: lint, unit, integration, API, contract, end-to-end, disruptive and performance tests, in that order, stopping at the first failing layer. It takes about 3 minutes and writes:
