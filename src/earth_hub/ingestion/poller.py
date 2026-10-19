@@ -62,13 +62,17 @@ class Poller:
         self._clock = clock
         self._rng = rng
         self._last_modified: str | None = None
+        # Since start, for the round summary (stages: earth_hub.observability).
+        self.totals = {"published": 0, "rejected": 0, "failed_delivery": 0}
         self.stop_event = threading.Event()
 
     def run_round(self) -> RoundResult:
         try:
             response = self._client.fetch(self._last_modified)
         except FeedUnavailable as exc:
-            logger.error("feed unavailable, skipping round", extra={"error": str(exc)})
+            logger.error(
+                "feed unavailable, skipping round", extra={"stage": "fetch", "error": str(exc)}
+            )
             return RoundResult("failed")
 
         if response.not_modified:
@@ -78,13 +82,16 @@ class Poller:
         try:
             parsed = parse_feed(response.body or b"", fetched_at=response.fetched_at)
         except InvalidFeed as exc:
-            logger.error("feed body unusable, skipping round", extra={"error": str(exc)})
+            logger.error(
+                "feed body unusable, skipping round", extra={"stage": "fetch", "error": str(exc)}
+            )
             return RoundResult("failed", expires=response.expires)
 
         for rejected in parsed.rejected:
             logger.warning(
                 "feature rejected",
                 extra={
+                    "stage": "parse",
                     "index": rejected.index,
                     "event_id": rejected.event_id,
                     "reason": rejected.reason,
@@ -97,10 +104,19 @@ class Poller:
             self._state.mark_sent(
                 message.event_id, message.source_updated_ms, message.event_time_ms
             )
+            logger.info(
+                "event published",
+                extra={
+                    "stage": "publish",
+                    "event_id": message.event_id,
+                    "source_updated_ms": message.source_updated_ms,
+                    "topic": self._publisher.topic,
+                },
+            )
         for message, error in outcome.failed:
             logger.error(
                 "delivery failed, will retry next round",
-                extra={"event_id": message.event_id, "error": error},
+                extra={"stage": "publish", "event_id": message.event_id, "error": error},
             )
 
         # Only remember Last-Modified when everything was delivered. Otherwise the next
@@ -118,14 +134,18 @@ class Poller:
             failed_delivery=len(outcome.failed),
             expires=response.expires,
         )
+        for name in self.totals:
+            self.totals[name] += getattr(result, name)
         logger.info(
             "round complete",
             extra={
+                "stage": "publish",
                 "published": result.published,
                 "unchanged": result.unchanged,
                 "rejected": result.rejected,
                 "failed_delivery": result.failed_delivery,
                 "tracked_events": len(self._state),
+                "totals": dict(self.totals),
             },
         )
         return result
@@ -143,7 +163,8 @@ class Poller:
 
     def run_forever(self) -> None:
         logger.info(
-            "poller started", extra={"url": self._client.url, "topic": self._publisher.topic}
+            "poller started",
+            extra={"stage": "fetch", "url": self._client.url, "topic": self._publisher.topic},
         )
         while not self.stop_event.is_set():
             result = self.run_round()
@@ -158,9 +179,11 @@ class Poller:
     def shutdown(self) -> None:
         pending = self._publisher.flush(SHUTDOWN_FLUSH_TIMEOUT_S)
         if pending:
-            logger.error("shutdown with undelivered messages", extra={"pending": pending})
+            logger.error(
+                "shutdown with undelivered messages", extra={"stage": "publish", "pending": pending}
+            )
         else:
-            logger.info("poller stopped cleanly")
+            logger.info("poller stopped cleanly", extra={"stage": "publish"})
 
     def _beat(self) -> None:
         if self._heartbeat_path is not None:

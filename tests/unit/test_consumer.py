@@ -360,3 +360,134 @@ def test_kafka_errors_in_a_batch_are_skipped():
     kafka, store = BatchKafka([eof, FakeMessage(1)]), BatchStore()
     consumer, _ = make_batch(kafka, store)
     assert consumer.run_once() == 1 and store.batches == [[1]]
+
+
+# --- observability: event IDs, stages, the periodic summary --------------------------------
+
+
+class ScriptedBatchStore(BatchStore):
+    def __init__(self, *results):
+        super().__init__()
+        self.results = list(results)
+
+    def process_batch(self, messages):
+        self.batches.append([m.offset for m in messages])
+        return [self.results.pop(0) for _ in messages]
+
+
+def records(caplog, message):
+    return [r for r in caplog.records if r.getMessage() == message]
+
+
+@pytest.mark.req("REQ-OBS-001")
+def test_every_message_line_has_its_event_id_stage_and_position(caplog):
+    caplog.set_level("DEBUG")
+    consumer, _ = make(FakeKafka([FakeMessage(3)]), FakeStore())
+    consumer.run_once()
+    (line,) = records(caplog, "message processed")
+    assert (line.event_id, line.stage, line.partition, line.offset) == ("us1", "persist", 0, 3)
+
+
+@pytest.mark.req("REQ-OBS-001")
+def test_in_batches_rejections_and_errors_get_their_own_lines(caplog):
+    caplog.set_level("INFO")
+    store = ScriptedBatchStore(
+        ProcessResult("applied", 1),
+        ProcessResult("rejected", reason="GEO-002: latitude 95.0 is outside -90..90"),
+        ProcessResult("error", reason="ValueError: boom"),
+    )
+    consumer, _ = make_batch(BatchKafka([FakeMessage(o) for o in (1, 2, 3)]), store)
+    consumer.run_once()
+    assert records(caplog, "message processed") == []  # routine: debug only in batches
+    (rejected,) = records(caplog, "message rejected")
+    assert rejected.levelname == "WARNING"
+    assert (rejected.event_id, rejected.stage, rejected.offset) == ("us1", "persist", 2)
+    assert rejected.reason.startswith("GEO-002:")
+    (failed,) = records(caplog, "message failed")
+    assert failed.levelname == "ERROR" and failed.offset == 3
+
+
+@pytest.mark.req("REQ-OBS-001")
+def test_error_lines_name_the_event(caplog):
+    store = FakeStore(ValueError("bad"), ValueError("bad"), ValueError("bad"))
+    consumer, _ = make(FakeKafka([FakeMessage(5)]), store)
+    consumer.run_once()
+    lines = records(caplog, "unexpected error processing message")
+    assert len(lines) == 3 and all(r.event_id == "us1" and r.stage == "persist" for r in lines)
+    (failed,) = records(caplog, "message failed")
+    assert failed.reason == "ValueError: bad"
+
+
+class Clock:
+    def __init__(self):
+        self.now = 1000.0
+
+    def __call__(self):
+        return self.now
+
+
+@pytest.mark.req("REQ-OBS-002")
+def test_a_summary_follows_every_interval(caplog):
+    caplog.set_level("INFO")
+    clock = Clock()
+    kafka = FakeKafka([FakeMessage(o) for o in range(1, 5)])
+    store = FakeStore(ProcessResult("applied", 1), ProcessResult("rejected", reason="r"))
+    consumer, _ = make(kafka, store, monotonic=clock, summary_interval_s=60)
+    consumer.run_once()
+    consumer.run_once()
+    assert records(caplog, "consumer summary") == []  # not yet due
+    clock.now += 60
+    consumer.run_once()
+    (first,) = records(caplog, "consumer summary")
+    assert first.stage == "persist"
+    assert (first.messages, first.outcomes) == (3, {"applied": 2, "rejected": 1})
+    assert first.lag is None  # a fake Kafka cannot say
+    clock.now += 60
+    consumer.run_once()
+    second = records(caplog, "consumer summary")[1]
+    assert (second.messages, second.outcomes) == (1, {"applied": 1})  # since the last one
+    assert second.totals == {"applied": 3, "rejected": 1}  # since start
+
+
+@pytest.mark.req("REQ-OBS-002")
+def test_an_idle_consumer_still_reports(caplog):
+    caplog.set_level("INFO")
+    clock = Clock()
+    consumer, _ = make(FakeKafka([]), FakeStore(), monotonic=clock, summary_interval_s=60)
+    clock.now += 61
+    consumer.run_once()
+    (summary,) = records(caplog, "consumer summary")
+    assert (summary.messages, summary.outcomes) == (0, {})
+
+
+class LaggingKafka(FakeKafka):
+    """Partition 0 ends at offset 120 and the consumer is at 100; partition 1 is unread."""
+
+    def assignment(self):
+        from confluent_kafka import TopicPartition
+
+        return [TopicPartition("earthquakes.raw", 0), TopicPartition("earthquakes.raw", 1)]
+
+    def position(self, partitions):
+        from confluent_kafka import TopicPartition
+
+        return [
+            TopicPartition("earthquakes.raw", 0, 100),
+            TopicPartition("earthquakes.raw", 1, -1001),
+        ]
+
+    def get_watermark_offsets(self, tp, timeout, cached):
+        return {0: (0, 120), 1: (40, 55)}[tp.partition]
+
+
+@pytest.mark.req("REQ-OBS-002")
+def test_the_summary_reports_lag_per_partition(caplog):
+    caplog.set_level("INFO")
+    clock = Clock()
+    consumer, _ = make(LaggingKafka([]), FakeStore(), monotonic=clock, summary_interval_s=1)
+    clock.now += 2
+    consumer.run_once()
+    (summary,) = records(caplog, "consumer summary")
+    # Partition 1 has no position yet: everything from its first offset is still to read.
+    assert summary.lag_by_partition == {"earthquakes.raw[0]": 20, "earthquakes.raw[1]": 15}
+    assert summary.lag == 35

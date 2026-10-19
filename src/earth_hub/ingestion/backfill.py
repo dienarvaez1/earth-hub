@@ -96,7 +96,7 @@ class Backfill:
                 "sweep", Window(plan[0].start, end), sweep_report, set(), updated_after=started
             )
             report.sweep = sweep_report.__dict__ | {"updated_after": started.isoformat()}
-        logger.info("backfill finished", extra={k: v for k, v in report.__dict__.items()})
+        logger.info("backfill finished", extra={"stage": "publish", **report.__dict__})
         return report
 
     def _window(
@@ -172,6 +172,7 @@ class Backfill:
         logger.info(
             "window done",
             extra={
+                "stage": "publish",
                 "job": job,
                 "start": window.start,
                 "end": window.end,

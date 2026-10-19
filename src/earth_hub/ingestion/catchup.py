@@ -74,6 +74,7 @@ class CatchUp:
         logger.info(
             "catch-up pass",
             extra={
+                "stage": "publish",
                 "in_feed": len(parsed.messages),
                 "published": len(outcome.delivered),
                 "failed": len(outcome.failed),
@@ -91,7 +92,10 @@ class CatchUp:
         )
         published = self._deleted(Window(started - DELETED_LOOKBACK, started), since)
         self._progress.set_checkpoint("deleted", started)
-        logger.info("deleted-events check", extra={"since": since, "published": published})
+        logger.info(
+            "deleted-events check",
+            extra={"stage": "publish", "since": since, "published": published},
+        )
         return published
 
     def _deleted(self, window: Window, since: datetime) -> int:
