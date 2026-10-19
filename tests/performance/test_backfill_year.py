@@ -10,6 +10,8 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from support.fdsn import FdsnServer, at
 
+from earth_hub.ingestion.windows import weekly_windows
+
 pytestmark = [pytest.mark.performance, pytest.mark.req("REQ-QA-002")]
 
 YEAR_COUNT = 139_579  # events USGS recorded from 2025-10-17 to 2026-10-17
@@ -76,7 +78,9 @@ def test_a_year_backfills_within_three_minutes_with_exact_totals(pipeline, featu
         f"fetch+publish {fetch_s:.1f} s, consume+store {store_s:.1f} s, total {total:.1f} s "
         f"({YEAR_COUNT / total:.0f} events/s)"
     )
-    assert report.windows_done == 42 and report.sweep["windows_done"] == 1  # weeks, then sweep
+    # The range ends now, so it gains a week every Sunday: never hardcode the count (DEF-028).
+    weeks = len(weekly_windows(start, now))
+    assert report.windows_done == weeks and report.sweep["windows_done"] == 1  # then the sweep
     assert report.published == YEAR_COUNT and report.fetched == YEAR_COUNT
     assert pipeline.get("/earthquakes/stats")["count"] == YEAR_COUNT
     assert (

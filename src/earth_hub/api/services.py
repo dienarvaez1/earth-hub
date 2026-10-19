@@ -140,6 +140,18 @@ def get_earthquake(conn: Connection, event_id: str) -> dict[str, Any] | None:
     return dict(row) if row else None
 
 
+def export_earthquakes(conn: Connection, *, after_id: int, limit: int) -> list[dict[str, Any]]:
+    """Whole rows, every column, in id order. Paging by id (not offset) is stable while
+    events are inserted or updated between pages."""
+    rows = conn.execute(
+        select(earthquakes)
+        .where(earthquakes.c.id > after_id)
+        .order_by(earthquakes.c.id)
+        .limit(limit)
+    ).mappings()
+    return [dict(r) for r in rows]
+
+
 def stats(conn: Connection, filters: Filters) -> dict[str, Any]:
     where = and_(true_(), *filters.clauses())
     c = earthquakes.c

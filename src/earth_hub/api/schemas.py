@@ -90,6 +90,48 @@ class MagnitudeSummary(BaseModel):
     buckets: list[MagnitudeBucket] = Field(description="Every range, including empty ones")
 
 
+class EarthquakeRow(BaseModel):
+    """One `earthquakes` row with every column, exactly as stored, for exports."""
+
+    id: int = Field(description="Primary key; stable while the row exists")
+    preferred_event_id: str
+    event_time: datetime
+    event_time_ms: int
+    source_updated: datetime
+    source_updated_ms: int
+    magnitude: float | None
+    mag_type: str | None
+    place: str | None
+    city: str | None
+    region: str | None
+    country: str | None
+    longitude: float
+    latitude: float
+    depth_km: float
+    event_type: str
+    review_status: str
+    tsunami: bool
+    felt: int | None
+    cdi: float | None
+    mmi: float | None
+    alert: str | None
+    sig: int | None
+    net: str | None
+    url: str | None
+    title: str | None
+    revision_ids: list[str] = Field(description="IDs listed by the stored revision")
+    revision_count: int
+    first_seen_at: datetime
+    last_applied_at: datetime
+
+
+class EarthquakeExportPage(BaseModel):
+    rows: list[EarthquakeRow] = Field(description="In id order, deleted events included")
+    next_after_id: int | None = Field(
+        description="Pass as after_id for the next page; null on the last page"
+    )
+
+
 class ErrorDetail(BaseModel):
     parameter: str | None = None
     message: str

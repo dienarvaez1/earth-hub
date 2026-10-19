@@ -172,6 +172,7 @@ def test_openapi_documents_every_endpoint_and_error(client):
         "/api/v1/earthquakes/summary/hourly",
         "/api/v1/earthquakes/summary/magnitude",
         "/api/v1/earthquakes/{event_id}",
+        "/api/v1/export/earthquakes",
     }
     for path, operations in spec["paths"].items():
         responses = operations["get"]["responses"]

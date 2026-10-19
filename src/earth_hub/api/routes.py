@@ -16,6 +16,7 @@ from earth_hub.api import services
 from earth_hub.api.errors import ERROR_RESPONSES, ApiError
 from earth_hub.api.schemas import (
     Earthquake,
+    EarthquakeExportPage,
     EarthquakePage,
     Health,
     HourlySummary,
@@ -30,6 +31,8 @@ MAX_LIMIT = 500
 # Far beyond any realistic depth (USGS publishes ~110,000 events a year), and well inside
 # PostgreSQL's bigint, which a larger value would overflow (a 500 found by Schemathesis).
 MAX_OFFSET = 10_000_000
+MAX_EXPORT_LIMIT = 5000
+MAX_ID = 2**63 - 1  # PostgreSQL bigint
 MAX_HOURLY_RANGE = timedelta(days=31)
 DEFAULT_HOURLY_RANGE = timedelta(hours=24)
 
@@ -250,3 +253,22 @@ def get_earthquake(db: Db, event_id: Annotated[Text, Path(min_length=1, max_leng
     if event is None:
         raise ApiError(404, "not_found", f"no event with ID {event_id!r}")
     return event
+
+
+@router.get(
+    "/export/earthquakes",
+    response_model=EarthquakeExportPage,
+    responses=ERROR_RESPONSES,
+    summary="Every earthquakes row with every column, for exports",
+    description="Rows exactly as stored, deleted events included, in id order. Start with "
+    "after_id=0 and pass next_after_id until it is null. Used by `make export-r2`.",
+)
+def export_earthquakes(
+    db: Db,
+    after_id: Annotated[int, Query(ge=0, le=MAX_ID)] = 0,
+    limit: Annotated[int, Query(ge=1, le=MAX_EXPORT_LIMIT)] = 1000,
+):
+    with db.connect() as conn:
+        rows = services.export_earthquakes(conn, after_id=after_id, limit=limit)
+    next_after_id = rows[-1]["id"] if len(rows) == limit else None
+    return EarthquakeExportPage(rows=rows, next_after_id=next_after_id)

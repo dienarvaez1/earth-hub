@@ -37,6 +37,7 @@ Local-first earthquake data platform: USGS GeoJSON feed → Python poller → Ka
 - `make backfill START=2026-01-01 [END=...]`, `make catchup-once`, `make test-performance` (a year of synthetic backfill, timed).
 - `make test-e2e`, `make test-disruptive` (stops shared containers), `make flake-check` (end-to-end suite ×5), `make traceability`.
 - `make reconcile`: topic-versus-database check.
+- `make export-r2 [DRY_RUN=1] [VERIFY=1]` / `make export-r2-runs`: on-demand copy of `earthquakes` to R2 through the API / list runs. Never part of the test suite.
 - `make api` / `make api-dev`: serve the API (container / host with reload) at http://127.0.0.1:8000/docs.
 
 Add dependencies with `uv add <pkg>` (or `uv add --dev <pkg>`); never edit `uv.lock` by hand.
@@ -65,4 +66,5 @@ Add dependencies with `uv add <pkg>` (or `uv add --dev <pkg>`); never edit `uv.l
 - `repository.process_batch` processes a batch as a set and must give exactly the results of `process_message` one by one: `tests/integration/test_batch.py` checks this on random streams. Merges fall back to the one-by-one path. Every lock goes through `_lock`, which uses sorted order (deadlock safety).
 - Whether a revision replaces the stored one is decided only by `database/revisions.py:compare` (newer `updated` wins, except for duplicates' deletions: DEF-026). The consumer's two paths and `Progress.needs_publish` all use it; don't compare `updated` anywhere else.
 - The mock FDSN service (`tests/support/fdsn.py`) reproduces the real one's boundary semantics; keep it faithful when changing either.
+- The R2 exporter (`export/r2.py`, `export/bucket.py`) reads only `GET /api/v1/export/earthquakes`, never PostgreSQL. `EarthquakeRow` in `api/schemas.py` must list every `earthquakes` column, in order (a test checks it). Tests use moto, never real R2.
 - Smoke tests use temporary topics and databases; never write test data to `earthquakes.raw` or the main database.

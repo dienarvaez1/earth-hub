@@ -109,6 +109,19 @@ One requirement per rule in [data-quality-rules.md](data-quality-rules.md).
 | REQ-API-012 | The OpenAPI schema documents every endpoint, parameter and error, and responses conform to it |
 | REQ-API-013 | The API is read-only and serves data from PostgreSQL only |
 
+## Export to R2
+
+| ID | Requirement |
+| --- | --- |
+| REQ-EXP-001 | `GET /api/v1/export/earthquakes` returns every column of every `earthquakes` row exactly as stored, deleted events included, in `id` order, paged by `after_id` (1–5000 rows) |
+| REQ-EXP-002 | `make export-r2` reads only through the API and uploads rows that are not in the bucket or changed since their last upload, skips unchanged rows, and deletes objects for rows no longer in the table |
+| REQ-EXP-003 | Each row is one object named by its primary key, so reruns and interrupted runs never create duplicates; uploads that failed are retried by the next run, and progress is saved every few pages so the next run skips rows an interrupted one already uploaded |
+| REQ-EXP-004 | After a run the bucket holds exactly the rows read, with the same value in every column, as checked against the bucket listing on a verified run and against the manifest otherwise; if not, the run is marked failed |
+| REQ-EXP-005 | Every run is recorded in the bucket (`runs/`) and in `reports/exports/`, with status, counts, timings and errors; a run that never finished is listed as interrupted |
+| REQ-EXP-006 | Only one export runs at a time; the lock is taken atomically, and a lock left by a crashed run expires |
+| REQ-EXP-007 | A dry run reports what would change without writing to the bucket; missing R2 settings stop the command with a clear message |
+| REQ-EXP-008 | By default a run decides uploads and deletions from the manifest without listing the bucket; `make export-r2 VERIFY=1`, and any run without a readable manifest, lists the bucket once after the uploads, deletes objects the manifest does not know and re-uploads rows whose object is missing |
+
 ## End-to-end scenarios
 
 The scenarios from Milestone 5 of the plan, verified through the API on the whole pipeline.
