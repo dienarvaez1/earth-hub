@@ -11,7 +11,7 @@ Commands that **call live services or change state** are marked ⚠. The skills 
 | Skill | Does | Main commands behind it |
 | --- | --- | --- |
 | `/eh [area]` | Shows this cheat sheet, or one section of it | |
-| `/eh-status [reconcile]` | Health of every service, consumer lag, newest event, API, last export | `docker compose ps`, `make reconcile` |
+| `/eh-status [reconcile]` | Health of every service, consumer lag, newest event, API, last export, the mode and the hourly schedule's last runs | `docker compose ps`, `make reconcile`, `make mode`, `gh run list --workflow direct.yml` |
 | `/eh-start [infra\|pipeline\|api\|ui\|dashboard\|all]` | Starts services and waits until healthy | `make up`, `make ingest`, `make api` |
 | `/eh-stop [pipeline\|api\|ui\|all\|reset]` | Stops services, keeping data (or wipes it, after asking) | `make ingest-stop`, `make down`, `make reset` |
 | `/eh-logs [service\|ID\|errors\|rejected\|summary]` | Reads the JSON logs with `jq`, follows one event | `docker compose logs … \| jq` |
