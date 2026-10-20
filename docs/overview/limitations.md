@@ -53,7 +53,8 @@ What Earth-Hub doesn't do, or does only within limits. These are deliberate trad
 ## Direct mode
 
 Milestone 8 ([architecture](../technical/architecture.md#direct-mode)).
-- **One direct process at a time.** The marker and the lock keep direct mode and full mode's exports apart, but nothing stops two `make direct-run` processes on two machines: both would poll the feed, and take turns writing. Run one.
+- **One direct process at a time.** The marker and the lock keep direct mode and full mode's exports apart, but nothing stops two `make direct-run` processes on two machines, or one and the [scheduled workflow](../technical/ci.md#direct-mode-on-a-schedule): both would poll the feed, and take turns writing. Run one.
+- **On the schedule, events are up to an hour late**, and GitHub may delay or skip a scheduled run when busy. Nothing is lost while the gap stays under a day (the day feed); catch-up covers revisions of older events.
 - **Events are late during a handover**, by its length: neither mode polls while it runs (the next round catches up, from the day feed). A handover to direct mode is mostly its export, about 35 s with few changes; one back to full mode, the replay and the checks.
 - **Full mode's pipeline is not stopped by the marker.** `make mode-direct` stops the poller and catch-up; started again by hand in direct mode, they would store events in PostgreSQL that the replay then repeats. The handover back would find the processing times differ and stay in direct mode.
 - **After a return to full mode, the poller sends the day's events again.** Its state is rebuilt from `earthquakes.raw`, which did not see the direct period. The consumer finds them already stored (duplicates): nothing changes, but `raw_events` gets the rows.

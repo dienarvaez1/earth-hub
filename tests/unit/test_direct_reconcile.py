@@ -133,3 +133,21 @@ def test_the_command_exits_1_when_broken(bucket, s3, monkeypatch, capsys):
     remove_row(s3)
     assert main([]) == 1
     assert "BROKEN: manifest rows without an object: 1" in capsys.readouterr().out
+
+
+@pytest.mark.req("REQ-MODE-014")
+def test_the_scheduled_check_skips_a_bucket_not_in_direct_mode(bucket, s3, monkeypatch, capsys):
+    from earth_hub.config import Settings
+    from earth_hub.export import mode
+
+    settings = Settings(
+        _env_file=None, postgres_db="x", postgres_user="x", postgres_password="x", r2_bucket=BUCKET
+    )
+    monkeypatch.setattr("earth_hub.config.get_settings", lambda: settings)
+    monkeypatch.setattr("earth_hub.export.bucket.make_s3_client", lambda settings: s3)
+    remove_row(s3)  # broken, but only direct mode keeps these invariants
+    assert main(["--skip-unless-direct"]) == 1
+    assert "BROKEN" in capsys.readouterr().out
+    mode.write(bucket, mode.read(bucket), mode=mode.FULL)
+    assert main(["--skip-unless-direct"]) == 0
+    assert "reconcile-direct: skipped: the bucket is in full mode" in capsys.readouterr().out

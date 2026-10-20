@@ -146,6 +146,7 @@ The exporter reads through the API, so start it first (`make api`).
 | | `make mode` | Which mode writes the bucket: `full` or `direct`, and since when |
 | | `make mode-direct` ⚠ / `make mode-full` ⚠ | Hand over to direct mode / back to full mode ([how](../technical/architecture.md#switching-modes)) |
 | | `make direct-once` ⚠ / `make direct-run` ⚠ | Direct mode: one poller round (and catch-up if due) / until stopped |
+| | `gh workflow run direct.yml -f job=round` ⚠ / `gh run list --workflow direct.yml` | Direct mode on GitHub's hourly schedule: a round now / the recent runs ([how](../technical/ci.md#direct-mode-on-a-schedule)) |
 | | `make reconcile-direct [DEEP=1]` | Direct mode's state in the bucket: rows, manifest, snapshot, ID map and log agree ([direct mode](../technical/architecture.md#direct-mode)) |
 
 ## Dashboard

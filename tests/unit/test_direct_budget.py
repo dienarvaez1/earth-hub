@@ -105,3 +105,18 @@ def test_direct_mode_stays_well_inside_the_free_operations(
     # allowance at today's load).
     assert month_a < FREE_CLASS_A / 2
     assert month_b < FREE_CLASS_B / 10
+
+
+@pytest.mark.req("REQ-MODE-007")
+def test_the_hourly_schedule_makes_fewer_rounds_than_the_load_measured_above():
+    """.github/workflows/direct.yml: one feed round and at most one catch-up pass an hour,
+    so its operations are within what the test above allows."""
+    from pathlib import Path
+
+    import yaml
+
+    workflow = Path(__file__).resolve().parents[2] / ".github" / "workflows" / "direct.yml"
+    crons = [entry["cron"] for entry in yaml.safe_load(workflow.read_text())[True]["schedule"]]
+    minute, *rest = crons[0].split()
+    assert minute.isdigit() and rest == ["*"] * 4  # once an hour
+    assert 24 <= FEED_ROUNDS_PER_DAY and 24 <= CATCHUP_PASSES_PER_DAY
