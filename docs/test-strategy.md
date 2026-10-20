@@ -84,7 +84,7 @@ Each layer uses throwaway resources: a temporary Kafka topic, a temporary databa
 ## Defect management
 
 - Every defect gets an ID in the [defect log](defects/README.md), with severity, how it was found and the commit that fixed it.
-- Instructive ones get a full report from the template.
+- Instructive ones can get a full report from the template. Reports of fixed defects are kept in the git history, linked from the log.
 - A fix needs a regression test that fails without it, wherever a test can express it.
 
 ## Tooling
