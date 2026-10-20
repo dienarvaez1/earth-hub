@@ -9,6 +9,10 @@ PostgreSQL, only R2 credentials. Runs only while the bucket's marker says `direc
 - `run`: the poller, waiting for each new feed version, and catch-up's loop beside it,
   until stopped (Ctrl-C or SIGTERM), or until a handover (make mode-full) freezes the
   bucket: its next round then finds the bucket no longer in direct mode, and it stops.
+
+`--skip-unless-direct` (the schedule in .github/workflows/direct.yml): a bucket not in direct
+mode, before or during the run, is a skip (exit 0) rather than an error, so the schedule stays
+quiet while full mode or a handover has the bucket. Missing settings still fail.
 """
 
 import argparse
@@ -35,13 +39,24 @@ def main(argv: list[str] | None = None) -> int:
 
     parser = argparse.ArgumentParser(description="Run direct mode: USGS straight to R2.")
     parser.add_argument("command", choices=("once", "run"))
+    parser.add_argument(
+        "--skip-unless-direct",
+        action="store_true",
+        help="exit 0 without writing when the bucket is not in direct mode (for a schedule)",
+    )
     args = parser.parse_args(argv)
     configure_logging()
     settings = get_settings()
     try:
         bucket = Bucket(make_s3_client(settings), settings.r2_bucket)
         mode.require(bucket, mode.DIRECT)
-    except (MissingSettings, mode.WrongMode) as exc:
+    except mode.WrongMode as exc:
+        if args.skip_unless_direct:
+            print(f"direct: skipped: {exc}")
+            return 0
+        print(f"direct: {exc}", file=sys.stderr)
+        return 2
+    except MissingSettings as exc:
         print(f"direct: {exc}", file=sys.stderr)
         return 2
 
@@ -71,6 +86,11 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "once":
             result = poller.run_round()
             print(f"direct: poller {result.status}, {result.published} events processed")
+            if stopping.is_set():  # a handover froze the bucket during the round
+                if args.skip_unless_direct:
+                    print("direct: skipped: the bucket left direct mode during the run")
+                    return 0
+                return 1
             now = datetime.now(UTC)
             for name, interval, job in (
                 ("catchup", settings.catchup_interval_seconds, catchup.catch_up),

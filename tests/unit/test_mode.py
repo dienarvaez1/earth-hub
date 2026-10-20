@@ -114,6 +114,18 @@ def direct_main(s3, monkeypatch, feature_template):
     return entry.main
 
 
+def deleted_checked_recently(s3) -> None:
+    """Direct mode's state with the deleted-events check an hour old: not due (catch-up is)."""
+    state = {
+        "seq": 0,
+        "run_id": None,
+        "written_at": None,
+        "sent": {},
+        "checkpoints": {"deleted": (datetime.now(UTC) - timedelta(hours=1)).isoformat()},
+    }
+    s3.put_object(Bucket=BUCKET, Key="_state/direct.json", Body=json.dumps(state))
+
+
 @pytest.mark.req("REQ-MODE-012")
 def test_direct_once_refuses_a_bucket_in_full_mode(direct_main, s3, capsys):
     assert direct_main(["once"]) == 2
@@ -124,15 +136,7 @@ def test_direct_once_refuses_a_bucket_in_full_mode(direct_main, s3, capsys):
 @pytest.mark.req("REQ-MODE-012")
 def test_direct_once_runs_the_poller_and_catch_up_when_due(direct_main, s3, capsys):
     start_direct(s3)
-    # The deleted-events check ran an hour ago: not due; catch-up never ran: due.
-    state = {
-        "seq": 0,
-        "run_id": None,
-        "written_at": None,
-        "sent": {},
-        "checkpoints": {"deleted": (datetime.now(UTC) - timedelta(hours=1)).isoformat()},
-    }
-    s3.put_object(Bucket=BUCKET, Key="_state/direct.json", Body=json.dumps(state))
+    deleted_checked_recently(s3)
     assert direct_main(["once"]) == 0
     out = capsys.readouterr().out
     assert "poller published, 1 events processed" in out
@@ -160,3 +164,53 @@ def test_a_long_running_direct_process_is_told_when_a_handover_freezes_the_bucke
     mode.write(Bucket(s3, BUCKET), frozen, state=mode.HANDING_OVER)
     assert len(publisher.publish([message]).failed) == 1
     assert stopped == [1]
+
+
+@pytest.mark.req("REQ-MODE-014")
+@pytest.mark.parametrize("marker", [None, mode.Mode(mode.DIRECT, mode.HANDING_OVER)])
+def test_a_scheduled_round_skips_a_bucket_not_in_direct_mode(direct_main, s3, capsys, marker):
+    if marker is not None:
+        s3.put_object(Bucket=BUCKET, Key=mode.MODE_KEY, Body=marker.body())
+    before = s3.list_objects_v2(Bucket=BUCKET)["KeyCount"]
+    assert direct_main(["once", "--skip-unless-direct"]) == 0
+    assert "direct: skipped: the bucket is in" in capsys.readouterr().out
+    assert s3.list_objects_v2(Bucket=BUCKET)["KeyCount"] == before
+
+
+@pytest.mark.req("REQ-MODE-014")
+def test_a_scheduled_round_runs_as_direct_once_in_direct_mode(direct_main, s3, capsys):
+    start_direct(s3)
+    deleted_checked_recently(s3)
+    assert direct_main(["once", "--skip-unless-direct"]) == 0
+    out = capsys.readouterr().out
+    assert "poller published, 1 events processed" in out and "skipped" not in out
+    assert s3.get_object(Bucket=BUCKET, Key="earthquakes/ak1.json")
+
+
+@pytest.mark.req("REQ-MODE-014")
+@pytest.mark.parametrize(("flags", "code"), [(["--skip-unless-direct"], 0), ([], 1)])
+def test_a_handover_during_a_scheduled_round_is_a_skip_and_catch_up_does_not_run(
+    direct_main, s3, capsys, monkeypatch, flags, code
+):
+    start_direct(s3)
+
+    def frozen(self, *args, **kwargs):  # a handover froze the bucket just before this round
+        raise mode.WrongMode("the bucket is in direct, handing-over mode, not direct")
+
+    monkeypatch.setattr(DirectRunner, "process", frozen)
+    assert direct_main(["once", *flags]) == code
+    out = capsys.readouterr().out
+    assert "events processed" in out and "catchup" not in out
+    assert ("left direct mode during the run" in out) == bool(flags)
+
+
+@pytest.mark.req("REQ-MODE-014")
+def test_missing_settings_still_fail_a_scheduled_round(direct_main, monkeypatch, capsys):
+    from earth_hub.export.bucket import MissingSettings
+
+    def missing(settings):
+        raise MissingSettings("set R2_BUCKET, R2_ACCESS_KEY_ID and R2_SECRET_ACCESS_KEY")
+
+    monkeypatch.setattr("earth_hub.export.bucket.make_s3_client", missing)
+    assert direct_main(["once", "--skip-unless-direct"]) == 2
+    assert "set R2_BUCKET" in capsys.readouterr().err

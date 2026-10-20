@@ -1,0 +1,104 @@
+# Direct mode on a schedule (docs/technical/ci.md#direct-mode-on-a-schedule): USGS straight to
+# R2 with no machine of ours running.
+#
+# round      every hour: one poller round, and catch-up if due (make direct-once)
+# reconcile  every day: direct mode's bucket invariants, read-only (make reconcile-direct)
+#
+# Both skip (exit 0) while the bucket is not in direct mode: `make mode-full` pauses the
+# schedule, `make mode-direct` resumes it. Only one direct process should write: stop any
+# `make direct-run` elsewhere while this schedule is on.
+#
+# The only workflow with secrets: R2 credentials, as repository secrets (GitHub Free has no
+# environments for private repositories), given only to the step that needs them. No
+# pull_request or push trigger, and pull requests from forks never get secrets. Actions are
+# pinned to commit SHAs (the tag is in the comment); the token is read-only.
+
+name: Direct mode
+
+on:
+  schedule:
+    - cron: "17 * * * *" # round
+    - cron: "41 5 * * *" # reconcile
+  workflow_dispatch:
+    inputs:
+      job:
+        description: What to run
+        type: choice
+        options: [round, reconcile]
+        default: round
+
+permissions:
+  contents: read
+
+# One at a time, and never cancelled halfway: a round's redo record would finish it, but the
+# lock would hold the next one back for up to 15 minutes.
+concurrency:
+  group: direct-mode
+  cancel-in-progress: false
+
+env:
+  UV_PYTHON_DOWNLOADS: automatic
+  # GitHub starts scheduled runs a few minutes late, unevenly: intervals a little shorter than
+  # the schedule, so an hourly run never finds catch-up 59 minutes old and skips it.
+  CATCHUP_INTERVAL_SECONDS: "3000"
+  DELETED_CHECK_INTERVAL_SECONDS: "82800"
+
+jobs:
+  round:
+    name: Direct round
+    if: github.event.schedule == '17 * * * *' || inputs.job == 'round'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          enable-cache: true
+      - name: Configure from the example settings
+        run: cp .env.example .env
+      - run: make install
+      - name: Direct round
+        env:
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET }}
+          USGS_CONTACT: ${{ vars.USGS_CONTACT }}
+        run: |
+          set -o pipefail
+          uv run python -m earth_hub.direct once --skip-unless-direct | tee output.txt
+      - name: Summary on the run page
+        if: always()
+        # The lines that are not JSON log records: the command's own summary.
+        run: grep -v '^{' output.txt >> "$GITHUB_STEP_SUMMARY" || echo "no summary written" >> "$GITHUB_STEP_SUMMARY"
+
+  reconcile:
+    name: Direct reconcile
+    if: github.event.schedule == '41 5 * * *' || inputs.job == 'reconcile'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          enable-cache: true
+      - name: Configure from the example settings
+        run: cp .env.example .env
+      - run: make install
+      - name: Reconcile
+        env:
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET }}
+        run: |
+          set -o pipefail
+          uv run python -m earth_hub.direct.reconcile --skip-unless-direct | tee output.txt
+      - name: Summary on the run page
+        if: always()
+        # The lines that are not JSON log records: the command's own summary.
+        run: grep -v '^{' output.txt >> "$GITHUB_STEP_SUMMARY" || echo "no summary written" >> "$GITHUB_STEP_SUMMARY"

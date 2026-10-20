@@ -14,6 +14,9 @@ never writes. Each check counts what breaks an invariant; all must be zero, or i
 
 With --deep it also reads every row object (one request each: 115k requests for a full
 bucket) and checks it against its manifest fingerprint.
+
+With --skip-unless-direct (the daily check in .github/workflows/direct.yml) a bucket not in
+direct mode is a skip (exit 0): full mode's exports do not keep direct mode's state.
 """
 
 import argparse
@@ -25,6 +28,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from earth_hub.direct.store import LOG_PREFIX, BucketState, record_of, row_body
+from earth_hub.export import mode
 from earth_hub.export.bucket import Bucket
 from earth_hub.export.r2 import TABLE_PREFIX, fingerprint, object_row, row_key
 from earth_hub.export.snapshot import content_hash
@@ -129,6 +133,11 @@ def main(argv: list[str] | None = None) -> int:
 
     parser = argparse.ArgumentParser(description="Check direct mode's state in the bucket.")
     parser.add_argument("--deep", action="store_true", help="also read every row object")
+    parser.add_argument(
+        "--skip-unless-direct",
+        action="store_true",
+        help="exit 0 without checking when the bucket is not in direct mode (for a schedule)",
+    )
     args = parser.parse_args(argv)
     configure_logging()
     settings = get_settings()
@@ -137,6 +146,12 @@ def main(argv: list[str] | None = None) -> int:
     except MissingSettings as exc:
         print(f"reconcile-direct: {exc}", file=sys.stderr)
         return 2
+    if args.skip_unless_direct:
+        try:
+            mode.require(bucket, mode.DIRECT)
+        except mode.WrongMode as exc:
+            print(f"reconcile-direct: skipped: {exc}")
+            return 0
     report = reconcile(bucket, deep=args.deep, workers=settings.export_workers)
     print(
         f"rows {report.rows}, IDs {report.ids}, log {report.log_objects} objects up to "
