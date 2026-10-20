@@ -1,10 +1,43 @@
 # Earth Hub
 
-Local-first earthquake data platform: the USGS earthquake feed flows through Apache Kafka into PostgreSQL and out through a REST API, with data quality and testing treated as first-class concerns. See [docs/IMPLEMENTATION.md](docs/IMPLEMENTATION.md) for the full plan.
+A local-first earthquake data platform, built as a QA engineering portfolio project. The live USGS feed flows through Apache Kafka into validated PostgreSQL tables. A read-only REST API serves them, and a public dashboard shows them from an export to Cloudflare R2. The point is less the pipeline than the evidence that it works: every requirement traces to a passing test, every defect found is logged with its root cause, and CI runs the regression on every pull request.
 
-**Status:** Milestone 5 (end-to-end QA). Live USGS events flow through Kafka into validated PostgreSQL tables and are served by a read-only REST API. The whole path is covered by automated end-to-end and outage tests, run by one regression command. Analytics, observability and performance come next, in Milestone 6.
+**Status:** Milestones 1 to 6 are complete, and Milestone 7 (CI and documentation) is in progress; the public release is deferred. The dashboard runs at **https://earth-hub.diego-narvaez.workers.dev**, marked as a preview and kept out of search engines until the release.
 
-## Requirements
+## For reviewers
+
+| If you have | Start with |
+| --- | --- |
+| 2 minutes | [Quality at a glance](#quality-at-a-glance), then the [defect log](docs/defects/README.md) |
+| 10 minutes | The [demo walkthrough](docs/demo.md): start it, run the tests, ingest the live feed, inspect what was stored and why, query the API, break something on purpose |
+| An hour | The [architecture](docs/architecture.md), the [test strategy](docs/test-strategy.md), the [requirements](docs/requirements.md) and their [traceability matrix](docs/traceability-matrix.md), and [how Claude Code was used](#how-claude-code-was-used) |
+
+```mermaid
+flowchart LR
+    usgs[("USGS feeds")] --> poller --> kafka[["Kafka"]] --> consumer["consumer + validation"] --> pg[("PostgreSQL")] --> api["REST API"]
+    api -- "make export-r2" --> r2[("Cloudflare R2")] --> dash["dashboard<br/>(DuckDB in the browser)"]
+```
+
+## Quality at a glance
+
+| | |
+| --- | --- |
+| **Requirements** | 137 requirements, each with a stable ID and at least one passing test that names it (`@pytest.mark.req`). A test naming an unknown ID fails at collection, and `make traceability` fails if any requirement has no passing test |
+| **Tests** | About 830, in eight layers: unit, integration, API, contract (Schemathesis), end-to-end, dashboard (in Chromium), disruptive (real outages) and performance. About 91% coverage across all layers |
+| **Defects** | 37 defects found and fixed, each with its milestone, severity, how it was found and the commit that fixed it; [six written up in full](docs/defects/README.md) with root cause and prevention |
+| **CI** | On every pull request and push to `main`, lint and unit tests, then the regression of every layer except performance, from the example settings and with no secrets ([docs/ci.md](docs/ci.md)) |
+| **Data integrity** | Kafka offsets committed only after the database; idempotent upserts; newer revisions win; `make reconcile` compares each topic with the database. The guarantee claimed is at-least-once, never exactly-once |
+| **Recovery** | PostgreSQL stopped while events arrive, a Kafka restart, crashes between the two commits, poller and consumer restarts: each tested, and each ending in a reconciliation |
+| **Docs that can't drift** | The [API examples](docs/api.md) and [SQL examples](docs/sql-examples.md) are replayed by tests; the [schema](docs/schema.md) is checked against the models; every relative link in the docs is checked |
+
+**Some things the testing found:**
+- **A security leak:** the database password printed in test tracebacks (DEF-001).
+- **A flaky network setup:** `localhost` resolving to IPv6 made Kafka offset lookups fail intermittently (DEF-004).
+- **A false pass:** an outage check reported PASS while leaving a consumer running (DEF-008).
+- **Six crashes from generated requests:** Schemathesis found server errors that hand-written tests missed (DEF-013 to DEF-018).
+- **Missing events in a live backfill:** reconciling a year of real data with USGS, window by window, showed a merged duplicate's deletion hiding a real earthquake (DEF-026).
+
+## Quick start
 
 | Tool | Version used | Notes |
 | --- | --- | --- |
@@ -12,286 +45,139 @@ Local-first earthquake data platform: the USGS earthquake feed flows through Apa
 | Python | 3.13 | Pinned in `.python-version` |
 | uv | 0.13 | `brew install uv` |
 | GNU Make | any | Preinstalled on macOS and Linux |
+| Node.js | 24 | Only for the dashboard |
 
-Services run in Docker, so Kafka and PostgreSQL don't need to be installed locally:
-
-| Service | Image | Reachable from your machine at |
-| --- | --- | --- |
-| Kafka (KRaft, single node) | `apache/kafka:4.2.2` | `127.0.0.1:29092` (Kafka protocol), `127.0.0.1:9101` (JMX) |
-| PostgreSQL | `postgres:18.6` | `localhost:5433` |
-
-PostgreSQL uses host port 5433 because 5432 is often taken by a local PostgreSQL. All ports are bound to `127.0.0.1` only. Kafka uses `PLAINTEXT` with no authentication, and JMX has no authentication either, which is acceptable only because nothing outside this machine can reach them.
-
-To inspect the broker with JConsole: `jconsole 127.0.0.1:9101`, then choose *Insecure connection*. Kafka's metrics are under the `kafka.server`, `kafka.network` and `kafka.log` MBean domains.
-
-To browse messages, run `make kafka-ui` and open `http://127.0.0.1:8080`. It uses [Kafbat UI](https://github.com/kafbat/kafka-ui) (`ghcr.io/kafbat/kafka-ui:v1.5.0`, Apache 2.0), which is not started by `make up`. In it you can:
-- read messages in `earthquakes.raw`, filtered by key, partition or offset
-- see how messages are spread across partitions
-- see the `earth-hub-consumer` group's lag
-
-It runs **read-only**, so producing, deleting or changing topics is refused (`405`). It doesn't show broker JMX metrics: Kafka's JMX advertises `127.0.0.1` for JConsole on your machine, and that address isn't reachable from another container.
-
-## Getting started
+Kafka and PostgreSQL run in Docker, bound to `127.0.0.1`.
 
 ```bash
 cp .env.example .env     # then change POSTGRES_PASSWORD
-make install             # create .venv from uv.lock
-make up                  # start Kafka and PostgreSQL, create the earthquakes.raw topic
-make migrate             # apply database migrations
-make smoke               # check Kafka and PostgreSQL work end to end
-make ingest              # run the pipeline (poller + consumer) on the live USGS feed
-make reconcile           # check every Kafka message reached PostgreSQL
-make api                 # serve the REST API at http://127.0.0.1:8000/docs
+make install             # .venv from uv.lock
+make up                  # Kafka and PostgreSQL, healthy, with the topics
+make migrate             # the schema
+make test                # unit tests: no Docker or network needed
+make regression          # every layer, with reports in reports/ (needs make dashboard-install for the dashboard layer)
+make ingest              # the pipeline on the live USGS feed
+make reconcile           # every Kafka message reached PostgreSQL
+make api                 # the REST API at http://127.0.0.1:8000/docs
 ```
+
+The [demo walkthrough](docs/demo.md) goes through these with what to look for.
 
 ## Commands
 
 | Command | What it does |
 | --- | --- |
 | `make install` | Install dependencies into `.venv` from `uv.lock` |
-| `make up` | Start Kafka and PostgreSQL, wait until healthy, create topics |
-| `make down` | Stop the services, keeping their data |
-| `make reset` | Stop the services and delete their data |
-| `make lint` | Check style and formatting with Ruff |
-| `make format` | Fix style and formatting |
-| `make regression` | **Every test layer in order, with reports in `reports/`** |
+| `make up` / `make down` / `make reset` | Start Kafka and PostgreSQL and wait until healthy / stop them, keeping data / stop them and delete data |
+| `make migrate` | Apply database migrations with Alembic |
+| `make lint` / `make format` | Check / fix style and formatting with Ruff |
+| `make regression` | **Every test layer in order, with reports in `reports/` and the traceability matrix** |
 | `make test` | Unit tests; no Docker or network needed |
 | `make test-integration` / `make smoke` | Integration, API and contract tests against the running services |
-| `make test-e2e` | End-to-end tests, from the feed to the API |
+| `make test-e2e` / `make test-dashboard` | End-to-end tests, from a mock feed to the API / the dashboard in Chromium against a simulated R2 |
 | `make test-disruptive` | Tests that stop and start the shared Kafka and PostgreSQL containers |
-| `make test-all` | Every non-disruptive test in one process, which also catches tests that affect each other |
-| `make flake-check` | The end-to-end suite 5 times in a row |
-| `make traceability` | Rebuild the traceability matrix from the last regression run |
-| `make smoke-restart` | Restart Kafka and PostgreSQL and check data survives (disruptive) |
-| `make migrate` | Apply database migrations with Alembic |
-| `make ingest` | Build and start the pipeline containers: migrate, poller, consumer (live USGS feed) |
-| `make ingest-once` | Poll the live feed once from your machine and exit |
-| `make ingest-logs` / `make ingest-stop` | Follow or stop the poller and consumer |
-| `make api` / `make api-stop` | Start or stop the API container (`http://127.0.0.1:8000`) |
-| `make api-dev` | Run the API on your machine with auto-reload |
-| `make kafka-ui` / `make kafka-ui-stop` | Start or stop the read-only Kafka web viewer (`http://127.0.0.1:8080`) |
-| `make backfill START=... [END=...]` | Backfill from the USGS FDSN service, one week per request |
-| `make catchup-once` | One catch-up pass over the `all_month` feed and one deleted-events check |
 | `make test-performance` | A full year of synthetic backfill through the pipeline, timed |
-| `make consume` | Run the consumer from your machine |
-| `make reconcile` | Check every Kafka message has a database row, and the tables' invariants |
-| `make dashboard-install` / `make dashboard-dev` / `make dashboard-deploy` | Install the dashboard's Node dependencies and test browser / serve it locally over the real bucket / publish it to Cloudflare Workers |
-| `make test-dashboard` | The dashboard in Chromium against a simulated R2 (no Cloudflare) |
-| `make export-r2 [DRY_RUN=1] [VERIFY=1]` / `make export-r2-runs` | Copy the `earthquakes` table to Cloudflare R2 through the API, uploading only new and changed rows / list past runs |
-| `make check-db-outage` | Stop PostgreSQL mid-stream and check nothing is lost or duplicated (disruptive) |
+| `make test-all` / `make flake-check` | Every non-disruptive test in one process / the end-to-end suite 5 times in a row |
+| `make traceability` | Rebuild the traceability matrix from the last regression run |
+| `make smoke-restart` / `make check-db-outage` | Restart both services and check data survives / stop PostgreSQL mid-stream and check nothing is lost (both disruptive) |
 | `make coverage` | Unit tests with a coverage report |
+| `make ingest` / `make ingest-logs` / `make ingest-stop` | Start the pipeline containers (migrate, poller, consumers, catch-up) on the live feed / follow / stop them |
+| `make ingest-once` / `make consume` | One poller round / the consumer, on your machine |
+| `make backfill START=... [END=...]` / `make catchup-once` | Backfill from the USGS FDSN service, one week per request / one catch-up pass |
+| `make reconcile` | Check every Kafka message has a database row, and the tables' invariants |
+| `make api` / `make api-stop` / `make api-dev` | Start / stop the API container, or run it on your machine with reload |
+| `make kafka-ui` / `make kafka-ui-stop` | A read-only web viewer for the topics at `http://127.0.0.1:8080` |
+| `make export-r2 [DRY_RUN=1] [VERIFY=1]` / `make export-r2-runs` | Copy the `earthquakes` table to Cloudflare R2 through the API, only new and changed rows / list past runs |
+| `make dashboard-install` / `make dashboard-dev` / `make dashboard-deploy` | The dashboard's Node dependencies and test browser / a local server over the real bucket / publish to Cloudflare Workers |
 
-## Ingestion
+## What is in it
 
-The poller (`src/earth_hub/ingestion/`) fetches the USGS `all_day` feed and publishes each new or revised event to `earthquakes.raw`, keyed by the USGS event ID.
-
-- **Timing:** the feed is regenerated every minute. The poller sends `If-Modified-Since` and waits until just after the feed's `Expires` time (plus 2–5 s of jitter, between 10 s and 5 min), falling back to `POLL_INTERVAL_SECONDS` when the header is missing. Expect events in Kafka 1–2 minutes after USGS publishes them.
-- **Only changes are sent:** an event is published when it is new or its `updated` timestamp has moved forward, and counts as sent only once Kafka confirms delivery. Failed deliveries are retried next round.
-- **Restarts:** on startup the poller rebuilds what it has sent from the last 26 hours of `earthquakes.raw`, so a restart doesn't resend the feed.
-- **Errors:** timeouts, connection errors, `429` and `5xx` are retried up to 3 times with backoff; other `4xx` are not. A failed round sends nothing and is retried at the fallback interval.
-- **Message format:** each value is a JSON envelope (`schema_version`, `event_id`, `ids`, `source_updated_ms`, `event_time_ms`, `source`, `feed_generated_ms`, `fetched_at`) around the unchanged USGS feature in `payload`. Only features without a usable `id`, `updated` or `time` are rejected; data-quality rules are applied by the consumer (Milestone 3).
-- **Not yet covered:** revisions to events older than 24 hours, and outages longer than the feed window. A catch-up query against the USGS FDSN API is planned for a later milestone.
-
-`make up` never starts the poller, so tests don't depend on live data. Its container is healthy while successful rounds keep happening (heartbeat within 3 poll intervals).
-
-## Backfill and catch-up
-
-```bash
-make backfill START=2026-01-01            # 2026 up to now, one request per week
-make backfill START=2026-01-01 END=2026-06-01
-make catchup-once                         # one all_month pass and one deleted-events check
-```
-
-- **Backfill** reads the USGS FDSN event service, one calendar week per request: Sunday 00:00:00 UTC to the next Sunday, the first week starting at `START`. Each window ends exactly where the next begins, because FDSN ignores milliseconds in query times; "ending at 23:59:59.999" would lose events.
-- **Every week is checked** against FDSN's `/count`, and is recorded in `backfill_windows` only when complete. A re-run skips finished weeks.
-- **Weeks are split into days** when USGS times out on them, or when they hold more than 20,000 events.
-- **A final sweep** picks up events USGS added or revised while the backfill ran.
-- **Requests go one at a time**, with a 1-second pause between them.
-- **The `catchup` service** (started by `make ingest`) reads the `all_month` feed hourly, which covers revisions and outages up to 30 days, and checks FDSN daily for deleted events.
-- **Both** publish to `earthquakes.backfill`, and only events new or newer than what is stored. A separate batched consumer, `consumer-backfill`, stores them, so live events never wait behind history. A year of history (139,579 events) goes through in about 42 seconds.
-
-Set `USGS_CONTACT` in `.env` (for example a public repository URL) to add a contact to the `User-Agent` sent to USGS.
-
-## Persistence
-
-The consumer (`src/earth_hub/consumers/`) reads `earthquakes.raw` and stores each message in PostgreSQL:
-
-| Table | Holds |
-| --- | --- |
-| `earthquakes` | One row per physical event: normalized time, location, magnitude, status and source fields, plus `revision_count` |
-| `earthquake_ids` | Every USGS ID ever seen, mapped to its event. When USGS changes an event's preferred ID, or two reports turn out to be one quake, the IDs stay linked |
-| `raw_events` | Every Kafka message with its topic, partition and offset, the full message, and its outcome: `applied`, `duplicate`, `stale`, `rejected` (with the rule broken) or `error` |
-
-Each message is handled in one transaction:
-1. Record it in `raw_events`. A redelivered offset is recognized and skipped.
-2. Validate it against the [data-quality rules](docs/data-quality-rules.md).
-3. Find its event through any of its IDs, merging records that turn out to be the same quake.
-4. Update the event only if the message's `updated` time is newer.
-
-The Kafka offset is committed only after the database commit, so delivery is at-least-once and redelivery is harmless.
-
-- **Database outage:** the consumer retries the same message with backoff (up to 30 s) until PostgreSQL is back, and never rejects a message because of it. Its health check fails meanwhile.
-- **Unexpected errors:** a message that fails 3 times for a non-database reason is stored with `outcome = 'error'` and the exception, so one bad message can't stall a partition.
-- **Several consumers:** PostgreSQL advisory locks on each event ID stop two consumers from creating or merging the same event at once.
-
-`make reconcile` compares the topic with `raw_events`. A missing row below the consumer group's committed offset counts as **lost**; at or above it, as **pending** (lag). It also checks five invariants, such as every preferred ID mapping to its own event.
-
-## REST API
-
-A read-only FastAPI app (`src/earth_hub/api/`) over PostgreSQL. It never reads from Kafka or USGS. Interactive docs are at `/docs` and the OpenAPI schema at `/openapi.json`.
-
-| Endpoint | Returns |
-| --- | --- |
-| `GET /api/v1/health` | Database status, newest event time, version. `503` when the database is down |
-| `GET /api/v1/earthquakes` | A page of events: `{items, total, limit, offset}` |
-| `GET /api/v1/earthquakes/{event_id}` | One event. Former USGS IDs work too, and return the event under its current ID |
-| `GET /api/v1/earthquakes/stats` | Count, min/max/average magnitude, counts by event type and by magnitude type |
-| `GET /api/v1/earthquakes/summary/hourly` | Counts per UTC hour, empty hours included (24 h by default, 31 days at most) |
-| `GET /api/v1/earthquakes/summary/magnitude` | Counts for `<0`, `0-1`, … `6-7`, `>=7` and `unknown`, empty ranges included |
-
-**Filters** (list, stats and summaries):
-- `min_magnitude` and `max_magnitude` (−2 to 10.5)
-- `start_time` (inclusive) and `end_time` (exclusive): ISO 8601 date-times, UTC assumed without a timezone, years 1900–2099
-- `place`: a case-insensitive substring, where `%` and `_` match literally
-- `event_type`, `review_status`, and `include_deleted` (deleted events are hidden by default)
-
-**List only:**
-- `limit`: 1–500, default 20
-- `offset`: 0–10,000,000
-- `sort`: `event_time`, `magnitude` or `depth`
-- `order`: `asc` or `desc` (default `desc`)
-
-Missing magnitudes sort last, and ties break by storage order, so pages are stable.
-
-**Errors** always look like `{"error": {"code", "message", "details"}}`:
-
-| Code | Status |
-| --- | --- |
-| `invalid_parameters` | `422`, listing every problem |
-| `not_found` | `404` |
-| `method_not_allowed` | `405`, with an `Allow` header |
-| `database_unavailable` | `503` |
-| `internal_error` | `500`, with no internals |
-
-```bash
-curl -s 'http://127.0.0.1:8000/api/v1/earthquakes?min_magnitude=4&sort=magnitude&limit=5'
-curl -s 'http://127.0.0.1:8000/api/v1/earthquakes/summary/hourly?start_time=2026-10-16T00:00:00Z'
-```
-
-## Export to R2
-
-`make export-r2` copies the `earthquakes` table to a Cloudflare R2 bucket, on demand only. It reads through the API (`GET /api/v1/export/earthquakes`, every column exactly as stored, paged by `id`), never from PostgreSQL, so the API must be running (`make api`).
-
-Set `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY` and `R2_BUCKET` in `.env`, from an R2 API token with Object Read & Write on the bucket.
-
-| In the bucket | What it is |
-| --- | --- |
-| `earthquakes/<id>.json` | One object per row, every column |
-| `_state/earthquakes-manifest.json.gz` | SHA-256 of each row as last uploaded |
-| `_state/lock.json` | Held while a run is in progress (expires after 2 hours if a run crashes) |
-| `runs/<run_id>.json` | One record per run: status, counts, timings, errors (also in `reports/exports/`) |
-| `analytics/earthquakes.parquet` | The whole table in one Parquet file for the dashboard: every row and column, types kept (about 7.5 MB for 115,000 rows) |
-| `analytics/meta.json` | What the snapshot holds: run, row count, size, SHA-256, column types |
-
-A run uploads rows that are new or changed since their last upload, skips unchanged ones, and deletes objects for rows that left the table (merged events). Each row is one object named by its primary key, so reruns and interrupted runs can never create duplicates; a failed upload is retried by the next run. Progress is saved every 10 pages (10,000 rows), so after an interruption the next run carries on where it stopped. `EXPORT_WORKERS` (default 64) sets how many uploads run at once: a first full export of about 115,000 rows took 98 minutes at 16. By default a run trusts the manifest to say what the bucket holds, so a run with a few changes takes about 15 s. `make export-r2 VERIFY=1` also lists the bucket (about 100 s for 115,000 objects) to delete objects the manifest does not know, re-upload any removed from the bucket by hand, and check the result against the bucket itself; a run without a readable manifest always does this. Run it now and then, or after touching the bucket outside the exporter. A run succeeds only when the bucket then holds exactly the rows it read.
-
-```bash
-make export-r2 DRY_RUN=1   # what would change, writing nothing
-make export-r2             # e.g. read 114731  new 0  updated 12  unchanged 114719  deleted 1  failed 0
-make export-r2-runs        # past runs; one that never finished shows as interrupted
-```
-
-After a run that succeeded, the export rewrites the Parquet snapshot if the rows changed. It is built from the same rows the run uploaded, so it holds exactly what the bucket does; a dry run or a failed run never writes it.
-
-The dashboard's reports are SQL files in [`dashboard/queries/`](dashboard/queries): the page runs them in the browser with DuckDB-WASM over the snapshot, and `tests/unit/test_dashboard_queries.py` runs the same files on a fixed dataset with answers worked by hand. All filters live in one `filter` table, set through `set_filter.sql`; the queries take no parameters.
-
-## Dashboard
-
-A public page with an interactive map and charts of every stored earthquake, built only from the R2 export, served by a Cloudflare Worker at `https://earth-hub.<your-subdomain>.workers.dev` on the free plan.
-
-| Part | What it does |
-| --- | --- |
-| `dashboard/src/worker.ts` | Serves `/data/earthquakes.parquet` and `/data/meta.json` from the bucket through an R2 binding, with `ETag`, `304`, byte ranges and a 5-minute browser cache. Nothing else in the bucket is reachable, and the page holds no credentials |
-| `dashboard/index.html`, `dashboard/src/` | The page: DuckDB-WASM runs `dashboard/queries/*.sql` over the snapshot in the browser; MapLibre GL draws the map on OpenFreeMap tiles; Observable Plot draws the charts |
-| `scripts/fetch_duckdb_extensions.py` | Downloads DuckDB's Parquet extension (pinned by SHA-256) so the page serves it itself |
-| `scripts/dashboard_config.py` | Writes `dashboard/wrangler.jsonc` with the bucket from `R2_BUCKET` |
-
-```bash
-make dashboard-install   # once: npm ci and the test browser
-make dashboard-dev       # http://127.0.0.1:8787, over the real bucket (read-only)
-npx wrangler login       # once, before the first deploy
-make dashboard-deploy    # publish; prints the workers.dev address
-```
-
-The page is marked **Preview — in development** and asks search engines not to index it (`X-Robots-Tag: noindex` on every response, a `robots` meta tag, a disallow-all `robots.txt`) until the project's release. Its footer links to `third-party-licenses.txt`, the licenses of the software it ships, which the build writes from the bundled packages (a package without a license text fails the build; see `dashboard/licenses/`).
-
-The page loads two things from elsewhere: the DuckDB-WASM engine from jsDelivr (its 35 MB WebAssembly file is over a Worker's 25 MiB limit for static files) and the map tiles from OpenFreeMap. Everything else, including the snapshot, comes from the Worker.
-
-**Measured** (`reports/dashboard-performance.json`, medians of five cold runs in headless Chromium on a developer machine, data served locally):
-
-| Rows | Snapshot | First map (Today) | All events (Last 3 years) | Filter change |
-| --- | --- | --- | --- | --- |
-| 115,000 | 6.0 MB | about 4 s | about 0.5 s | about 140 ms |
-| 1,000,000 | 36 MB | about 4.5 s | about 3.7 s | about 900 ms |
-
-About 3–4 s of the first map is the browser compiling DuckDB's engine; browsers cache that between visits, which the tests do not measure. At 1M rows, building the map's points is the next thing to make faster.
-
-**Time presets:** Today (the default), This week (from Monday), This month, Last 3 months, This year, Last 3 years, and Custom with From and To calendars. Every period is whole UTC days through today; each preset picks a chart grouping (per day, week or month). Up to 5,000 events the map shows every event as its own point; above that it clusters them, except events of magnitude 6 or more, which always stay single points on top.
-
-## Observability
-
-Every service logs JSON lines. Every pipeline line has a `stage` (`fetch`, `parse`, `publish`, `persist`), and every line about one event has its `event_id`, so one event can be followed from the feed to the database. The consumer logs a summary every minute with its outcome counts and its lag behind Kafka. [docs/observability.md](docs/observability.md) has the fields, `jq` recipes, and a controlled failure diagnosed from the logs alone (also an end-to-end test).
-
-```bash
-docker compose logs --no-log-prefix poller consumer | jq -cR 'fromjson? | select(.event_id == "us7000abcd")'
-docker compose logs --no-log-prefix consumer | jq -cR 'fromjson? | select(.message == "consumer summary") | {ts, lag, outcomes}'
-```
+| Part | What it does | More |
+| --- | --- | --- |
+| **Ingestion** | Polls the USGS `all_day` feed every minute, and publishes new and revised events to Kafka in a versioned envelope around the unchanged feature. Catch-up reads `all_month` hourly and checks deletions daily; `make backfill` loads history from the FDSN service, week by week, checked against its counts | [Architecture](docs/architecture.md#ingestion) |
+| **Persistence** | The consumer validates each message against [16 data-quality rules](docs/data-quality-rules.md), merges records USGS turns out to be one event, and stores the newest revision. Every message is kept with its outcome, rejected ones included | [Schema](docs/schema.md) |
+| **REST API** | Read-only, over PostgreSQL: events, lookups by any former ID, statistics, hourly and magnitude summaries, with one error format | [API reference](docs/api.md) |
+| **Export** | `make export-r2` copies the table to R2 on demand, uploading only what changed, then writes a Parquet snapshot | [Architecture](docs/architecture.md#export-to-r2) |
+| **Dashboard** | A Cloudflare Worker serves the page and the snapshot; the browser runs the reports itself with DuckDB-WASM, and draws the map and charts | [Architecture](docs/architecture.md#dashboard), [SQL](docs/sql-examples.md#dashboard-reports) |
+| **Observability** | JSON logs where every pipeline line has a `stage` and every line about an event its `event_id`, plus a consumer summary every minute | [Observability](docs/observability.md) |
 
 ## Tests and QA
 
-Run everything with **`make regression`**: lint, unit, integration, API, contract, end-to-end, disruptive and performance tests, in that order, stopping at the first failing layer. It takes about 3 minutes and writes:
-- `reports/regression-summary.md`
-- JUnit XML for each layer
-- a coverage report covering all layers (`reports/coverage-html/index.html`)
-- the [traceability matrix](docs/traceability-matrix.md)
+`make regression` runs these layers in order, stopping at the first that fails:
+- lint, unit, integration, API, contract;
+- end-to-end, dashboard, disruptive, performance;
+- then the traceability check.
+
+It writes `reports/regression-summary.md`, JUnit XML for each layer, a coverage report across all layers (`reports/coverage-html/index.html`) and the [traceability matrix](docs/traceability-matrix.md).
 
 | Layer | Location | What it covers |
 | --- | --- | --- |
-| Unit | `tests/unit/` | Parsing, the 16 validation rules at their boundaries, retries and timing, poller state, consumer control flow, API validation and errors. **No Docker, no network:** a guard blocks it and the live USGS feed |
-| Integration | `tests/integration/` | Real Kafka and PostgreSQL on temporary topics and databases: smoke tests, migrations, redelivery, revisions, ID changes and merges, concurrency, constraints, reconciliation |
-| API | `tests/api/` | Every endpoint over a fixed set of 20 events stored through the real consumer code; statistics and summaries checked against separate SQL |
+| Unit | `tests/unit/` | Parsing, the validation rules at their boundaries, retries and timing, poller state, consumer control flow, API validation, the export, the dashboard's SQL on hand-worked data, the CI workflow, the docs. **No Docker, no network:** a guard blocks it |
+| Integration | `tests/integration/` | Real Kafka and PostgreSQL on temporary topics and databases: migrations, redelivery, revisions, ID changes and merges, concurrency, batches against one-by-one processing, constraints, reconciliation |
+| API | `tests/api/` | Every endpoint over a fixed set of 20 events stored through the real consumer code, with aggregates checked against separately written SQL, and the documented examples replayed |
 | Contract | `tests/api/test_contract.py` | Schemathesis generates requests from the OpenAPI schema (`CONTRACT_EXAMPLES=1000` for a deeper run) |
-| Dashboard | `tests/dashboard/` | The built page and Worker under `wrangler dev` over a simulated R2, in Chromium, offline: the Worker's headers, ranges and 404s; DuckDB-WASM's answers against Python's on every report for nine filters; the form, the charts, empty results, labels, phone width, a missing snapshot. Needs `make dashboard-install` |
-| End-to-end | `tests/e2e/` | Mock USGS feed → real poller → Kafka → real consumer → PostgreSQL → API, checked only through the API. These are the plan's scenarios: new, duplicate, revised, invalid, merged and deleted events, consumer and poller restarts, an empty database, invalid requests, and a reconciled batch of 55 messages |
-| Performance | `tests/performance/` | **A full year of synthetic history** (139,579 events) through backfill, Kafka, the batched consumer and the API, with a 3-minute budget; about 42 s. Runs only with `--run-performance` |
-| Disruptive | `tests/disruptive/` | **Stops and starts the shared containers:** PostgreSQL stopped while events arrive, a Kafka restart, data surviving a restart of both. Runs only with `--run-disruptive` |
-
-Other test commands:
-- `make test-e2e`, `make test-disruptive`, and `make test-all` (every non-disruptive test in one process)
-- `make flake-check` runs the end-to-end suite 5 times in a row
-- `make smoke-restart` and `make check-db-outage` run single disruptive tests
+| End-to-end | `tests/e2e/` | A mock USGS feed → the real poller → Kafka → the real consumer → PostgreSQL → the API, checked only through the API: new, duplicate, revised, invalid, merged and deleted events, restarts, backfill and catch-up |
+| Dashboard | `tests/dashboard/` | The built page and Worker under `wrangler dev`, over a simulated R2, in Chromium, offline. It checks the Worker's headers and ranges, DuckDB-WASM's answers against Python's on every report, and the page's controls, charts, empty results and phone layout; it fails on any console error |
+| Disruptive | `tests/disruptive/` | Stops and starts the shared containers: PostgreSQL stopped while events arrive, a Kafka restart, data surviving a restart of both |
+| Performance | `tests/performance/` | A full year of synthetic history (139,579 events) through backfill, Kafka, the consumer and the API in about 42 s; the dashboard at 115,000 and 1,000,000 rows. Local only: shared CI runners can't repeat the timings |
 
 **QA documents** in `docs/`:
-- [test strategy](docs/test-strategy.md) and [test plan](docs/test-plan.md)
-- [requirements](docs/requirements.md) (131, each with an ID) and the generated [traceability matrix](docs/traceability-matrix.md)
-- the [defect log](docs/defects/README.md): 35 defects found and fixed, 6 with full reports
-- the [data-quality rules](docs/data-quality-rules.md)
+- the [test strategy](docs/test-strategy.md) and the [test plan](docs/test-plan.md) for Milestones 1–5;
+- the [requirements](docs/requirements.md), 137 of them, and the [traceability matrix](docs/traceability-matrix.md);
+- the [defect log](docs/defects/README.md): 37 defects found and fixed, 6 with full reports;
+- the [data-quality rules](docs/data-quality-rules.md) and the [known limitations](docs/limitations.md).
 
-**CI:** GitHub Actions runs lint and unit tests, then this regression without the performance layer (shared runners cannot repeat its timings), on every pull request and push to `main`, and keeps the reports as artifacts. No secrets are needed. See [docs/ci.md](docs/ci.md).
+## How Claude Code was used
 
-Tests declare what they verify with `@pytest.mark.req("REQ-...")`. `make traceability` fails if a requirement has no passing test, and a marker naming an unknown requirement fails at collection.
+Earth-Hub was built with [Claude Code](https://claude.com/claude-code), Anthropic's coding agent, as an engineering assistant inside fixed quality gates. Claude Code wrote the code, tests and documents. The author decided what was built and what counts as done.
 
-## Configuration
+**The working method**, set out in the [implementation plan](docs/IMPLEMENTATION.md#7-claude-code-development-workflow) and in [`CLAUDE.md`](CLAUDE.md), the project rules Claude Code reads in every session:
+1. **Plan.** Before each milestone, Claude Code proposes the changes, the test strategy and the acceptance criteria, and waits for approval.
+2. **Implement.** It writes the change, with tests that name the requirements they verify.
+3. **Verify.** It runs the real suites, `make regression` before anything is called done, and reports the actual results, failures included.
+4. **Review.** The author reads the pull request, and Claude Code commits, merges or deploys only when asked.
 
-Settings come from environment variables or `.env` (see `.env.example`) and are validated at startup by `src/earth_hub/config.py`. Values in `.env` are for code running on your machine; containers get their in-network host names from `docker-compose.yml`. `.env` is git-ignored and must never be committed.
+`CLAUDE.md` grew with the project. When a defect showed a class of mistake, a rule was added so it wouldn't recur. For example:
+- never use `localhost` for Kafka (DEF-004);
+- never compare `updated` times outside `revisions.py` (DEF-026);
+- name loggers so `python -m` modules keep their stage (DEF-034).
+
+**Decisions that stayed with the author:**
+- **Scope and order.** The milestone plan and the initial prompt, written before any code. Each milestone's proposal approved, revised or narrowed, and what to defer, such as the public release and the license.
+- **What counts as done.** The exit gates: every layer green, every requirement traced, the end-to-end suite passing 5 runs out of 5, and defects fixed with a regression test.
+- **Risk and exposure.** Keeping everything bound to `127.0.0.1`, the R2 export on demand only, and the dashboard public but marked as a preview until the release.
+- **When to stop.** Each merge, deploy and live operation (`make ingest`, `make export-r2`, `make dashboard-deploy`).
+
+**Not trusting AI-written tests either.** The [test strategy](docs/test-strategy.md#ai-assisted-development) applies the same safeguards to tests as to code:
+- mutation spot checks;
+- repeated and combined runs;
+- independent oracles;
+- tests of the test tooling.
+
+Five of the 37 defects were in the test tooling itself (DEF-007, DEF-008, DEF-025, DEF-028, DEF-029), found because results were checked rather than trusted. Four were found after merge (DEF-034 to DEF-037), and are logged as such.
+
+## Documentation
+
+| Page | What it holds |
+| --- | --- |
+| [Demo walkthrough](docs/demo.md) | A 10-minute guided tour |
+| [Architecture](docs/architecture.md) | Diagrams of the pipeline, the topics, recovery, the export and the dashboard; each component in detail; services and ports |
+| [Schema](docs/schema.md) | Every table and column, and how a message changes them |
+| [API reference](docs/api.md) | Endpoints, parameters, errors, and examples replayed by a test |
+| [SQL examples](docs/sql-examples.md) | The dashboard's reports and queries for inspecting PostgreSQL, with results replayed by tests |
+| [Observability](docs/observability.md) | Log fields, `jq` recipes, and a failure diagnosed from the logs |
+| [CI](docs/ci.md) | The workflow, reading a run, security |
+| [Known limitations](docs/limitations.md) | What Earth-Hub doesn't do, or does only within limits |
+| [Test strategy](docs/test-strategy.md), [test plan](docs/test-plan.md), [requirements](docs/requirements.md), [traceability](docs/traceability-matrix.md), [defects](docs/defects/README.md), [data-quality rules](docs/data-quality-rules.md) | The QA documents |
+| [Implementation plan](docs/IMPLEMENTATION.md) | The milestones, as planned and as revised |
 
 ## Troubleshooting
 
 - **Port already in use:** change `POSTGRES_PORT` in `.env`, or stop whatever is using 29092.
-- **Kafka connection errors mentioning `::1`:** use `127.0.0.1:29092`, not `localhost:29092`; the port is published on IPv4 only.
-- **Kafka slow to become healthy:** the first start takes 15–30 seconds; `make up` waits for it.
+- **Kafka connection errors mentioning `::1`:** use `127.0.0.1:29092`, not `localhost:29092`. The port is published on IPv4 only.
+- **Kafka slow to become healthy:** the first start takes 15–30 seconds, and `make up` waits for it.
 - **Start over with empty data:** `make reset && make up && make migrate`.
-- **`make reconcile` reports lost messages:** a message was acknowledged without a `raw_events` row. Check the consumer logs for that partition and offset; resetting the consumer group's offset replays it safely, because redelivery is idempotent.
+- **`make reconcile` reports lost messages:** a message was acknowledged without a `raw_events` row. Check the consumer logs for that partition and offset. Resetting the consumer group's offset replays it safely, because redelivery is idempotent.
 
 ## Data source
 

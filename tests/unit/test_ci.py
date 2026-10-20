@@ -141,3 +141,12 @@ def test_requirements_tested_only_by_a_layer_left_out_are_not_run_not_gaps(trace
 def test_without_the_option_every_untested_requirement_is_a_gap(trace_repo, capsys):
     assert traceability.main([]) == 1
     assert "REQ-T-002, REQ-T-003" in capsys.readouterr().err
+
+
+@pytest.mark.req("REQ-CI-003")
+def test_three_part_requirement_ids_are_found_in_a_layer_left_out(trace_repo):
+    # DEF-037: the pattern found REQ-T-002 but not REQ-DQ-GEO-002.
+    (trace_repo / "tests" / "slow" / "test_rules.py").write_text(
+        'pytest.mark.req("REQ-DQ-GEO-002", "REQ-E2E-011")\n'
+    )
+    assert traceability.marked_in(["tests/slow"]) == {"REQ-T-002", "REQ-DQ-GEO-002", "REQ-E2E-011"}

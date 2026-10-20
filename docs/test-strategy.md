@@ -32,7 +32,9 @@ Testing effort follows what would hurt most if it failed.
 | API | `tests/api/` | `make up` | Every endpoint over a fixed dataset of 20 events stored through the real consumer code; aggregates checked against separate SQL |
 | Contract | `tests/api/test_contract.py` | `make up` | Responses match the OpenAPI schema for generated inputs, with no server errors |
 | End-to-end | `tests/e2e/` | `make up` | The whole pipeline: mock feed → real poller → Kafka → real consumer → PostgreSQL → API, checked only through the API |
+| Dashboard | `tests/dashboard/` | `make dashboard-install` | The built page and Worker under `wrangler dev` over a simulated R2, in Chromium, offline: the Worker's responses, the reports' answers against Python's, the page's controls |
 | Disruptive | `tests/disruptive/` | `make up`, plus `--run-disruptive` | Real outages: PostgreSQL stopped while events arrive, a Kafka restart, data surviving a restart of both |
+| Performance | `tests/performance/` | `make up`, plus `--run-performance` | A year of synthetic history through the pipeline, and the dashboard at up to 1,000,000 rows, within time budgets |
 | Live checks (manual) | `make ingest`, `make reconcile` | Internet | The real feed end to end; never part of the automated suite |
 
 Each layer uses throwaway resources: a temporary Kafka topic, a temporary database migrated to the latest schema, and a unique consumer group per test. Nothing writes to `earthquakes.raw` or the main database, so the suites can run while the live pipeline is collecting data.
@@ -42,7 +44,7 @@ Each layer uses throwaway resources: a temporary Kafka topic, a temporary databa
 - **Equivalence partitioning and boundary values.** Every range rule is tested just inside, at and just outside its limits. Examples: latitude 90 versus 90.0001, magnitude −2 and 10.5, the event time exactly 1 h ahead, `limit` 500 versus 501, an exclusive `end_time` at exactly an event's time.
 - **Negative testing.** Invalid input at every layer: malformed GeoJSON, unroutable features, values `jsonb` can't hold, invalid API parameters, and SQL-injection strings.
 - **Fault injection.** Mocked HTTP failures (timeouts, `429`, `5xx`), fake Kafka delivery errors, simulated crashes between commits, a database on a closed port, and real container outages.
-- **Property-based contract testing.** Schemathesis generates requests from the OpenAPI schema. 60 examples per endpoint by default; `CONTRACT_EXAMPLES=1000` for a deeper run. It found 6 of the 20 recorded defects.
+- **Property-based contract testing.** Schemathesis generates requests from the OpenAPI schema. 60 examples per endpoint by default; `CONTRACT_EXAMPLES=1000` for a deeper run. It found 6 of the 37 recorded defects.
 - **Independent oracles.** Aggregates are checked against SQL written separately in the test, or against values computed from the test's own input. Never against the code under test.
 - **Mutation spot checks.** Before trusting a new test suite, key safeguards are deliberately broken one at a time to confirm the tests fail. So far 19 deliberate breaks across Milestones 2–4 (5, 6 and 8), and every one was caught.
 - **Repetition and combination.** Intermittent failures are treated as defects. `make flake-check` runs the end-to-end suite 5 times, and `make test-all` runs suites together to expose interactions between them (DEF-006).
@@ -63,7 +65,7 @@ Each layer uses throwaway resources: a temporary Kafka topic, a temporary databa
 | --- | --- |
 | Developer machine with Docker Compose | All automated layers; services bound to `127.0.0.1` |
 | Same machine with internet | Live checks of the real feed (`make ingest`, `make reconcile`) |
-| CI (Milestone 7) | Lint, unit, integration, API, contract and end-to-end layers on GitHub Actions |
+| CI: GitHub Actions ([ci.md](ci.md)) | Every layer but performance, on every pull request and push to `main`, from the example settings and with no secrets |
 
 ## Entry and exit criteria
 
@@ -97,4 +99,4 @@ The code and tests were written with Claude Code, under a fixed working method:
 - the real suite is run and its output reviewed
 - every diff is reviewed before commit
 
-The safeguards in this strategy apply to AI-written tests as much as to AI-written code: mutation spot checks, repeated runs, independent oracles and tests of the test tooling. Two of the recorded defects were in the test tooling itself (DEF-007 and DEF-008), found because results were checked rather than trusted.
+The safeguards in this strategy apply to AI-written tests as much as to AI-written code: mutation spot checks, repeated runs, independent oracles and tests of the test tooling. Five of the recorded defects were in the test tooling itself (DEF-007, DEF-008, DEF-025, DEF-028 and DEF-029), found because results were checked rather than trusted. The documentation is held to the same standard: its API and SQL examples are replayed by tests, and its links and schema are checked.

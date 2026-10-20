@@ -155,6 +155,7 @@ The dashboard's SQL lives in `dashboard/queries/`; the page runs it in the brows
 | REQ-OBS-001 | Every pipeline log line has a `stage` (`fetch`, `parse`, `publish`, `persist`), and every line about one event has its `event_id`: the poller logs each event it publishes, and the consumer each rejection and error (in batches; every message when one at a time), with the event's Kafka position |
 | REQ-OBS-002 | The consumer logs a summary every minute (configurable): outcome counts since the last summary and since start, and its lag per partition; the poller's round line keeps totals since start |
 | REQ-OBS-003 | An event the pipeline rejects can be diagnosed from the logs alone: filtering on its event ID shows it published and then rejected, with the rule and reason, and the consumer's summary counts it and shows the lag back at 0 |
+| REQ-OBS-004 | The live consumer handles `earthquakes.raw` one message at a time, so the outcome of every live event is logged; only the backfill consumer takes batches (DEF-036) |
 
 ## Continuous integration
 
@@ -166,6 +167,16 @@ The dashboard's SQL lives in `dashboard/queries/`; the page runs it in the brows
 | REQ-CI-002 | Each run keeps its reports (JUnit, coverage, traceability matrix, regression summary) as artifacts for 30 days and shows the regression summary on the run's page |
 | REQ-CI-003 | A layer left out with `regression.py --skip` is reported as skipped and does not fail the run; requirements covered only by its tests are listed as not run; any layer that runs and fails, or a requirement left without a passing test otherwise, still fails it |
 | REQ-CI-004 | The workflow's actions are pinned to commit SHAs and its token can only read the repository |
+
+## Documentation
+
+| ID | Requirement |
+| --- | --- |
+| REQ-DOC-001 | Every relative link in the README and in `docs/` points to a file that exists, and every `#anchor` to a heading in it |
+| REQ-DOC-002 | Every request in `docs/api.md` returns exactly the documented status, headers and body on the documented dataset |
+| REQ-DOC-003 | Every query in `docs/sql-examples.md`, the dashboard's reports and the PostgreSQL ones, gives exactly the documented result on its fixed dataset |
+| REQ-DOC-004 | `docs/schema.md` lists every column of every table, in order, with the type and nullability the models define |
+| REQ-DOC-005 | The README's counts of requirements and defects match `docs/requirements.md` and the defect log |
 
 ## End-to-end scenarios
 
