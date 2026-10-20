@@ -1,6 +1,6 @@
 """Validation of earthquakes.raw messages and conversion to normalized fields.
 
-Every rule has a stable ID, documented in docs/data-quality-rules.md, which is stored with
+Every rule has a stable ID, documented in docs/technical/data-quality-rules.md, which is stored with
 each rejected message so rejections can be counted and traced. Envelope rules stop
 validation early (nothing else can be checked); payload rules are all evaluated, so a
 rejection lists every problem at once.

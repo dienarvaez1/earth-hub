@@ -11,7 +11,7 @@ DDL), stop and ask: the consumer owns these tables, and the migrations own the s
 
 Run from the repository root, through the container's local socket (no password needed or printed):
 `docker compose exec -T postgres psql -U earth_hub_app earth_hub -c "<SQL>"`. Tables and columns:
-`docs/schema.md`; more queries with their meaning: `docs/sql-examples.md` (Inspecting PostgreSQL).
+`docs/technical/schema.md`; more queries with their meaning: `docs/technical/sql-examples.md` (Inspecting PostgreSQL).
 
 | Argument | SQL |
 | --- | --- |

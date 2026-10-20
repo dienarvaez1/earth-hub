@@ -8,7 +8,7 @@ argument-hint: "[health | list <params> | event <ID> | stats <params> | hourly <
 
 Base URL `http://127.0.0.1:8000/api/v1` (the `API_PORT` in `.env` if changed). If nothing answers, the API
 isn't running: say `make api` (or `/eh-start api`) starts it, or run it yourself if the user asked for results.
-Reference and examples: `docs/api.md`; interactive docs at http://127.0.0.1:8000/docs.
+Reference and examples: `docs/technical/api.md`; interactive docs at http://127.0.0.1:8000/docs.
 
 | Argument | Request |
 | --- | --- |

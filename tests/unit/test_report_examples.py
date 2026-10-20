@@ -1,5 +1,6 @@
-"""The dashboard report examples in docs/sql-examples.md, run on the dashboard's fixed dataset
-with DuckDB, as the page runs them, and compared with the results the document shows."""
+"""The dashboard report examples in docs/technical/sql-examples.md, run on the dashboard's
+fixed dataset with DuckDB, as the page runs them, and compared with the results the
+document shows."""
 
 import pytest
 from support.analytics import QUERIES, Dashboard

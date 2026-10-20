@@ -21,7 +21,7 @@ If the poller isn't running, say `make ingest` (or `/eh-start pipeline`) starts 
 
 How it works, in one line each, if asked: it sends `If-Modified-Since`, waits for the feed's `Expires` plus
 2–5 s of jitter (10 s – 5 min), publishes only new events or newer `updated` times, and counts an event as sent
-only once Kafka confirms it (docs/architecture.md, Ingestion).
+only once Kafka confirms it (docs/technical/architecture.md, Ingestion).
 
 ## Report
 

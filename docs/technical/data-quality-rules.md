@@ -1,6 +1,6 @@
 # Data-quality rules
 
-The consumer validates every `earthquakes.raw` message before storing it (`src/earth_hub/validation/earthquake_rules.py`). A message that breaks any rule is **rejected**: it is not stored in `earthquakes`, but its row in `raw_events` keeps the full message, `outcome = 'rejected'`, the first rule broken in `rule`, and every violation in `reason`.
+The consumers validate every message, from `earthquakes.raw` and `earthquakes.backfill`, before storing it (`src/earth_hub/validation/earthquake_rules.py`). A message that breaks any rule is **rejected**: it is not stored in `earthquakes`, but its row in `raw_events` keeps the full message, `outcome = 'rejected'`, the first rule broken in `rule`, and every violation in `reason`.
 
 The poller does not apply these rules. It publishes every feature it can route (one with an `id`, `updated` and `time`), so a bad record leaves an audit trail instead of disappearing upstream.
 

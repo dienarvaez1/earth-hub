@@ -95,7 +95,7 @@ Read with `--partition`: it joins no consumer group, so it can't move the pipeli
 
 ## PostgreSQL
 
-With `q() { docker compose exec -T postgres psql -U earth_hub_app earth_hub -c "$1"; }`, or interactively with `docker compose exec postgres psql -U earth_hub_app earth_hub`. More queries, with their results explained: [SQL examples](sql-examples.md#inspecting-postgresql).
+With `q() { docker compose exec -T postgres psql -U earth_hub_app earth_hub -c "$1"; }`, or interactively with `docker compose exec postgres psql -U earth_hub_app earth_hub`. More queries, with their results explained: [SQL examples](../technical/sql-examples.md#inspecting-postgresql).
 
 | Skill | Command | What it shows |
 | --- | --- | --- |
@@ -110,7 +110,7 @@ With `q() { docker compose exec -T postgres psql -U earth_hub_app earth_hub -c "
 
 ## REST API (from PostgreSQL)
 
-`BASE=http://127.0.0.1:8000/api/v1`. All endpoints, with examples: [API reference](api.md). Interactive docs: http://127.0.0.1:8000/docs.
+`BASE=http://127.0.0.1:8000/api/v1`. All endpoints, with examples: [API reference](../technical/api.md). Interactive docs: http://127.0.0.1:8000/docs.
 
 | Skill | Command | What it returns |
 | --- | --- | --- |

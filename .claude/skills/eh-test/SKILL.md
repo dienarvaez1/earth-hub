@@ -23,7 +23,7 @@ Run from the repository root. Report real results; never call something passing 
 | `flake` | `make flake-check`: the end-to-end suite 5 times | `make up` | ~4 min |
 | `traceability` | `make traceability` (from the last regression's results) | — | < 1 s |
 | `coverage` | `make coverage` | — | ~15 s |
-| `REQ-…` | `grep -rln '"<REQ-ID>"' tests` finds the files whose tests name it (the marker's ID, as in `docs/traceability-matrix.md`); run those files with their layer's options, e.g. `uv run pytest tests/api/test_lookup.py -m integration` | the layer's | |
+| `REQ-…` | `grep -rln '"<REQ-ID>"' tests` finds the files whose tests name it (the marker's ID, as in `docs/progress/traceability-matrix.md`); run those files with their layer's options, e.g. `uv run pytest tests/api/test_lookup.py -m integration` | the layer's | |
 | a keyword | `uv run pytest -k "<keyword>" -m "not disruptive and not performance"` (add `--run-disruptive` only if asked) | `make up` for non-unit tests | |
 
 - `disruptive` restarts containers the live pipeline uses (`make ingest`): warn the user if the pipeline is
@@ -32,7 +32,7 @@ Run from the repository root. Report real results; never call something passing 
 - For a regression, report from `reports/regression-summary.md`: the result, each layer's counts and time,
   coverage, traceability.
 - A failing test: show its name and the assertion, read the code it tests, and say what broke. Don't change a
-  test to make it pass without saying so; record real defects in `docs/defects/README.md` (CLAUDE.md).
+  test to make it pass without saying so; record real defects in `docs/progress/defects.md` (CLAUDE.md).
 
 ## Report
 

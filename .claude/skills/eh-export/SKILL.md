@@ -13,7 +13,7 @@ and if it doesn't answer, start it with `make api` first (say so).
 | Argument | Command | Writes to R2 |
 | --- | --- | --- |
 | `dry` (default) | `make export-r2 DRY_RUN=1` | no: counts new, updated, unchanged and deleted rows |
-| `run` | `make export-r2` | yes: uploads new and changed rows, deletes merged ones, then rewrites the Parquet snapshot if rows changed (~15 s with a few changes) |
+| `run` | `make export-r2` | yes: uploads new and changed rows, deletes merged ones, then rewrites the Parquet snapshot if rows changed (~35 s with a few changes, ~8 s with none) |
 | `verify` | `make export-r2 VERIFY=1` | yes, and lists the whole bucket (~100 s more) to remove unknown objects and re-upload missing ones |
 | `runs` | `make -s export-r2-runs` | no |
 

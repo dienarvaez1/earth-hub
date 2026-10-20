@@ -1,6 +1,6 @@
 # REST API
 
-A read-only FastAPI app (`src/earth_hub/api/`) over PostgreSQL. It never reads from Kafka or USGS. Run it with `make api` (a container) or `make api-dev` (on your machine, with reload); interactive docs are at http://127.0.0.1:8000/docs and the OpenAPI schema at `/openapi.json`.
+A read-only FastAPI app (`src/earth_hub/api/`) over PostgreSQL. It never reads from Kafka or USGS. Run it with `make api` (a container; `/eh-start api` in Claude Code) or `make api-dev` (on your machine, with reload); interactive docs are at http://127.0.0.1:8000/docs and the OpenAPI schema at `/openapi.json`.
 
 The response models in `src/earth_hub/api/schemas.py` are the contract: Schemathesis checks every endpoint against the schema they generate (`tests/api/test_contract.py`), and the examples below are replayed by a test.
 
@@ -50,7 +50,7 @@ An invalid request is answered `422` even while the database is down: routes con
 
 ## Examples
 
-Replayed by `tests/api/test_api_examples.py` against the documented dataset: the 20 events of the API tests (`tests/api/dataset.py`), stored through the real consumer code, with the API's clock at 2026-10-10 23:30 UTC. Each request must return exactly the status, headers and body shown, so this page cannot drift from the API. Run against your own data (`make api`), the same requests return your events.
+Replayed by `tests/api/test_api_examples.py` against the documented dataset: the 20 events of the API tests (`tests/api/dataset.py`), stored through the real consumer code, with the API's clock at 2026-10-10 23:30 UTC. Each request must return exactly the status, headers and body shown, so this page cannot drift from the API. Run against your own data (`make api`), the same requests return your events; with Claude Code, `/eh-api` sends them and summarizes the answer, e.g. `/eh-api event ak20` or `/eh-api list min_magnitude=7&sort=magnitude`.
 
 ### Health
 

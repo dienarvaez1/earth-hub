@@ -1,7 +1,7 @@
 """What the pipeline's log lines carry, and the consumer's periodic summary.
 
 Every line about one event has `event_id` and `stage`, so filtering the logs on an event ID
-shows its whole path (docs/observability.md). The stages, in pipeline order:
+shows its whole path (docs/technical/architecture.md, Observability). The stages, in pipeline order:
 
     fetch     poller: reading the USGS feed (no event yet)
     parse     poller: a feature without id, updated or time, rejected before Kafka

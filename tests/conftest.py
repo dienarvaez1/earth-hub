@@ -21,7 +21,7 @@ from earth_hub.ingestion.events import build_message
 
 REPO = Path(__file__).resolve().parents[1]
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
-REQUIREMENTS_DOC = REPO / "docs" / "requirements.md"
+REQUIREMENTS_DOC = REPO / "docs" / "progress" / "requirements.md"
 LOOPBACK = {"127.0.0.1", "::1", "localhost"}
 NETWORKED_MARKERS = {"integration", "e2e", "disruptive", "performance"}
 
@@ -62,7 +62,7 @@ def pytest_collection_modifyitems(config, items):
     }
     if unknown:
         raise pytest.UsageError(
-            "tests reference requirements missing from docs/requirements.md: "
+            "tests reference requirements missing from docs/progress/requirements.md: "
             + ", ".join(f"{req} ({nodeid})" for nodeid, req in sorted(unknown))
         )
     for marker, option, reason in (

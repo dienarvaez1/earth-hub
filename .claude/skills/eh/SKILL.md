@@ -8,7 +8,7 @@ argument-hint: "[area, e.g. kafka | db | api | r2 | tests]"
 
 Read-only: this skill only shows commands.
 
-1. Read `docs/cheatsheet.md` (the Earth-Hub cheat sheet).
+1. Read `docs/overview/cheatsheet.md` (the Earth-Hub cheat sheet).
 2. With no argument: print its **Skills** table (each `/eh-*` skill, what it does, the command behind it).
 3. With an area (`$ARGUMENTS`, e.g. `kafka`, `db`, `api`, `r2`, `usgs`, `docker`, `tests`): print only that
    section's table, as it is in the file. Don't paraphrase commands; copy them, so they stay exact.

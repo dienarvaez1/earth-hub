@@ -1,6 +1,6 @@
 # Database schema
 
-PostgreSQL 18, defined in `src/earth_hub/database/models.py` and created by the Alembic migrations in `migrations/versions/` (`make migrate`). `tests/integration/test_migrations.py` fails if the migrations and the models differ, and `tests/unit/test_schema_doc.py` fails if this page leaves out a column or gets its type or nullability wrong. Every time is a UTC `timestamptz`.
+PostgreSQL 18, defined in `src/earth_hub/database/models.py` and created by the Alembic migrations in `migrations/versions/` (`make migrate`). With Claude Code, `/eh-db` queries these tables, read-only. `tests/integration/test_migrations.py` fails if the migrations and the models differ, and `tests/unit/test_schema_doc.py` fails if this page leaves out a column or gets its type or nullability wrong. Every time is a UTC `timestamptz`.
 
 ```mermaid
 erDiagram

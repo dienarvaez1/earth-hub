@@ -6,6 +6,27 @@ Earth-Hub is a local-first, open-source data platform that ingests earthquake da
 
 The project is designed to showcase your experience in software quality assurance, test automation, database testing, ETL validation, API testing, and AI-assisted engineering with Claude Code.
 
+## Status
+
+As of 2026-10-20. The plan below is the original, with Milestone 7 revised; the work as built is described in the [architecture](../technical/architecture.md), and what each step found in the [defect log](defects.md).
+
+| Milestone | Status | Merged in |
+| --- | --- | --- |
+| Setup: plan and project rules | Done | #1 |
+| 1. Foundation and infrastructure | Done | #2 |
+| 2. USGS ingestion and Kafka producer | Done | #3 |
+| 3. Consumer, validation and PostgreSQL | Done | #4 |
+| 4. REST API (and the read-only Kafka UI) | Done | `4d2748f`, `620b8c7` |
+| 5. End-to-end QA and regression automation | Done | #6 |
+| Backfill and catch-up, between 5 and 6 | Done | #7, #8; place-derived location #9 |
+| R2 export, before 6 | Done | #10, #11 |
+| 6. Analytics dashboard from R2, observability, performance | Done | #12, #13, #14, #15 |
+| 7.1 CI, third-party licenses, preview marking | Done | #16 |
+| 7.2 Documentation and demo | Done | #18; skills and cheat sheet #19; defect reports to history #20; docs reorganized #21 |
+| 7.3 Release: audit, license, public repository, branch protection, `USGS_CONTACT`, preview marking removed | **Deferred** | |
+
+Current numbers: 140 requirements, all covered by a passing test; 39 defects, all fixed; about 870 tests in the full regression.
+
 ## 1. Project vision
 
 **Earth-Hub**
@@ -451,7 +472,7 @@ Revised on 2026-10-19: the release (license, public repository, branch protectio
 
 **Implementation**
 
-1. **CI** (`.github/workflows/ci.yml`, [ci.md](ci.md)): on every pull request and push to `main`, a quick job (lint, unit tests) and a regression job running `scripts/regression.py --skip performance` from the example settings, with no secrets; reports kept as artifacts and the summary on the run page; actions pinned to commit SHAs, read-only token. Performance stays local: shared runners cannot repeat its timings. Also in this step: the third-party licenses the public page must carry (DEF-035), and the page's preview marking.
+1. **CI** (`.github/workflows/ci.yml`, [ci.md](../technical/ci.md)): on every pull request and push to `main`, a quick job (lint, unit tests) and a regression job running `scripts/regression.py --skip performance` from the example settings, with no secrets; reports kept as artifacts and the summary on the run page; actions pinned to commit SHAs, read-only token. Performance stays local: shared runners cannot repeat its timings. Also in this step: the third-party licenses the public page must carry (DEF-035), and the page's preview marking.
 2. **Documentation and demo:** architecture diagrams (pipeline, topics and consumer groups, export and dashboard, recovery), the schema, API examples replayed by a test, SQL report examples, known limitations, a README written as the reviewer's entry point (including how Claude Code was used and which QA decisions stayed with the author), and `docs/demo.md`, a walkthrough of about 10 minutes.
 3. **Release (deferred):** the audit (a secret scan of the whole history, the author emails of three early commits), a LICENSE, the repository made public, branch protection requiring CI, `USGS_CONTACT`, and the preview marking removed.
 
@@ -467,6 +488,8 @@ Revised on 2026-10-19: the release (license, public repository, branch protectio
 **Exit gate:** A reviewer can clone Earth-Hub, start it, run tests, inspect persisted records, query the API, and understand the quality controls; every pull request is checked by CI.
 
 ## 5. Recommended repository structure
+
+The structure recommended before any code; the layout as built is in the [README](../../README.md#what-is-in-it) and the [architecture](../technical/architecture.md).
 
 ```
 earth-hub/

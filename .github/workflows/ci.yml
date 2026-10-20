@@ -1,4 +1,4 @@
-# CI: every pull request and every push to main (docs/ci.md).
+# CI: every pull request and every push to main (docs/technical/ci.md).
 #
 # checks      lint and unit tests, for quick feedback (no Docker)
 # regression  every layer but performance through scripts/regression.py, the same script as
@@ -81,7 +81,7 @@ jobs:
           name: regression-reports
           path: |
             reports/
-            docs/traceability-matrix.md
+            docs/progress/traceability-matrix.md
           retention-days: 30
       - name: Service logs, if anything failed
         if: failure()

@@ -1,4 +1,4 @@
-"""The CI workflow (.github/workflows/ci.yml) and the scripts it runs (docs/ci.md)."""
+"""The CI workflow (.github/workflows/ci.yml) and the scripts it runs (docs/technical/ci.md)."""
 
 import json
 import re
@@ -62,7 +62,7 @@ def test_reports_are_kept_and_summarised_even_when_the_run_fails(workflow):
     (upload,) = [s for s in job if s.get("uses", "").startswith("actions/upload-artifact@")]
     assert upload["if"] == "always()"
     paths = upload["with"]["path"].split()
-    assert {"reports/", "docs/traceability-matrix.md"} <= set(paths)
+    assert {"reports/", "docs/progress/traceability-matrix.md"} <= set(paths)
     assert upload["with"]["retention-days"] == 30
     (summary,) = [s for s in job if "GITHUB_STEP_SUMMARY" in s.get("run", "")]
     assert summary["if"] == "always()" and "regression-summary.md" in summary["run"]
@@ -150,3 +150,13 @@ def test_three_part_requirement_ids_are_found_in_a_layer_left_out(trace_repo):
         'pytest.mark.req("REQ-DQ-GEO-002", "REQ-E2E-011")\n'
     )
     assert traceability.marked_in(["tests/slow"]) == {"REQ-T-002", "REQ-DQ-GEO-002", "REQ-E2E-011"}
+
+
+@pytest.mark.req("REQ-QA-003")
+def test_make_test_and_make_coverage_run_exactly_the_regressions_unit_layer():
+    # DEF-039: `make coverage` selected "not integration", so it also ran the end-to-end and
+    # dashboard tests, which need Docker and a browser.
+    makefile = (REPO / "Makefile").read_text()
+    for target in ("test", "coverage"):
+        (recipe,) = re.findall(rf"^{target}:.*\n\t(.+)$", makefile, re.M)
+        assert re.search(r'-m "([^"]+)"', recipe)[1] == regression.UNIT, target

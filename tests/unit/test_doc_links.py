@@ -46,7 +46,7 @@ def links(page: Path) -> list[str]:
 
 def test_the_pages_are_found():
     names = {p.relative_to(REPO).as_posix() for p in PAGES}
-    assert {"README.md", "docs/architecture.md", "docs/defects/README.md"} <= names
+    assert {"README.md", "docs/technical/architecture.md", "docs/progress/defects.md"} <= names
 
 
 @pytest.mark.req("REQ-DOC-001")
@@ -85,8 +85,10 @@ def count(pattern: str, path: str) -> int:
 @pytest.mark.req("REQ-DOC-005")
 def test_the_readme_counts_match_the_requirements_and_the_defect_log():
     readme = (REPO / "README.md").read_text()
-    requirements = count(r"^\| REQ-[A-Z0-9-]+ \|", "docs/requirements.md")  # as conftest.py
-    defects = count(r"^\| \[?DEF-\d+", "docs/defects/README.md")
+    requirements = count(
+        r"^\| REQ-[A-Z0-9-]+ \|", "docs/progress/requirements.md"
+    )  # as conftest.py
+    defects = count(r"^\| \[?DEF-\d+", "docs/progress/defects.md")
     claimed = {int(n) for n in re.findall(r"\b(\d+) requirements\b", readme)}
     assert claimed == {requirements}
     claimed = {int(n) for n in re.findall(r"\b(\d+) defects\b", readme)}

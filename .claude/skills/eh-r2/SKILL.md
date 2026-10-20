@@ -18,7 +18,7 @@ settings are missing (the message names them).
 | `snapshot` | `make -s r2-get KEY=analytics/earthquakes.parquet OUT=/tmp/earthquakes.parquet` (~7.5 MB), then e.g. `uv run python -c "import duckdb; print(duckdb.sql(\"SELECT count(*), max(magnitude) FROM '/tmp/earthquakes.parquet'\"))"` |
 | `runs` | `make -s export-r2-runs` (the latest export runs and their counts) |
 
-What's in the bucket (`docs/architecture.md`, Export to R2): `earthquakes/<id>.json` (one per row),
+What's in the bucket (`docs/technical/architecture.md`, Export to R2): `earthquakes/<id>.json` (one per row),
 `_state/earthquakes-manifest.json.gz` (SHA-256 per row), `_state/lock.json` (only during a run),
 `runs/<run_id>.json`, `analytics/earthquakes.parquet` and `analytics/meta.json` (the dashboard's snapshot).
 

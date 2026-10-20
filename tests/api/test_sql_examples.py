@@ -1,5 +1,5 @@
-"""The PostgreSQL queries in docs/sql-examples.md, run on the documented dataset and compared
-with the results the document shows."""
+"""The PostgreSQL queries in docs/technical/sql-examples.md, run on the documented dataset
+and compared with the results the document shows."""
 
 import pytest
 from sqlalchemy import text

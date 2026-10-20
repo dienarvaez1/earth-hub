@@ -1,6 +1,6 @@
 # Requirements
 
-The requirements Earth-Hub is tested against, collected from the [implementation plan](IMPLEMENTATION.md), the [data-quality rules](data-quality-rules.md) and the API contract. Each has a stable ID.
+The requirements Earth-Hub is tested against, collected from the [implementation plan](plan.md), the [data-quality rules](../technical/data-quality-rules.md) and the API contract. Each has a stable ID.
 
 Tests declare which requirements they verify with `@pytest.mark.req("REQ-...")`. `make traceability` builds the [traceability matrix](traceability-matrix.md) from those markers and the latest test results, and **fails if any requirement has no passing test**. A test that names an ID missing from this file fails at collection, so the two cannot drift apart.
 
@@ -12,7 +12,7 @@ Every table row that starts with `| REQ-` is read by the tooling: keep one requi
 | --- | --- |
 | REQ-ING-001 | The poller fetches the USGS `all_day` feed with `If-Modified-Since`; a `304` publishes nothing |
 | REQ-ING-002 | The next fetch is timed from the feed's `Expires` header plus 2–5 s of jitter, between 10 s and 5 min, falling back to `POLL_INTERVAL_SECONDS` without the header |
-| REQ-ING-003 | Timeouts, connection errors, `429` and `5xx` are retried up to 3 times with exponential backoff; other `4xx` are not retried; a failed round publishes nothing |
+| REQ-ING-003 | Timeouts, connection errors, `429`, `500`, `502`, `503` and `504` are tried up to 3 times in all (2 retries) with exponential backoff; other `4xx` are not retried; a failed round publishes nothing |
 | REQ-ING-004 | Only new events, or events whose `updated` time moved forward, are published |
 | REQ-ING-005 | Messages are keyed by USGS event ID and carry a versioned envelope around the unchanged USGS feature |
 | REQ-ING-006 | An event counts as sent only after Kafka confirms delivery; failed deliveries are retried next round |
@@ -65,7 +65,7 @@ Every table row that starts with `| REQ-` is read by the tooling: keep one requi
 
 ## Data quality
 
-One requirement per rule in [data-quality-rules.md](data-quality-rules.md).
+One requirement per rule in [data-quality-rules.md](../technical/data-quality-rules.md).
 
 | ID | Requirement |
 | --- | --- |
@@ -160,7 +160,7 @@ The dashboard's SQL lives in `dashboard/queries/`; the page runs it in the brows
 
 ## Continuous integration
 
-`.github/workflows/ci.yml`; how it works is in [ci.md](ci.md).
+`.github/workflows/ci.yml`; how it works is in [ci.md](../technical/ci.md).
 
 | ID | Requirement |
 | --- | --- |
@@ -174,11 +174,11 @@ The dashboard's SQL lives in `dashboard/queries/`; the page runs it in the brows
 | ID | Requirement |
 | --- | --- |
 | REQ-DOC-001 | Every relative link in the README and in `docs/` points to a file that exists, and every `#anchor` to a heading in it |
-| REQ-DOC-002 | Every request in `docs/api.md` returns exactly the documented status, headers and body on the documented dataset |
-| REQ-DOC-003 | Every query in `docs/sql-examples.md`, the dashboard's reports and the PostgreSQL ones, gives exactly the documented result on its fixed dataset |
-| REQ-DOC-004 | `docs/schema.md` lists every column of every table, in order, with the type and nullability the models define |
-| REQ-DOC-005 | The README's counts of requirements and defects match `docs/requirements.md` and the defect log |
-| REQ-DOC-006 | The cheat sheet (`docs/cheatsheet.md`) lists every Claude Code skill in `.claude/skills/`, and the cheat sheet and the skills name only skills and make targets that exist |
+| REQ-DOC-002 | Every request in `docs/technical/api.md` returns exactly the documented status, headers and body on the documented dataset |
+| REQ-DOC-003 | Every query in `docs/technical/sql-examples.md`, the dashboard's reports and the PostgreSQL ones, gives exactly the documented result on its fixed dataset |
+| REQ-DOC-004 | `docs/technical/schema.md` lists every column of every table, in order, with the type and nullability the models define |
+| REQ-DOC-005 | The README's counts of requirements and defects match `docs/progress/requirements.md` and the defect log |
+| REQ-DOC-006 | The cheat sheet (`docs/overview/cheatsheet.md`) lists every Claude Code skill in `.claude/skills/`; the cheat sheet and the skills name only skills and make targets that exist; the README and `docs/` name only skills that exist, with arguments those skills take |
 
 ## End-to-end scenarios
 
@@ -212,3 +212,4 @@ The scenarios from Milestone 5 of the plan, verified through the API on the whol
 | REQ-OPS-006 | Requests to USGS identify Earth-Hub in the `User-Agent`, with an optional operator contact |
 | REQ-QA-001 | Unit tests never use the network, the live USGS feed included |
 | REQ-QA-002 | Test data is deterministic: results do not depend on live earthquakes |
+| REQ-QA-003 | `make test` and `make coverage` run exactly the regression's unit layer, which needs no Docker, network or browser (DEF-039) |

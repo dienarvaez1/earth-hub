@@ -1,6 +1,6 @@
 # Known limitations
 
-What Earth-Hub doesn't do, or does only within limits. These are deliberate trade-offs for a local-first, single-machine project, not defects; [the defect log](defects/README.md) lists what went wrong and was fixed.
+What Earth-Hub doesn't do, or does only within limits. These are deliberate trade-offs for a local-first, single-machine project, not defects; [the defect log](../progress/defects.md) lists what went wrong and was fixed.
 
 ## Processing guarantees
 
@@ -11,9 +11,9 @@ What Earth-Hub doesn't do, or does only within limits. These are deliberate trad
 ## Freshness
 
 - **Live events arrive 1–2 minutes** after USGS publishes them: the feed is regenerated every minute, and the poller waits for its `Expires` time.
-- **Revisions and outages up to 30 days** are caught up hourly, from the `all_month` feed. Anything older needs `make backfill`.
+- **Revisions and outages up to 30 days** are caught up hourly, from the `all_month` feed. Anything older needs `make backfill` (`/eh-backfill`).
 - **Deletions arrive within a day,** with catch-up's daily deleted-events check. Until then, a deleted event is still served.
-- **The dashboard shows the last export,** not the database: `make export-r2` runs on demand only, with no schedule.
+- **The dashboard shows the last export,** not the database: `make export-r2` (`/eh-export run`) runs on demand only, with no schedule.
 
 ## Scale and deployment
 
@@ -59,4 +59,4 @@ The release is deferred. These are planned, but not in place:
 - `USGS_CONTACT` set to the repository's address;
 - removing the dashboard's preview marking.
 
-See [the implementation plan](IMPLEMENTATION.md#milestone-7--cicd-documentation-and-portfolio-release).
+See [the implementation plan](../progress/plan.md#milestone-7--cicd-documentation-and-portfolio-release).
