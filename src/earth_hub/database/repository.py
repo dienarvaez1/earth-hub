@@ -32,6 +32,9 @@ class IncomingMessage:
     key: bytes | None
     value: bytes | None
     timestamp_ms: int | None = None
+    # When direct mode processed it: set on messages replayed from direct mode's log
+    # (direct/handover.py), so full mode records the same processing times. None: now.
+    processed_at: datetime | None = None
 
 
 @dataclass(frozen=True)
@@ -122,7 +125,21 @@ def _process(
         # Serialize work on these IDs, in a fixed order to avoid deadlocks, so two consumers
         # can never create two records for one event or merge the same records twice.
         _lock(conn, {i for envelope, _ in decoded for i in envelope_ids(envelope)})
+    # Messages replayed from direct mode carry their processing time: each run of messages
+    # with the same time is processed as the batch it was there, after one set of locks.
+    results: list[ProcessResult] = []
+    start = 0
+    for end in range(1, len(messages) + 1):
+        at = messages[start].processed_at or now
+        if end == len(messages) or (messages[end].processed_at or now) != at:
+            results += _process_group(conn, messages[start:end], decoded[start:end], at)
+            start = end
+    return results
 
+
+def _process_group(
+    conn: Connection, messages: list[IncomingMessage], decoded: list, now: datetime
+) -> list[ProcessResult]:
     done = _stored_offsets(conn, messages)
     store = PostgresStore(conn)
     ledger = store.load(i for envelope, _ in decoded for i in envelope_ids(envelope))

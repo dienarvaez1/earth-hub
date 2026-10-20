@@ -25,11 +25,11 @@ As of 2026-10-20. The plan below is the original, with Milestone 7 revised; the 
 | 7.2 Documentation and demo | Done | #18; skills and cheat sheet #19; defect reports to history #20; docs reorganized #21 |
 | 7.3 Release: audit, license, public repository, branch protection, `USGS_CONTACT`, preview marking removed | **Deferred** | |
 | 8.1 Persistence decisions in memory (`processing/ledger.py`), `EventStore`, `PostgresStore`; the record key | Done | #22, #23 |
-| 8.2 `BucketStore`, the direct runner, parity tests | In progress | |
-| 8.3 The mode switch, handovers with log replay | Planned | |
+| 8.2 `BucketStore`, the direct runner, parity tests | Done | #24 |
+| 8.3 The mode switch, handovers with log replay | In progress | |
 | Load test of the API with Locust, after 8 | Planned | |
 
-Current numbers: 150 requirements, all covered by a passing test; 41 defects, all fixed; about 950 tests in the full regression.
+Current numbers: 155 requirements, all covered by a passing test; 41 defects, all fixed; about 980 tests in the full regression.
 
 ## 1. Project vision
 
@@ -506,7 +506,7 @@ Full mode stays the reference implementation; none of its behavior, tests or evi
 
 1. **Decisions apart from storage.** The persistence decisions (record identity, merges, revisions, recorded IDs) move from SQL into a pure module, `processing/ledger.py`, behind an `EventStore` interface; `PostgresStore` loads and writes for it. `process_message` becomes a batch of one, and merges go through the set-based path. Processing times come from the `now` passed in, never the database clock (REQ-PER-018). No other behavior change: the whole suite, `test_batch.py`'s random streams included, must pass unchanged.
 2. **`BucketStore` and the direct runner.** Rows `earthquakes/<key>.json`, an ID map (as built: one object, `_state/ids.json.gz`, instead of one per ID, because catch-up asks about every event of the month feed each hour, which would be about 11 million reads a month), an append-only log `log/<date>/<run>.ndjson` (each applied envelope, its sequence, time and outcome: the replacement for `raw_events`), and the poller's 26-hour state; conditional writes, the existing lock. The snapshot is updated, not rebuilt. Catch-up and the deleted-events check in direct mode; a full-year backfill stays a full-mode job. `make reconcile-direct`.
-3. **The mode switch.** `EARTH_HUB_MODE=full|direct`; `make direct-once` / `make direct-run`; a mode marker and checkpoint in `_state/mode.json`, so the modes take turns and never write at once.
+3. **The mode switch.** `EARTH_HUB_MODE=full|direct`; `make direct-once` / `make direct-run`; a mode marker and checkpoint in `_state/mode.json`, so the modes take turns and never write at once. (As built, the marker is the setting: a per-machine `EARTH_HUB_MODE` could disagree with it, which is what the marker exists to prevent. `make mode` shows it; `make mode-direct` and `make mode-full` change it.)
    - **full → direct:** export, then build direct mode's ID map and 26-hour state, then write the checkpoint.
    - **direct → full:** freeze the bucket; replay every log entry after the checkpoint, in order, through `earthquakes.backfill`, so Kafka, `raw_events` and PostgreSQL get the deltas full mode never saw, with their original processing times; wait for lag 0; then `make reconcile`, and an export dry run that must find no differences from the bucket. Only then switch; otherwise abort and stay in direct mode. Fallback without a log: an FDSN backfill of the period, reporting any differences.
 

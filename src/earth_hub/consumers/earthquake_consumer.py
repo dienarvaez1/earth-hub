@@ -14,6 +14,7 @@ import logging
 import threading
 import time
 from collections.abc import Callable
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Protocol
 
@@ -338,7 +339,24 @@ def _incoming(message) -> IncomingMessage:
         key=message.key(),
         value=message.value(),
         timestamp_ms=message.timestamp()[1] if message.timestamp()[0] else None,
+        processed_at=_processed_at(message),
     )
+
+
+PROCESSED_AT_HEADER = "earth-hub-processed-at"
+
+
+def _processed_at(message) -> datetime | None:
+    """The processing time a message replayed from direct mode carries; None otherwise, or
+    if it is not a valid UTC time (the message is then processed as any other)."""
+    for name, value in message.headers() or []:
+        if name == PROCESSED_AT_HEADER and value:
+            try:
+                moment = datetime.fromisoformat(value.decode())
+            except (UnicodeDecodeError, ValueError):
+                return None
+            return moment if moment.utcoffset() == timedelta(0) else None
+    return None
 
 
 def _tally(outcomes) -> dict[str, int]:

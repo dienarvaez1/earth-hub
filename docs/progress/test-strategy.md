@@ -129,7 +129,7 @@ The [requirements](requirements.md) list it, grouped by area.
 | R2 export | The exporter on moto; interrupted and resumed runs; the snapshot's values and types |
 | 6 | The dashboard in Chromium against a simulated R2, its reports compared with Python's; log fields and a failure diagnosed from logs alone |
 | 7 | CI and tests of the workflow file; documentation tested: examples replayed, schema and links checked |
-| 8 | The ledger checked alone; parity of the two stores on random streams and every persistence defect scenario (identical buckets, byte for byte), and end to end from the same mock USGS services; a direct round interrupted at each of its writes; the R2 operations budget; `make reconcile-direct` against each broken invariant |
+| 8 | The ledger checked alone; parity of the two stores on random streams and every persistence defect scenario (identical buckets, byte for byte), and end to end from the same mock USGS services; a direct round interrupted at each of its writes; the R2 operations budget; `make reconcile-direct` against each broken invariant; round trips full → direct → full on real Kafka and PostgreSQL against a database that stayed in full mode, a gap in the log, a rule broken in one mode, and a replay interrupted and run again; switching back and forth twice while the feed changes, during the handovers too, with every event checked at its latest version after each switch |
 
 Claude Code writes and runs the tests, and the project owner approves each milestone's proposal and reviews each pull request before merging (see the README, *How Claude Code was used*).
 

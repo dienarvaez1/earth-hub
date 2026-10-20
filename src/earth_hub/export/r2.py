@@ -7,6 +7,7 @@ Bucket layout:
     earthquakes/<key>.json                 one object per row: every column but `id`, as stored
     _state/earthquakes-manifest.json.gz    SHA-256 of each row as last uploaded
     _state/lock.json                       held while a run is in progress
+    _state/mode.json                       which mode writes the bucket; runs only in full
     runs/<run_id>.json                     one record per run (also kept in reports/exports/)
     analytics/earthquakes.parquet          the whole table for the dashboard (see snapshot.py)
     analytics/meta.json                    what the snapshot holds
@@ -49,7 +50,7 @@ from pathlib import Path
 
 import httpx
 
-from earth_hub.export import lock
+from earth_hub.export import lock, mode
 from earth_hub.export.bucket import Bucket
 from earth_hub.export.lock import LOCK_KEY, LockHeld  # noqa: F401  (LOCK_KEY: for callers)
 from earth_hub.export.snapshot import (
@@ -481,7 +482,13 @@ class Exporter:
                 logger.exception("could not save run record %s to the bucket", record.run_id)
 
     def _acquire_lock(self, record: RunRecord, now: datetime) -> None:
+        """The lock, and only in full mode: in direct mode the bucket is direct mode's."""
         lock.acquire(self.bucket, record.run_id, record.started_at, now, self.lock_ttl)
+        try:
+            mode.require(self.bucket, mode.FULL)
+        except BaseException:
+            self._release_lock(record)
+            raise
 
     def _release_lock(self, record: RunRecord) -> None:
         lock.release(self.bucket, record.run_id, self.lock_ttl)
@@ -567,6 +574,9 @@ def main(argv: list[str] | None = None) -> int:
             record = exporter.run(dry_run=args.dry_run, verify=args.verify)
         except LockHeld as exc:
             print(f"export-r2: {exc}; try again later", file=sys.stderr)
+            return 3
+        except mode.WrongMode as exc:
+            print(f"export-r2: {exc}; nothing written", file=sys.stderr)
             return 3
     print(format_record(asdict(record)))
     for message in record.errors:

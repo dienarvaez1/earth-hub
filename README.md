@@ -2,7 +2,7 @@
 
 A local-first earthquake data platform, built as a QA engineering portfolio project. The live USGS feed flows through Apache Kafka into validated PostgreSQL tables. A read-only REST API serves them, and a public dashboard shows them from an export to Cloudflare R2. The point is less the pipeline than the evidence that it works: every requirement traces to a passing test, every defect found is logged with how it was found and how it was fixed, and CI runs the regression on every pull request.
 
-**Status:** Milestones 1 to 6 are complete, and so are Milestone 7's CI and documentation; the public release, the rest of Milestone 7, is deferred ([status](docs/progress/plan.md#status)). The dashboard runs at **https://earth-hub.diego-narvaez.workers.dev**, marked as a preview and kept out of search engines until the release.
+**Status:** Milestones 1 to 6 are complete, and so are Milestone 7's CI and documentation; the public release, the rest of Milestone 7, is deferred. Milestone 8, a second mode that runs without Docker and keeps its state in R2, is in progress ([status](docs/progress/plan.md#status)). The dashboard runs at **https://earth-hub.diego-narvaez.workers.dev**, marked as a preview and kept out of search engines until the release.
 
 ## For reviewers
 
@@ -22,8 +22,8 @@ flowchart LR
 
 | | |
 | --- | --- |
-| **Requirements** | 150 requirements, each with a stable ID and at least one passing test that names it (`@pytest.mark.req`). A test naming an unknown ID fails at collection, and `make traceability` fails if any requirement has no passing test |
-| **Tests** | About 870, in eight layers: unit, integration, API, contract (Schemathesis), end-to-end, dashboard (in Chromium), disruptive (real outages) and performance. About 91% coverage across all layers |
+| **Requirements** | 155 requirements, each with a stable ID and at least one passing test that names it (`@pytest.mark.req`). A test naming an unknown ID fails at collection, and `make traceability` fails if any requirement has no passing test |
+| **Tests** | About 980, in eight layers: unit, integration, API, contract (Schemathesis), end-to-end, dashboard (in Chromium), disruptive (real outages) and performance. About 91% coverage across all layers |
 | **Defects** | 41 defects found and fixed, each with its milestone, severity, how it was found and the commit that fixed it; [six written up in full](docs/progress/defects.md) with root cause and prevention (kept in the git history) |
 | **CI** | On every pull request and push to `main`, lint and unit tests, then the regression of every layer except performance, from the example settings and with no secrets ([docs/technical/ci.md](docs/technical/ci.md)) |
 | **Data integrity** | Kafka offsets committed only after the database; idempotent upserts; newer revisions win; `make reconcile` compares each topic with the database. The guarantee claimed is at-least-once, never exactly-once |
@@ -88,6 +88,8 @@ The [demo walkthrough](docs/overview/demo.md) goes through these with what to lo
 | `make api` / `make api-stop` / `make api-dev` | Start / stop the API container, or run it on your machine with reload |
 | `make kafka-ui` / `make kafka-ui-stop` | A read-only web viewer for the topics at `http://127.0.0.1:8080` |
 | `make export-r2 [DRY_RUN=1] [VERIFY=1]` / `make export-r2-runs` | Copy the `earthquakes` table to Cloudflare R2 through the API, only new and changed rows / list past runs |
+| `make mode` / `make mode-direct` / `make mode-full` | Which mode writes the bucket / hand over to direct mode / back to full mode, checked before switching |
+| `make direct-once` / `make direct-run` / `make reconcile-direct` | Direct mode: one round / run until stopped / check its state in the bucket |
 | `make r2-ls [PREFIX=…]` / `make r2-count` / `make r2-get KEY=…` | List, count or read the bucket's objects, read-only |
 | `make dashboard-install` / `make dashboard-dev` / `make dashboard-deploy` | The dashboard's Node dependencies and test browser / a local server over the real bucket / publish to Cloudflare Workers |
 
@@ -99,6 +101,7 @@ The [demo walkthrough](docs/overview/demo.md) goes through these with what to lo
 | **Persistence** | The consumer validates each message against [16 data-quality rules](docs/technical/data-quality-rules.md), merges records USGS turns out to be one event, and stores the newest revision. Every message is kept with its outcome, rejected ones included | [Schema](docs/technical/schema.md) |
 | **REST API** | Read-only, over PostgreSQL: events, lookups by any former ID, statistics, hourly and magnitude summaries, with one error format | [API reference](docs/technical/api.md) |
 | **Export** | `make export-r2` copies the table to R2 on demand, uploading only what changed, then writes a Parquet snapshot | [Architecture](docs/technical/architecture.md#export-to-r2) |
+| **Direct mode** | The same poller and catch-up straight to R2, with no Docker, Kafka or PostgreSQL: the bucket full mode's export would write, byte for byte, which tests check against full mode. A marker in the bucket says which mode writes it; the handovers replay direct mode's log into Kafka and check both sides agree before switching (Milestone 8) | [Architecture](docs/technical/architecture.md#direct-mode) |
 | **Dashboard** | A Cloudflare Worker serves the page and the snapshot; the browser runs the reports itself with DuckDB-WASM, and draws the map and charts | [Architecture](docs/technical/architecture.md#dashboard), [SQL](docs/technical/sql-examples.md#dashboard-reports) |
 | **Observability** | JSON logs where every pipeline line has a `stage` and every line about an event its `event_id`, plus a consumer summary every minute | [Observability](docs/technical/architecture.md#observability) |
 
@@ -124,7 +127,7 @@ It writes `reports/regression-summary.md`, JUnit XML for each layer, a coverage 
 
 **QA documents** in `docs/`:
 - the [test strategy](docs/progress/test-strategy.md): risks, levels, techniques, scope, reports and testing by milestone;
-- the [requirements](docs/progress/requirements.md), 150 of them, and the [traceability matrix](docs/progress/traceability-matrix.md);
+- the [requirements](docs/progress/requirements.md), 155 of them, and the [traceability matrix](docs/progress/traceability-matrix.md);
 - the [defect log](docs/progress/defects.md): 41 defects found and fixed, 6 with full reports in the git history;
 - the [data-quality rules](docs/technical/data-quality-rules.md) and the [known limitations](docs/overview/limitations.md).
 

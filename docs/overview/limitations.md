@@ -52,12 +52,15 @@ What Earth-Hub doesn't do, or does only within limits. These are deliberate trad
 
 ## Direct mode
 
-Milestone 8 is in progress ([architecture](../technical/architecture.md#direct-mode)).
-- **It runs only in the tests so far.** The commands to run it, and the handovers between modes, are step 3; until then, running it against the real bucket would write next to full mode's exports.
-- **One direct process at a time.** The lock keeps a round and an export apart, but two direct runners would each poll the feed; the mode switch (step 3) is what keeps them to one.
+Milestone 8 ([architecture](../technical/architecture.md#direct-mode)).
+- **One direct process at a time.** The marker and the lock keep direct mode and full mode's exports apart, but nothing stops two `make direct-run` processes on two machines: both would poll the feed, and take turns writing. Run one.
+- **Events are late during a handover**, by its length: neither mode polls while it runs (the next round catches up, from the day feed). A handover to direct mode is mostly its export, about 35 s with few changes; one back to full mode, the replay and the checks.
+- **Full mode's pipeline is not stopped by the marker.** `make mode-direct` stops the poller and catch-up; started again by hand in direct mode, they would store events in PostgreSQL that the replay then repeats. The handover back would find the processing times differ and stay in direct mode.
+- **After a return to full mode, the poller sends the day's events again.** Its state is rebuilt from `earthquakes.raw`, which did not see the direct period. The consumer finds them already stored (duplicates): nothing changes, but `raw_events` gets the rows.
+- **The handover to full mode needs the log.** Without it (a gap), the fallback is a backfill of the period by hand, and the processing times of that period are then the backfill's.
 - **The log grows** by about 3 MB a day at today's load, about 1 GB a year, inside R2's 10 GB of free storage for years; nothing prunes it yet.
 - **About 10 R2 writes per live round**, 16% of the free monthly Class A operations at today's load. Merging the state and the ID map into one object would save one write a round.
-- **Processing times differ between the modes when each runs on its own clock.** The parity tests compare them exactly only with the same `now` given to both; step 3's handover carries them in the log.
+- **Processing times differ between the modes when each runs on its own clock.** The parity tests compare them exactly only with the same `now` given to both; the handover carries direct mode's into PostgreSQL through the log.
 
 ## Not yet done
 

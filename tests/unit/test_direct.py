@@ -9,7 +9,7 @@ from datetime import UTC, datetime, timedelta
 
 import duckdb
 import pytest
-from support.export import BUCKET
+from support.export import BUCKET, start_direct
 from support.fdsn import FdsnServer, event_at
 from support.feed import FeedServer
 from support.streams import random_stream
@@ -27,6 +27,7 @@ from earth_hub.direct.store import (
 )
 from earth_hub.export.bucket import Bucket, PreconditionFailed
 from earth_hub.export.lock import LOCK_KEY, LockHeld
+from earth_hub.export.mode import MODE_KEY
 from earth_hub.export.r2 import MANIFEST_KEY, row_key
 from earth_hub.export.snapshot import META_KEY, SNAPSHOT_KEY, SnapshotFile
 from earth_hub.ingestion.catchup import CatchUp
@@ -75,6 +76,7 @@ def make_runner(s3, tmp_path):
         count[0] += 1
         workdir = tmp_path / f"runner{count[0]}"
         workdir.mkdir()
+        start_direct(s3)
         return DirectRunner(bucket or Bucket(s3, BUCKET), workdir=workdir, workers=2, **kwargs)
 
     return make
@@ -252,7 +254,7 @@ def test_a_round_waits_while_an_export_holds_the_lock(runner, s3, make_envelope,
     s3.put_object(Bucket=BUCKET, Key=LOCK_KEY, Body=json.dumps(lock))
     with pytest.raises(LockHeld, match="run export"):
         runner.process([make_envelope(feature(make_feature, "ak1"))], now=NOW)
-    assert list(everything(s3)) == [LOCK_KEY]
+    assert sorted(everything(s3)) == [LOCK_KEY, MODE_KEY]
 
 
 @pytest.mark.req("REQ-MODE-004")
@@ -298,8 +300,9 @@ def test_a_runner_reads_what_another_wrote_since_its_last_round(
 
 
 def test_rounds_with_nothing_to_process_write_nothing(runner, s3):
+    before = everything(s3)
     assert runner.process([], now=NOW) == []
-    assert everything(s3) == {}
+    assert everything(s3) == before
 
 
 @pytest.mark.req("REQ-MODE-005")

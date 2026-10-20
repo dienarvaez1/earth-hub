@@ -1,4 +1,4 @@
-.PHONY: help install up down reset ingest ingest-once ingest-logs ingest-stop api api-dev api-stop kafka-ui kafka-ui-stop backfill catchup-once consume reconcile reconcile-direct export-r2 export-r2-runs r2-ls r2-count r2-get dashboard-install dashboard-build dashboard-dev dashboard-deploy test-dashboard check-db-outage lint format test test-integration test-e2e test-disruptive test-performance test-all regression flake-check traceability smoke smoke-restart migrate coverage
+.PHONY: help install up down reset ingest ingest-once ingest-logs ingest-stop api api-dev api-stop kafka-ui kafka-ui-stop backfill catchup-once consume reconcile reconcile-direct mode mode-direct mode-full direct-once direct-run export-r2 export-r2-runs r2-ls r2-count r2-get dashboard-install dashboard-build dashboard-dev dashboard-deploy test-dashboard check-db-outage lint format test test-integration test-e2e test-disruptive test-performance test-all regression flake-check traceability smoke smoke-restart migrate coverage
 
 help: ## List the available commands
 	@grep -E '^[a-z0-9-]+:.*## ' $(MAKEFILE_LIST) | awk -F ':.*## ' '{printf "  %-17s %s\n", $$1, $$2}'
@@ -92,6 +92,26 @@ reconcile: ## Check every Kafka message has a database row, and the tables' inva
 
 reconcile-direct: ## Check direct mode's state in R2 (read-only): make reconcile-direct [DEEP=1]
 	uv run python -m earth_hub.direct.reconcile $(if $(DEEP),--deep)
+
+mode: ## Which mode writes the R2 bucket: full or direct
+	uv run python -m earth_hub.direct.handover status
+
+mode-direct: ## Hand over to direct mode: stop the poller and catch-up, export, write direct mode's state
+	docker compose stop poller catchup
+	uv run python -m earth_hub.direct.handover direct || { docker compose start poller catchup; echo "Handover failed: full mode resumed"; exit 1; }
+	@echo "Direct mode: start it with make direct-run"
+
+mode-full: ## Hand over to full mode: replay direct mode's log into Kafka, check, then switch
+	docker compose up -d --wait consumer consumer-backfill api
+	uv run python -m earth_hub.direct.handover full
+	docker compose up -d poller catchup
+	@echo "Full mode: the poller and catch-up are running again"
+
+direct-once: ## Direct mode: one poller round, and catch-up if due, straight to R2
+	uv run python -m earth_hub.direct once
+
+direct-run: ## Direct mode: the poller and catch-up straight to R2, until stopped
+	uv run python -m earth_hub.direct run
 
 check-db-outage: ## Stop PostgreSQL mid-stream and check nothing is lost (disruptive)
 	uv run pytest tests/disruptive --run-disruptive -k database_outage

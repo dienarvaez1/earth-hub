@@ -9,7 +9,7 @@ and 464 catch-up messages over 24 hourly passes, plus one deleted-events check.
 from datetime import UTC, datetime, timedelta
 
 import pytest
-from support.export import BUCKET
+from support.export import BUCKET, start_direct
 
 from earth_hub.direct.runner import DirectRunner
 from earth_hub.export.bucket import Bucket
@@ -57,6 +57,7 @@ class CountingBucket(Bucket):
 def test_direct_mode_stays_well_inside_the_free_operations(
     s3, tmp_path, make_envelope, make_feature
 ):
+    start_direct(s3)
     bucket = CountingBucket(s3, BUCKET)
     runner = DirectRunner(bucket, workdir=tmp_path, workers=2)
     # Some history first, so rounds update a real ID map, manifest and snapshot.

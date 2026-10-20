@@ -5,6 +5,7 @@ from datetime import UTC, datetime
 import httpx
 
 from earth_hub.export.bucket import Bucket
+from earth_hub.export.mode import DIRECT, MODE_KEY, Mode
 
 NOW = datetime(2026, 10, 18, 9, 0, tzinfo=UTC)
 BUCKET = "earth-hub-test"
@@ -88,3 +89,8 @@ class FlakyBucket(Bucket):
             self.failing.discard(key)
             raise ConnectionError("simulated network failure")
         return super().put(key, body, **kwargs)
+
+
+def start_direct(s3, bucket: str = BUCKET) -> None:
+    """Put a bucket in direct mode, as the full -> direct handover leaves it."""
+    s3.put_object(Bucket=bucket, Key=MODE_KEY, Body=Mode(mode=DIRECT).body())
