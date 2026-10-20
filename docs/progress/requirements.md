@@ -21,25 +21,6 @@ Every table row that starts with `| REQ-` is read by the tooling: keep one requi
 | REQ-ING-009 | The poller shuts down cleanly on `SIGTERM`, flushing pending messages |
 | REQ-ING-010 | Messages with the same key always go to the same partition |
 
-## Persistence
-
-| ID | Requirement |
-| --- | --- |
-| REQ-PER-001 | Every Kafka message gets one `raw_events` row with its topic, partition, offset, full message and outcome |
-| REQ-PER-002 | A redelivered offset is recognized and skipped without a new row |
-| REQ-PER-003 | A message with the same `updated` time as the stored event is a `duplicate` and changes nothing |
-| REQ-PER-004 | A newer revision updates the event; an older one is `stale` and changes nothing |
-| REQ-PER-005 | An event stays one record when USGS changes its preferred ID, and its former IDs still find it |
-| REQ-PER-006 | Records that turn out to be one event are merged into the oldest, keeping the newest data and every ID |
-| REQ-PER-007 | The Kafka offset is committed only after the database commit; a crash between the two causes no duplicates |
-| REQ-PER-008 | During a database outage the consumer retries the same message until PostgreSQL is back, and never rejects it for that reason |
-| REQ-PER-009 | A message that fails 3 times for an unexpected reason is stored as `error` with the exception, and the partition moves on |
-| REQ-PER-010 | Concurrent processing of one event cannot create duplicate records |
-| REQ-PER-011 | Database `CHECK` constraints enforce the range rules even when the application is bypassed |
-| REQ-PER-012 | Migrations match the models exactly and upgrade and downgrade cleanly |
-| REQ-PER-013 | Reconciliation accounts for every message in the topic, separating lost from pending, and checks the tables' invariants |
-| REQ-PER-014 | Messages that `jsonb` cannot hold (not JSON, `NaN`, NUL, `null`) are kept as text and rejected, never crash the consumer |
-
 ## Backfill and catch-up
 
 | ID | Requirement |
@@ -91,6 +72,25 @@ One requirement per rule in [data-quality-rules.md](../technical/data-quality-ru
 | REQ-DQ-DEL-002 | The deletion of a duplicate merged into another event never hides that event, whichever arrives first; backfill and catch-up decide what to publish by the same rule (DEF-026) |
 | REQ-DQ-PLACE-001 | Derive city, region and country from `place` (split at the first " of ", then at commas; US states give country United States) for new revisions and for events already stored, keeping `place` unchanged |
 | REQ-DQ-PLACE-002 | Events stored by backfill and catch-up get city, region and country by the same rule as the live feed, including when a revision changes `place` |
+
+## Persistence
+
+| ID | Requirement |
+| --- | --- |
+| REQ-PER-001 | Every Kafka message gets one `raw_events` row with its topic, partition, offset, full message and outcome |
+| REQ-PER-002 | A redelivered offset is recognized and skipped without a new row |
+| REQ-PER-003 | A message with the same `updated` time as the stored event is a `duplicate` and changes nothing |
+| REQ-PER-004 | A newer revision updates the event; an older one is `stale` and changes nothing |
+| REQ-PER-005 | An event stays one record when USGS changes its preferred ID, and its former IDs still find it |
+| REQ-PER-006 | Records that turn out to be one event are merged into the oldest, keeping the newest data and every ID |
+| REQ-PER-007 | The Kafka offset is committed only after the database commit; a crash between the two causes no duplicates |
+| REQ-PER-008 | During a database outage the consumer retries the same message until PostgreSQL is back, and never rejects it for that reason |
+| REQ-PER-009 | A message that fails 3 times for an unexpected reason is stored as `error` with the exception, and the partition moves on |
+| REQ-PER-010 | Concurrent processing of one event cannot create duplicate records |
+| REQ-PER-011 | Database `CHECK` constraints enforce the range rules even when the application is bypassed |
+| REQ-PER-012 | Migrations match the models exactly and upgrade and downgrade cleanly |
+| REQ-PER-013 | Reconciliation accounts for every message in the topic, separating lost from pending, and checks the tables' invariants |
+| REQ-PER-014 | Messages that `jsonb` cannot hold (not JSON, `NaN`, NUL, `null`) are kept as text and rejected, never crash the consumer |
 
 ## API
 
@@ -173,6 +173,26 @@ The dashboard's SQL lives in `dashboard/queries/`; the page runs it in the brows
 | REQ-DASH-016 | The page links to `third-party-licenses.txt`, generated at build time with the license of every package bundled into the page and of the DuckDB extension it serves; the build fails if a package's license text is missing (DEF-035) |
 | REQ-DASH-017 | Until the release, the page is marked "Preview — in development" and kept out of search engines: `X-Robots-Tag: noindex, nofollow` on every response (page, files and `/data/*`), a `robots` meta tag, and a `robots.txt` that disallows everything |
 
+## End-to-end scenarios
+
+The scenarios from Milestone 5 of the plan, verified through the API on the whole pipeline.
+
+| ID | Requirement |
+| --- | --- |
+| REQ-E2E-001 | A new valid event in the feed becomes retrievable through the API |
+| REQ-E2E-002 | Duplicate delivery of a message creates no duplicate record |
+| REQ-E2E-003 | A revised event is shown with its latest revision |
+| REQ-E2E-004 | An invalid event is never served, and is recorded as rejected with an auditable reason |
+| REQ-E2E-005 | A database outage is recovered from without losing or duplicating events |
+| REQ-E2E-006 | A consumer restart, clean or between the database commit and the offset commit, handles redelivered events safely |
+| REQ-E2E-007 | An empty database gives valid empty results and zero-count summaries |
+| REQ-E2E-008 | An invalid API request gets a consistent client error |
+| REQ-E2E-009 | A batch of input records reconciles exactly with the processing outcomes and the API |
+| REQ-E2E-010 | Two reports merged into one event are served as one event under either ID |
+| REQ-E2E-011 | An event revised to `deleted` is hidden by default |
+| REQ-E2E-012 | A poller restart resends nothing and changes nothing in the API |
+| REQ-E2E-013 | A Kafka broker restart is recovered from without losing or duplicating events |
+
 ## Observability
 
 | ID | Requirement |
@@ -181,6 +201,20 @@ The dashboard's SQL lives in `dashboard/queries/`; the page runs it in the brows
 | REQ-OBS-002 | The consumer logs a summary every minute (configurable): outcome counts since the last summary and since start, and its lag per partition; the poller's round line keeps totals since start |
 | REQ-OBS-003 | An event the pipeline rejects can be diagnosed from the logs alone: filtering on its event ID shows it published and then rejected, with the rule and reason, and the consumer's summary counts it and shows the lag back at 0 |
 | REQ-OBS-004 | The live consumer handles `earthquakes.raw` one message at a time, so the outcome of every live event is logged; only the backfill consumer takes batches (DEF-036) |
+
+## Operations and quality
+
+| ID | Requirement |
+| --- | --- |
+| REQ-OPS-001 | The infrastructure starts healthy with one command: Kafka (KRaft), the `earthquakes.raw` topic with 3 partitions, and PostgreSQL 18 |
+| REQ-OPS-002 | Data in Kafka and PostgreSQL survives a restart of both |
+| REQ-OPS-003 | Configuration is validated at startup, and passwords never appear in logs, test output or API responses |
+| REQ-OPS-004 | Logs are one JSON object per line, with extra fields such as event ID and stage |
+| REQ-OPS-005 | The poller's, consumers' and catch-up's health checks follow their heartbeats |
+| REQ-OPS-006 | Requests to USGS identify Earth-Hub in the `User-Agent`, with an optional operator contact |
+| REQ-QA-001 | Unit tests never use the network, the live USGS feed included |
+| REQ-QA-002 | Test data is deterministic: results do not depend on live earthquakes |
+| REQ-QA-003 | `make test` and `make coverage` run exactly the regression's unit layer, which needs no Docker, network or browser (DEF-039) |
 
 ## Continuous integration
 
@@ -204,37 +238,3 @@ The dashboard's SQL lives in `dashboard/queries/`; the page runs it in the brows
 | REQ-DOC-004 | `docs/technical/schema.md` lists every column of every table, in order, with the type and nullability the models define |
 | REQ-DOC-005 | The README's counts of requirements and defects match `docs/progress/requirements.md` and the defect log |
 | REQ-DOC-006 | The cheat sheet (`docs/overview/cheatsheet.md`) lists every Claude Code skill in `.claude/skills/`; the cheat sheet and the skills name only skills and make targets that exist; the README and `docs/` name only skills that exist, with arguments those skills take |
-
-## End-to-end scenarios
-
-The scenarios from Milestone 5 of the plan, verified through the API on the whole pipeline.
-
-| ID | Requirement |
-| --- | --- |
-| REQ-E2E-001 | A new valid event in the feed becomes retrievable through the API |
-| REQ-E2E-002 | Duplicate delivery of a message creates no duplicate record |
-| REQ-E2E-003 | A revised event is shown with its latest revision |
-| REQ-E2E-004 | An invalid event is never served, and is recorded as rejected with an auditable reason |
-| REQ-E2E-005 | A database outage is recovered from without losing or duplicating events |
-| REQ-E2E-006 | A consumer restart, clean or between the database commit and the offset commit, handles redelivered events safely |
-| REQ-E2E-007 | An empty database gives valid empty results and zero-count summaries |
-| REQ-E2E-008 | An invalid API request gets a consistent client error |
-| REQ-E2E-009 | A batch of input records reconciles exactly with the processing outcomes and the API |
-| REQ-E2E-010 | Two reports merged into one event are served as one event under either ID |
-| REQ-E2E-011 | An event revised to `deleted` is hidden by default |
-| REQ-E2E-012 | A poller restart resends nothing and changes nothing in the API |
-| REQ-E2E-013 | A Kafka broker restart is recovered from without losing or duplicating events |
-
-## Operations and quality
-
-| ID | Requirement |
-| --- | --- |
-| REQ-OPS-001 | The infrastructure starts healthy with one command: Kafka (KRaft), the `earthquakes.raw` topic with 3 partitions, and PostgreSQL 18 |
-| REQ-OPS-002 | Data in Kafka and PostgreSQL survives a restart of both |
-| REQ-OPS-003 | Configuration is validated at startup, and passwords never appear in logs, test output or API responses |
-| REQ-OPS-004 | Logs are one JSON object per line, with extra fields such as event ID and stage |
-| REQ-OPS-005 | The poller's, consumers' and catch-up's health checks follow their heartbeats |
-| REQ-OPS-006 | Requests to USGS identify Earth-Hub in the `User-Agent`, with an optional operator contact |
-| REQ-QA-001 | Unit tests never use the network, the live USGS feed included |
-| REQ-QA-002 | Test data is deterministic: results do not depend on live earthquakes |
-| REQ-QA-003 | `make test` and `make coverage` run exactly the regression's unit layer, which needs no Docker, network or browser (DEF-039) |

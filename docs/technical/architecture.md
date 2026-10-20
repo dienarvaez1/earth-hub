@@ -5,26 +5,24 @@ How Earth-Hub is put together: what each part does, what it may read and write, 
 ## Overview
 
 ```mermaid
-%%{init: {"flowchart": {"rankSpacing": 20, "nodeSpacing": 90}}}%%
+%%{init: {"flowchart": {"rankSpacing": 35, "nodeSpacing": 100, "subGraphTitleMargin": {"top": 8, "bottom": 22}}}}%%
 flowchart TB
     usgs[("USGS<br/>GeoJSON feeds")]
     fdsn[("USGS<br/>FDSN event service")]
 
     subgraph docker["full mode: Docker Compose"]
-        poller["poller"]
+        poller["poller<br/>all_day, every minute"]
         catchup["catchup<br/>all_month hourly,<br/>deletions daily"]
-        backfill["make backfill<br/>(on the host)"]
+        backfill["make backfill<br/>(on the host),<br/>one week per request"]
         raw[["earthquakes.raw"]]
         bf[["earthquakes.backfill"]]
         consumer["consumer"]
         consumerbf["consumer-backfill"]
         pg[("PostgreSQL")]
-        api["api<br/>(FastAPI, read-only)"]
+        api["api (FastAPI, read-only),<br/>read by make export-r2"]
     end
 
-    subgraph gha["direct mode"]
-        direct["GitHub Actions, hourly:<br/>poller + catch-up<br/>+ validation + ledger<br/>over BucketStore"]
-    end
+    direct["<b>direct mode</b><br/>GitHub Actions, hourly:<br/>poller + catch-up<br/>+ validation + ledger<br/>over BucketStore"]
 
     subgraph cloud["Cloudflare"]
         r2[("R2 bucket<br/>_state/mode.json<br/>says who writes")]
@@ -33,10 +31,10 @@ flowchart TB
 
     browser["Browser<br/>DuckDB-WASM,<br/>MapLibre, Plot"]
 
-    usgs -- "all_day, every minute" --> poller
+    usgs --> poller
     usgs --> catchup
     fdsn --> catchup
-    fdsn -- "one week per request" --> backfill
+    fdsn --> backfill
     usgs --> direct
     fdsn --> direct
     poller --> raw
@@ -47,7 +45,7 @@ flowchart TB
     consumer --> pg
     consumerbf --> pg
     pg --> api
-    api -- "full mode:<br/>make export-r2" --> r2
+    api --> r2
     direct -- "rows, snapshot,<br/>log, state" --> r2
     r2 --> worker
     worker --> browser
@@ -91,25 +89,6 @@ All ports are bound to `127.0.0.1`. Kafka uses `PLAINTEXT` and JMX has no authen
 | Kafka UI | `http://127.0.0.1:8080`: [Kafbat UI](https://github.com/kafbat/kafka-ui) `v1.5.0`, read-only, so producing or deleting is refused (`405`) |
 | Dashboard (local) | `http://127.0.0.1:8787` (`make dashboard-dev`) |
 
-## Topics and consumer groups
-
-```mermaid
-%%{init: {"flowchart": {"rankSpacing": 110, "nodeSpacing": 30}}}%%
-flowchart TB
-    poller["poller"] -- "key: USGS ID" --> raw[["earthquakes.raw<br/>3 partitions"]]
-    catchup["catchup"] --> bf[["earthquakes.backfill<br/>3 partitions"]]
-    backfill["make backfill"] --> bf
-    raw -- "group earth-hub-consumer" --> consumer["consumer<br/>one at a time"]
-    bf -- "group earth-hub-consumer-backfill" --> consumerbf["consumer-backfill<br/>batches of 500"]
-    raw -. "26 h read back at start-up" .-> poller
-```
-
-- **Messages are keyed by USGS event ID,** so every revision of an event goes to one partition, in order.
-- **Two topics,** so that a year of history never queues in front of live events. The poller reads `earthquakes.raw` back at start-up, to know what it already sent; it never reads the backfill topic.
-- **Both consumers run the same code,** with two settings apart. `consumer-backfill` sets `KAFKA_CONSUMER_TOPIC`, and takes up to `CONSUMER_BATCH_SIZE` messages at once, processed as a set (`process_batch`). The live consumer has a batch size of 1 (`process_message`), so the outcome of every live event is logged (DEF-036). Both paths make their decisions in memory with `processing/ledger.py` and only then write ([schema](schema.md#how-a-message-changes-the-tables)). `tests/integration/test_batch.py` checks, on random streams, that a batch gives exactly the results of handling its messages one at a time.
-
-**The envelope** (`schema_version` 1) has these fields: `event_id`, `ids`, `source_updated_ms`, `event_time_ms`, `source`, `feed_generated_ms`, `fetched_at`, and `payload`, which is the USGS feature, unchanged. The poller drops only features it can't route: those without a usable `id`, `updated` or `time`. Every data-quality rule is applied by the consumer, which keeps rejected messages.
-
 ## Ingestion
 
 The poller (`src/earth_hub/ingestion/`) fetches the USGS `all_day` feed and publishes each new or revised event to `earthquakes.raw`.
@@ -139,6 +118,25 @@ make catchup-once                         # one all_month pass and one deleted-e
 - **The `catchup` service** reads the `all_month` feed hourly, which covers revisions and outages of up to 30 days, and checks FDSN daily for deleted events.
 - **Both publish to `earthquakes.backfill`,** and only events that are new or newer than what is stored. A year of history (139,579 events) goes through in about 42 seconds.
 
+## Topics and consumer groups
+
+```mermaid
+%%{init: {"flowchart": {"rankSpacing": 110, "nodeSpacing": 30}}}%%
+flowchart TB
+    poller["poller"] -- "key: USGS ID" --> raw[["earthquakes.raw<br/>3 partitions"]]
+    catchup["catchup"] --> bf[["earthquakes.backfill<br/>3 partitions"]]
+    backfill["make backfill"] --> bf
+    raw -- "group earth-hub-consumer" --> consumer["consumer<br/>one at a time"]
+    bf -- "group earth-hub-consumer-backfill" --> consumerbf["consumer-backfill<br/>batches of 500"]
+    raw -. "26 h read back at start-up" .-> poller
+```
+
+- **Messages are keyed by USGS event ID,** so every revision of an event goes to one partition, in order.
+- **Two topics,** so that a year of history never queues in front of live events. The poller reads `earthquakes.raw` back at start-up, to know what it already sent; it never reads the backfill topic.
+- **Both consumers run the same code,** with two settings apart. `consumer-backfill` sets `KAFKA_CONSUMER_TOPIC`, and takes up to `CONSUMER_BATCH_SIZE` messages at once, processed as a set (`process_batch`). The live consumer has a batch size of 1 (`process_message`), so the outcome of every live event is logged (DEF-036). Both paths make their decisions in memory with `processing/ledger.py` and only then write ([schema](schema.md#how-a-message-changes-the-tables)). `tests/integration/test_batch.py` checks, on random streams, that a batch gives exactly the results of handling its messages one at a time.
+
+**The envelope** (`schema_version` 1) has these fields: `event_id`, `ids`, `source_updated_ms`, `event_time_ms`, `source`, `feed_generated_ms`, `fetched_at`, and `payload`, which is the USGS feature, unchanged. The poller drops only features it can't route: those without a usable `id`, `updated` or `time`. Every data-quality rule is applied by the consumer, which keeps rejected messages.
+
 ## Persistence
 
 How a message changes the tables, one transaction per message, is in [the schema](schema.md#how-a-message-changes-the-tables). The guarantees:
@@ -147,39 +145,6 @@ How a message changes the tables, one transaction per message, is in [the schema
 - **Newer wins, always through one function.** Whether a revision replaces the stored one is decided only by `database/revisions.py:compare`. The consumer's two paths and backfill's "does this need publishing" all use it.
 - **Bad data is kept, not stored as an event.** 16 [data-quality rules](data-quality-rules.md) with stable IDs, plus `CHECK` constraints in the database as a second line of defense.
 - **`make reconcile`** compares each topic with `raw_events`. A missing row below the group's committed offset is **lost**; at or above it, it is **pending** (lag). It also checks five invariants, such as every preferred ID mapping to its own event.
-
-## Recovery
-
-```mermaid
-sequenceDiagram
-    participant K as Kafka
-    participant C as consumer
-    participant P as PostgreSQL
-    K->>C: message at offset n
-    C->>P: BEGIN, insert raw_events (topic, partition, n)
-    alt offset already stored
-        P-->>C: conflict: a redelivery, nothing to do
-    else new
-        C->>P: validate, find the event, apply if newer
-    end
-    C->>P: COMMIT
-    Note over C,P: a crash before COMMIT: nothing was stored,<br/>and the offset was not committed
-    C->>K: commit offset n + 1
-    Note over C,K: a crash before this: n is delivered again,<br/>and recognized as stored
-```
-
-| Failure | What happens | Tested by |
-| --- | --- | --- |
-| PostgreSQL down | The consumer retries the same message with backoff (up to 30 s) until it's back, never rejecting the message because of it, and its health check fails meanwhile. The API answers `503`, but still `422` for invalid requests | `tests/disruptive/test_outages.py`, `make check-db-outage` |
-| Kafka restarted | The poller and consumers reconnect; nothing is lost or duplicated | `tests/disruptive/test_outages.py` |
-| Consumer killed mid-stream | Uncommitted offsets are delivered again and recognized | `tests/e2e/test_scenarios.py`, `tests/integration/test_pipeline.py` |
-| Poller restarted | It rebuilds what it sent from the topic, and resends nothing | `tests/e2e/test_scenarios.py`, `tests/integration/test_ingestion.py` |
-| A message that keeps failing | After 3 attempts for a reason other than the database, it's stored with `outcome = 'error'`, so one bad message can't stall a partition | `tests/unit/test_consumer.py` |
-| An outage longer than the live feed's day | Catch-up's hourly `all_month` pass covers up to 30 days; beyond that, `make backfill` | `tests/e2e/test_backfill.py` |
-| Both services restarted | The data survives | `tests/disruptive/test_outages.py`, `make smoke-restart` |
-| An export interrupted | The next run carries on from its last checkpoint; objects are named by each record's key, so they are never duplicated | `tests/unit/test_export_r2.py` |
-| A handover to full mode interrupted while replaying | The bucket stays frozen; run again, the handover sends only the log entries not yet in the topic | `tests/e2e/test_mode_handover.py` |
-| A direct round interrupted | The next round finishes it from its redo record, and the bucket ends byte for byte as if nothing had happened, wherever the interruption was | `tests/unit/test_direct.py` |
 
 ## Export to R2
 
@@ -397,6 +362,39 @@ make dashboard-deploy    # publish; prints the workers.dev address
 | 1,000,000 | 36 MB | about 4 s | about 3.7 s | about 900 ms |
 
 About 3–4 s of the first map is the browser compiling DuckDB's engine. Browsers cache that between visits, which the tests don't measure.
+
+## Recovery
+
+```mermaid
+sequenceDiagram
+    participant K as Kafka
+    participant C as consumer
+    participant P as PostgreSQL
+    K->>C: message at offset n
+    C->>P: BEGIN, insert raw_events (topic, partition, n)
+    alt offset already stored
+        P-->>C: conflict: a redelivery, nothing to do
+    else new
+        C->>P: validate, find the event, apply if newer
+    end
+    C->>P: COMMIT
+    Note over C,P: a crash before COMMIT: nothing was stored,<br/>and the offset was not committed
+    C->>K: commit offset n + 1
+    Note over C,K: a crash before this: n is delivered again,<br/>and recognized as stored
+```
+
+| Failure | What happens | Tested by |
+| --- | --- | --- |
+| PostgreSQL down | The consumer retries the same message with backoff (up to 30 s) until it's back, never rejecting the message because of it, and its health check fails meanwhile. The API answers `503`, but still `422` for invalid requests | `tests/disruptive/test_outages.py`, `make check-db-outage` |
+| Kafka restarted | The poller and consumers reconnect; nothing is lost or duplicated | `tests/disruptive/test_outages.py` |
+| Consumer killed mid-stream | Uncommitted offsets are delivered again and recognized | `tests/e2e/test_scenarios.py`, `tests/integration/test_pipeline.py` |
+| Poller restarted | It rebuilds what it sent from the topic, and resends nothing | `tests/e2e/test_scenarios.py`, `tests/integration/test_ingestion.py` |
+| A message that keeps failing | After 3 attempts for a reason other than the database, it's stored with `outcome = 'error'`, so one bad message can't stall a partition | `tests/unit/test_consumer.py` |
+| An outage longer than the live feed's day | Catch-up's hourly `all_month` pass covers up to 30 days; beyond that, `make backfill` | `tests/e2e/test_backfill.py` |
+| Both services restarted | The data survives | `tests/disruptive/test_outages.py`, `make smoke-restart` |
+| An export interrupted | The next run carries on from its last checkpoint; objects are named by each record's key, so they are never duplicated | `tests/unit/test_export_r2.py` |
+| A handover to full mode interrupted while replaying | The bucket stays frozen; run again, the handover sends only the log entries not yet in the topic | `tests/e2e/test_mode_handover.py` |
+| A direct round interrupted | The next round finishes it from its redo record, and the bucket ends byte for byte as if nothing had happened, wherever the interruption was | `tests/unit/test_direct.py` |
 
 ## Observability
 
