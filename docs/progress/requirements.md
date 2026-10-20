@@ -116,15 +116,16 @@ One requirement per rule in [data-quality-rules.md](../technical/data-quality-ru
 | --- | --- |
 | REQ-EXP-001 | `GET /api/v1/export/earthquakes` returns every column of every `earthquakes` row exactly as stored, deleted events included, in `id` order, paged by `after_id` (1–5000 rows) |
 | REQ-EXP-002 | `make export-r2` reads only through the API and uploads rows that are not in the bucket or changed since their last upload, skips unchanged rows, and deletes objects for rows no longer in the table |
-| REQ-EXP-003 | Each row is one object named by its primary key, so reruns and interrupted runs never create duplicates; uploads that failed are retried by the next run, and progress is saved every few pages so the next run skips rows an interrupted one already uploaded |
+| REQ-EXP-003 | Each row is one object named by its key (REQ-EXP-012), so reruns and interrupted runs never create duplicates; uploads that failed are retried by the next run, and progress is saved every few pages so the next run skips rows an interrupted one already uploaded |
 | REQ-EXP-004 | After a run the bucket holds exactly the rows read, with the same value in every column, as checked against the bucket listing on a verified run and against the manifest otherwise; if not, the run is marked failed |
 | REQ-EXP-005 | Every run is recorded in the bucket (`runs/`) and in `reports/exports/`, with status, counts, timings and errors; a run that never finished is listed as interrupted |
 | REQ-EXP-006 | Only one export runs at a time; the lock is taken atomically, and a lock left by a crashed run expires |
 | REQ-EXP-007 | A dry run reports what would change without writing to the bucket; missing R2 settings stop the command with a clear message |
 | REQ-EXP-008 | By default a run decides uploads and deletions from the manifest without listing the bucket; `make export-r2 VERIFY=1`, and any run without a readable manifest, lists the bucket once after the uploads, deletes objects the manifest does not know and re-uploads rows whose object is missing |
-| REQ-EXP-009 | After a run that succeeded, the export writes `analytics/earthquakes.parquet`: every row it read and every column, with the same values and types (timestamps with time zone, lists as lists), in `id` order; it is rewritten only when the rows changed or the snapshot is missing; dry runs and failed runs never write it |
+| REQ-EXP-009 | After a run that succeeded, the export writes `analytics/earthquakes.parquet`: every row it read and every published column (all but `id`), with the same values and types (timestamps with time zone, lists as lists), in `key` order; it is rewritten only when the rows changed or the snapshot is missing; dry runs and failed runs never write it |
 | REQ-EXP-010 | `analytics/meta.json` describes the snapshot (run, time, row count, size, SHA-256 of the file, the rows' fingerprint, column types) and is written only after the file; a missing or unreadable `meta.json` makes the next run rewrite both |
 | REQ-EXP-011 | `make r2-ls`, `make r2-count` and `make r2-get` list, count and read the bucket's objects (gunzipping `.gz`, saving binary objects only to a file) and never write to it |
+| REQ-EXP-012 | Each record has a `key`, the USGS ID it was created with, kept by the surviving record of a merge (existing rows: the earliest-seen of their IDs); R2 rows and the snapshot are named and ordered by `key` and never carry the database's `id`, so they are the same whatever store processed the events |
 
 ## Dashboard
 

@@ -39,16 +39,16 @@ PY
 
 The examples run on the 8 events of `tests/support/dashboard_data.py`, chosen for edges: 29 February and the midnights around it, a Sunday at the end of an ISO week, magnitudes at band edges, a negative magnitude, an event without magnitude or country, a deletion and a quarry blast.
 
-| id | time (UTC) | magnitude | country | region | note |
+| key | time (UTC) | magnitude | country | region | note |
 | --- | --- | --- | --- | --- | --- |
-| 1 | 2024-02-28 23:59:59.999 | 2.49 | United States | Alaska | |
-| 2 | 2024-02-29 00:00:00 | 2.5 | United States | Alaska | |
-| 3 | 2024-02-29 12:00:00 | 4.5 | Mexico | Baja California | |
-| 4 | 2024-03-01 00:00:00 | NULL | NULL | NULL | |
-| 5 | 2024-03-04 06:00:00 | -0.43 | United States | California | |
-| 6 | 2024-03-10 23:00:00 | 5.2 | Japan | NULL | a Sunday |
-| 7 | 2024-03-10 08:00:00 | 3.0 | United States | Alaska | deleted |
-| 8 | 2024-04-02 10:00:00 | 1.0 | United States | Alaska | quarry blast |
+| us0001 | 2024-02-28 23:59:59.999 | 2.49 | United States | Alaska | |
+| us0002 | 2024-02-29 00:00:00 | 2.5 | United States | Alaska | |
+| us0003 | 2024-02-29 12:00:00 | 4.5 | Mexico | Baja California | |
+| us0004 | 2024-03-01 00:00:00 | NULL | NULL | NULL | |
+| us0005 | 2024-03-04 06:00:00 | -0.43 | United States | California | |
+| us0006 | 2024-03-10 23:00:00 | 5.2 | Japan | NULL | a Sunday |
+| us0007 | 2024-03-10 08:00:00 | 3.0 | United States | Alaska | deleted |
+| us0008 | 2024-04-02 10:00:00 | 1.0 | United States | Alaska | quarry blast |
 
 The filter is the default (no limits, deleted events left out, per month, `top_n` 10, `significant_magnitude` 4.5) except where an example says otherwise.
 
@@ -145,20 +145,20 @@ Per ISO week, from Monday. Weeks without events are listed with 0, so a chart's 
 
 <!-- replay: dashboard significant -->
 
-| id | event_ts | magnitude | place | country | depth_km | url |
+| key | event_ts | magnitude | place | country | depth_km | url |
 | --- | --- | --- | --- | --- | --- | --- |
-| 6 | 2024-03-10 23:00:00 | 5.2 | place 6 | Japan | 10.0 | https://earthquake.usgs.gov/earthquakes/eventpage/ak0001 |
-| 3 | 2024-02-29 12:00:00 | 4.5 | place 3 | Mexico | 10.0 | https://earthquake.usgs.gov/earthquakes/eventpage/ak0001 |
+| us0006 | 2024-03-10 23:00:00 | 5.2 | place 6 | Japan | 10.0 | https://earthquake.usgs.gov/earthquakes/eventpage/ak0001 |
+| us0003 | 2024-02-29 12:00:00 | 4.5 | place 3 | Mexico | 10.0 | https://earthquake.usgs.gov/earthquakes/eventpage/ak0001 |
 
 `largest.sql`: the strongest, here at 1.0 and above with `top_n = 3`; equal magnitudes would be newest first.
 
 <!-- replay: dashboard largest significant_magnitude=1.0 top_n=3 -->
 
-| id | event_ts | magnitude | place | country | depth_km | url |
+| key | event_ts | magnitude | place | country | depth_km | url |
 | --- | --- | --- | --- | --- | --- | --- |
-| 6 | 2024-03-10 23:00:00 | 5.2 | place 6 | Japan | 10.0 | https://earthquake.usgs.gov/earthquakes/eventpage/ak0001 |
-| 3 | 2024-02-29 12:00:00 | 4.5 | place 3 | Mexico | 10.0 | https://earthquake.usgs.gov/earthquakes/eventpage/ak0001 |
-| 2 | 2024-02-29 00:00:00 | 2.5 | place 2 | United States | 10.0 | https://earthquake.usgs.gov/earthquakes/eventpage/ak0001 |
+| us0006 | 2024-03-10 23:00:00 | 5.2 | place 6 | Japan | 10.0 | https://earthquake.usgs.gov/earthquakes/eventpage/ak0001 |
+| us0003 | 2024-02-29 12:00:00 | 4.5 | place 3 | Mexico | 10.0 | https://earthquake.usgs.gov/earthquakes/eventpage/ak0001 |
+| us0002 | 2024-02-29 00:00:00 | 2.5 | place 2 | United States | 10.0 | https://earthquake.usgs.gov/earthquakes/eventpage/ak0001 |
 
 ### A filtered map
 
@@ -166,10 +166,10 @@ Per ISO week, from Monday. Weeks without events are listed with 0, so a chart's 
 
 <!-- replay: dashboard map_points start_time="2024-02-29" end_time="2024-03-01" -->
 
-| id | longitude | latitude | depth_km | magnitude | event_time_ms | place | title | url | review_status |
+| key | longitude | latitude | depth_km | magnitude | event_time_ms | place | title | url | review_status |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| 2 | -155.6123 | 57.4401 | 10.0 | 2.5 | 1709164800000 | place 2 | M 2.4 - 86 km E of Ugashik, Alaska | https://earthquake.usgs.gov/earthquakes/eventpage/ak0001 | reviewed |
-| 3 | -155.6123 | 57.4401 | 10.0 | 4.5 | 1709208000000 | place 3 | M 2.4 - 86 km E of Ugashik, Alaska | https://earthquake.usgs.gov/earthquakes/eventpage/ak0001 | reviewed |
+| us0002 | -155.6123 | 57.4401 | 10.0 | 2.5 | 1709164800000 | place 2 | M 2.4 - 86 km E of Ugashik, Alaska | https://earthquake.usgs.gov/earthquakes/eventpage/ak0001 | reviewed |
+| us0003 | -155.6123 | 57.4401 | 10.0 | 4.5 | 1709208000000 | place 3 | M 2.4 - 86 km E of Ugashik, Alaska | https://earthquake.usgs.gov/earthquakes/eventpage/ak0001 | reviewed |
 
 ### The filter's options
 

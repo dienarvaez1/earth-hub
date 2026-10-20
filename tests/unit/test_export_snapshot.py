@@ -9,6 +9,7 @@ import pytest
 from support.export import BUCKET, NOW, make_row
 
 from earth_hub.api.schemas import EarthquakeRow
+from earth_hub.export.r2 import published
 from earth_hub.export.snapshot import COLUMNS, META_KEY, SNAPSHOT_KEY, TIMESTAMPTZ
 
 pytestmark = pytest.mark.req("REQ-EXP-009")
@@ -44,8 +45,8 @@ def keys(s3, prefix="analytics/") -> list[str]:
     return [o["Key"] for o in s3.list_objects_v2(Bucket=BUCKET, Prefix=prefix).get("Contents", [])]
 
 
-def test_the_columns_are_every_table_column_in_order():
-    assert list(COLUMNS) == list(EarthquakeRow.model_fields)
+def test_the_columns_are_every_table_column_but_id_in_order():
+    assert list(COLUMNS) == [f for f in EarthquakeRow.model_fields if f != "id"]
 
 
 def test_a_run_writes_every_row_and_column_exactly(export, api, s3, tmp_path):
@@ -56,7 +57,7 @@ def test_a_run_writes_every_row_and_column_exactly(export, api, s3, tmp_path):
     assert record.snapshot["written"] and record.snapshot["rows"] == 7
     rows, types = read_snapshot(s3, tmp_path)
     assert types == COLUMNS
-    assert rows == [as_python(r) for r in api.rows]  # every value, in id order
+    assert rows == [as_python(published(r)) for r in api.rows]  # every value, in key order
     assert rows[0]["event_time"].microsecond == 123456
 
 
@@ -92,7 +93,7 @@ def test_changes_rewrite_the_snapshot(export, api, s3, tmp_path):
     record = export(clock=LATER[0])
     assert record.snapshot["written"]
     rows, _ = read_snapshot(s3, tmp_path)
-    assert [r["id"] for r in rows] == [1, 2, 3, 4, 6, 7, 12]
+    assert [r["key"] for r in rows] == [f"us{n:04d}" for n in (1, 2, 3, 4, 6, 7, 12)]
     assert rows[0]["magnitude"] == 4.1
     assert meta(s3)["run_id"] == record.run_id
 
@@ -103,7 +104,7 @@ def test_a_dry_run_never_writes_it(export, s3):
 
 
 def test_a_failed_run_does_not_write_it_and_the_next_run_does(export, bucket, api, s3, tmp_path):
-    bucket.failing = {"earthquakes/2.json"}
+    bucket.failing = {"earthquakes/us0002.json"}
     record = export()
     assert record.status == "failed" and record.snapshot is None
     assert keys(s3) == []

@@ -17,18 +17,25 @@ from earth_hub.export.r2 import (
     Exporter,
     LockHeld,
     encode,
-    key_row_id,
     list_runs,
+    object_row,
+    published,
     row_key,
 )
 
 
-def stored_rows(s3) -> dict[int, dict]:
+def name(n: int) -> str:
+    """The object of test row n (support/export.py:make_row gives it the key us000n)."""
+    return row_key(f"us{n:04d}")
+
+
+def stored_rows(s3) -> dict[str, dict]:
+    """key -> the row object's content."""
     objects = {}
     for page in s3.get_paginator("list_objects_v2").paginate(Bucket=BUCKET, Prefix="earthquakes/"):
         for item in page.get("Contents", []):
             body = s3.get_object(Bucket=BUCKET, Key=item["Key"])["Body"].read()
-            objects[key_row_id(item["Key"])] = json.loads(body)
+            objects[object_row(item["Key"])] = json.loads(body)
     return objects
 
 
@@ -49,9 +56,9 @@ def test_first_run_uploads_every_row_exactly(export, api, s3):
         "deleted": 0,
         "failed": 0,
     }
-    assert stored_rows(s3) == {row["id"]: row for row in api.rows}
-    body = s3.get_object(Bucket=BUCKET, Key=row_key(1))["Body"].read()
-    assert body == encode(api.rows[0])  # byte for byte what the API returned
+    assert stored_rows(s3) == {row["key"]: published(row) for row in api.rows}
+    body = s3.get_object(Bucket=BUCKET, Key=name(1))["Body"].read()
+    assert body == encode(published(api.rows[0]))  # byte for byte the API row, less its id
     assert record.verified  # no manifest yet, so the bucket was listed
     assert record.verification == {
         "source": "bucket listing",
@@ -91,13 +98,13 @@ def test_new_changed_and_removed_rows(export, api, s3):
         "deleted": 1,
         "failed": 0,
     }
-    assert stored_rows(s3) == {row["id"]: row for row in api.rows}
+    assert stored_rows(s3) == {row["key"]: published(row) for row in api.rows}
 
 
 @pytest.mark.req("REQ-EXP-008")
 def test_an_object_removed_from_the_bucket_is_uploaded_again_by_a_verified_run(export, s3):
     export()
-    s3.delete_object(Bucket=BUCKET, Key=row_key(3))
+    s3.delete_object(Bucket=BUCKET, Key=name(3))
     quick = export()  # trusts the manifest: does not notice
     assert quick.status == "succeeded" and not quick.verified
     assert (quick.counts.new, quick.counts.unchanged) == (0, 7)
@@ -113,11 +120,11 @@ def test_an_object_removed_from_the_bucket_is_uploaded_again_by_a_verified_run(e
 @pytest.mark.req("REQ-EXP-008")
 def test_a_verified_run_deletes_objects_the_manifest_does_not_know(export, s3):
     export()
-    s3.put_object(Bucket=BUCKET, Key=row_key(99), Body=b"{}")  # left by hand
+    s3.put_object(Bucket=BUCKET, Key=name(99), Body=b"{}")  # left by hand
     assert export().verification["match"]  # unverified: not seen
     record = export(verify=True)
     assert record.status == "succeeded" and record.counts.deleted == 1
-    assert sorted(stored_rows(s3)) == list(range(1, 8))
+    assert sorted(stored_rows(s3)) == [f"us{n:04d}" for n in range(1, 8)]
 
 
 @pytest.mark.req("REQ-EXP-003")
@@ -146,7 +153,7 @@ def test_the_final_manifest_filter_is_computed_once(export, monkeypatch):
 
     monkeypatch.setattr(r2, "kept", kept)
     export()
-    assert len(calls) == 1 and calls[0] == set(range(1, 8))
+    assert len(calls) == 1 and calls[0] == {f"us{n:04d}" for n in range(1, 8)}
 
 
 @pytest.mark.req("REQ-EXP-008")
@@ -174,7 +181,7 @@ def test_only_a_verified_run_lists_the_bucket_and_only_once(export, api, monkeyp
 
 @pytest.mark.req("REQ-EXP-008")
 def test_a_run_without_a_manifest_is_verified(export, s3):
-    s3.put_object(Bucket=BUCKET, Key=row_key(99), Body=b"{}")
+    s3.put_object(Bucket=BUCKET, Key=name(99), Body=b"{}")
     record = export()
     assert record.verified and record.counts.deleted == 1
 
@@ -208,17 +215,17 @@ def test_objects_outside_the_row_layout_are_left_alone(export, s3):
 
 @pytest.mark.req("REQ-EXP-003", "REQ-EXP-004", "REQ-EXP-005")
 def test_failed_uploads_fail_the_run_and_are_retried_without_duplicates(export, bucket, api, s3):
-    bucket.failing = {row_key(2), row_key(6)}
+    bucket.failing = {name(2), name(6)}
     record = export()
     assert record.status == "failed"
     assert (record.counts.new, record.counts.failed) == (5, 2)
-    assert record.verification["missing"] == [2, 6]
-    assert any("row 2" in e for e in record.errors)
+    assert record.verification["missing"] == ["us0002", "us0006"]
+    assert any("row us0002" in e for e in record.errors)
 
     record = export()
     assert record.status == "succeeded"
     assert (record.counts.new, record.counts.unchanged) == (2, 5)
-    assert stored_rows(s3) == {row["id"]: row for row in api.rows}
+    assert stored_rows(s3) == {row["key"]: published(row) for row in api.rows}
 
 
 @pytest.mark.req("REQ-EXP-003", "REQ-EXP-005")
@@ -237,7 +244,7 @@ def test_an_interrupted_run_is_recorded_and_the_next_run_completes_it(export, ap
     assert record.status == "succeeded"
     # The interrupted run saved its progress: the 3 rows it uploaded are not sent again.
     assert (record.counts.new, record.counts.updated, record.counts.unchanged) == (4, 0, 3)
-    assert stored_rows(s3) == {row["id"]: row for row in api.rows}
+    assert stored_rows(s3) == {row["key"]: published(row) for row in api.rows}
 
 
 @pytest.mark.req("REQ-EXP-003")
@@ -258,7 +265,7 @@ def test_a_killed_run_loses_only_the_pages_since_the_last_checkpoint(export, api
     record = export(clock=lambda: NOW + timedelta(minutes=1))
     assert record.status == "succeeded"
     assert (record.counts.unchanged, record.counts.new, record.counts.updated) == (6, 1, 0)
-    assert stored_rows(s3) == {row["id"]: row for row in api.rows}
+    assert stored_rows(s3) == {row["key"]: published(row) for row in api.rows}
 
 
 @pytest.mark.req("REQ-EXP-005")
@@ -349,8 +356,8 @@ def test_a_dry_run_counts_changes_and_writes_nothing(export, api, s3, tmp_path):
     record = export(dry_run=True, clock=lambda: NOW + timedelta(minutes=5))
     assert record.status == "succeeded" and record.dry_run
     assert (record.counts.new, record.counts.updated, record.counts.unchanged) == (1, 1, 6)
-    assert stored_rows(s3)[1]["magnitude"] == 2.37  # unchanged in the bucket
-    assert 10 not in stored_rows(s3)
+    assert stored_rows(s3)["us0001"]["magnitude"] == 2.37  # unchanged in the bucket
+    assert "us0010" not in stored_rows(s3)
     assert s3.list_objects_v2(Bucket=BUCKET, Prefix="runs/")["KeyCount"] == 1  # first run only
     assert len(list((tmp_path / "exports").glob("*.json"))) == 2  # recorded locally
 
@@ -367,7 +374,7 @@ def test_an_unreadable_manifest_only_costs_a_reupload(export, s3, api):
     manifest = json.loads(
         gzip.decompress(s3.get_object(Bucket=BUCKET, Key=MANIFEST_KEY)["Body"].read())
     )
-    assert sorted(manifest["rows"], key=int) == [str(r["id"]) for r in api.rows]
+    assert sorted(manifest["rows"]) == [r["key"] for r in api.rows]
 
 
 @pytest.mark.req("REQ-EXP-005")
@@ -398,8 +405,27 @@ def test_missing_settings_stop_the_command(monkeypatch, capsys):
     assert "set R2_BUCKET, R2_ACCESS_KEY_ID" in capsys.readouterr().err
 
 
-def test_row_keys():
-    assert row_key(42) == "earthquakes/42.json"
-    assert key_row_id("earthquakes/42.json") == 42
-    assert key_row_id("earthquakes/README.txt") is None
-    assert key_row_id("earthquakes/4/2.json") is None
+@pytest.mark.req("REQ-EXP-012")
+def test_rows_are_named_by_key_and_published_without_id():
+    assert row_key("us7000abcd") == "earthquakes/us7000abcd.json"
+    assert object_row("earthquakes/us7000abcd.json") == "us7000abcd"
+    assert object_row("earthquakes/README.txt") is None
+    assert object_row("earthquakes/us/1.json") is None
+    assert published({"id": 7, "key": "us1", "magnitude": 2.0}) == {"key": "us1", "magnitude": 2.0}
+
+
+@pytest.mark.req("REQ-EXP-012")
+def test_a_bucket_named_by_id_is_renamed_by_the_next_run(export, api, s3):
+    # The layout before keys: objects earthquakes/<id>.json, a manifest keyed by id.
+    for row in api.rows:
+        s3.put_object(Bucket=BUCKET, Key=f"earthquakes/{row['id']}.json", Body=encode(row))
+    old = {str(row["id"]): "0" * 64 for row in api.rows}
+    s3.put_object(
+        Bucket=BUCKET,
+        Key=MANIFEST_KEY,
+        Body=gzip.compress(json.dumps({"table": "earthquakes", "rows": old}).encode()),
+    )
+    record = export()
+    assert record.status == "succeeded"
+    assert (record.counts.new, record.counts.deleted) == (7, 7)  # every row moves to its key
+    assert stored_rows(s3) == {row["key"]: published(row) for row in api.rows}

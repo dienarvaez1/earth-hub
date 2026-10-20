@@ -287,6 +287,7 @@ def test_record_error_stores_the_message_and_reason(db):
 )
 def test_check_constraints_hold_without_the_application(db, column, value):
     row = {
+        "key": "x1",
         "preferred_event_id": "x1",
         "event_time": NOW_FIXTURE,
         "event_time_ms": 1000,

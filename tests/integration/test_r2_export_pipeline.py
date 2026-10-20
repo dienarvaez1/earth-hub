@@ -18,7 +18,7 @@ from earth_hub.api.main import create_app
 from earth_hub.database.models import Earthquake
 from earth_hub.database.repository import IncomingMessage, process_message
 from earth_hub.export.bucket import Bucket
-from earth_hub.export.r2 import Exporter, key_row_id
+from earth_hub.export.r2 import Exporter, object_row
 from earth_hub.export.snapshot import SNAPSHOT_KEY
 
 pytestmark = pytest.mark.integration
@@ -64,9 +64,11 @@ def export(db, s3, tmp_path, minute=0):
         return exporter.run()
 
 
-def table_rows(db) -> dict[int, dict]:
+def table_rows(db) -> dict[str, dict]:
+    """key -> the row as published: every column but the database's id."""
     with db.connect() as conn:
-        return {r["id"]: dict(r) for r in conn.execute(select(Earthquake.__table__)).mappings()}
+        rows = conn.execute(select(Earthquake.__table__)).mappings()
+        return {r["key"]: {c: v for c, v in r.items() if c != "id"} for r in rows}
 
 
 def assert_snapshot_equals_table(db, s3, tmp_path):
@@ -77,35 +79,37 @@ def assert_snapshot_equals_table(db, s3, tmp_path):
     snapshot = [dict(zip(relation.columns, r, strict=True)) for r in relation.fetchall()]
     con.close()
     table = table_rows(db)
-    assert [r["id"] for r in snapshot] == sorted(table)
+    assert [r["key"] for r in snapshot] == sorted(table)
     for got in snapshot:
-        row = table[got["id"]]
+        row = table[got["key"]]
         assert list(got) == list(row)
         for column, value in row.items():
-            assert got[column] == value, (got["id"], column)
-            assert type(got[column]) is type(value), (got["id"], column)
+            assert got[column] == value, (got["key"], column)
+            assert type(got[column]) is type(value), (got["key"], column)
 
 
 def assert_bucket_equals_table(db, s3):
     table = table_rows(db)
     objects = {}
     for item in s3.list_objects_v2(Bucket=BUCKET, Prefix="earthquakes/").get("Contents", []):
-        objects[key_row_id(item["Key"])] = json.loads(
+        objects[object_row(item["Key"])] = json.loads(
             s3.get_object(Bucket=BUCKET, Key=item["Key"])["Body"].read()
         )
     assert set(objects) == set(table)
-    for row_id, row in table.items():
-        obj = objects[row_id]
+    for key, row in table.items():
+        obj = objects[key]
         assert list(obj) == list(row)
         for column, value in row.items():
             got = obj[column]
             if isinstance(value, datetime):
                 got = datetime.fromisoformat(got)
-            assert got == value, (row_id, column)
-            assert type(got) is type(value), (row_id, column)
+            assert got == value, (key, column)
+            assert type(got) is type(value), (key, column)
 
 
-@pytest.mark.req("REQ-EXP-001", "REQ-EXP-002", "REQ-EXP-003", "REQ-EXP-004", "REQ-EXP-009")
+@pytest.mark.req(
+    "REQ-EXP-001", "REQ-EXP-002", "REQ-EXP-003", "REQ-EXP-004", "REQ-EXP-009", "REQ-EXP-012"
+)
 def test_the_bucket_matches_the_table_through_revisions_deletions_and_merges(
     db, make_envelope, make_feature, s3, tmp_path
 ):

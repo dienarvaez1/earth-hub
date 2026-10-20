@@ -93,7 +93,10 @@ class MagnitudeSummary(BaseModel):
 class EarthquakeRow(BaseModel):
     """One `earthquakes` row with every column, exactly as stored, for exports."""
 
-    id: int = Field(description="Primary key; stable while the row exists")
+    id: int = Field(description="Primary key: this database's row number; used for paging")
+    key: str = Field(
+        description="The record's identity outside the database: the USGS ID it was created with"
+    )
     preferred_event_id: str
     event_time: datetime
     event_time_ms: int

@@ -31,9 +31,11 @@ class NewKey:
 
 @dataclass
 class Record:
-    """One stored event, as the decisions need it. `columns` are the values of the event's
-    columns (those in ValidEvent.fields); `None` when they were not loaded and have not changed."""
+    """One stored event, as the decisions need it. `key` is its identity outside a store: the
+    USGS ID it was created with, kept by the surviving record of a merge. `columns` are the
+    values of the event's columns (those in ValidEvent.fields)."""
 
+    key: str
     preferred_event_id: str
     source_updated_ms: int
     deleted: bool
@@ -85,6 +87,7 @@ class Ledger:
             key = NewKey(len(self.created))
             self.created.append(key)
             self.records[key] = Record(
+                key=event.event_id,
                 preferred_event_id=event.event_id,
                 source_updated_ms=event.source_updated_ms,
                 deleted=event.deleted,
@@ -133,7 +136,9 @@ class Ledger:
         total = sum(self.records[k].revision_count for k in merged)
         first_seen = min(self.records[k].first_seen_at for k in merged)
         base = self.records[newest] if newest != survivor else self.records[survivor]
-        self.records[survivor] = replace(base, revision_count=total, first_seen_at=first_seen)
+        self.records[survivor] = replace(
+            base, key=self.records[survivor].key, revision_count=total, first_seen_at=first_seen
+        )
         for key in others:
             del self.records[key]
         for event_id, key in self.event_of.items():

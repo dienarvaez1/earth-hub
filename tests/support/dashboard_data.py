@@ -74,7 +74,7 @@ def synthetic(directory: Path, rows: int) -> Path:
     regions = "[" + ", ".join("NULL" if r is None else f"'{r}'" for _, r in places) + "]"
     step_ms = 365 * 86_400_000 // rows
     values = {
-        "id": "i",
+        "key": "'syn' || lpad(CAST(i AS VARCHAR), 7, '0')",
         "preferred_event_id": "'syn' || i",
         "event_time": "to_timestamp((1735689600000 + i * $step) / 1000.0)",
         "event_time_ms": "1735689600000 + i * $step",
