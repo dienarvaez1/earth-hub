@@ -168,7 +168,7 @@ sequenceDiagram
 | A message that keeps failing | After 3 attempts for a reason other than the database, it's stored with `outcome = 'error'`, so one bad message can't stall a partition | `tests/unit/test_consumer.py` |
 | An outage longer than the live feed's day | Catch-up's hourly `all_month` pass covers up to 30 days; beyond that, `make backfill` | `tests/e2e/test_backfill.py` |
 | Both services restarted | The data survives | `tests/disruptive/test_outages.py`, `make smoke-restart` |
-| An export interrupted | The next run carries on from its last checkpoint; objects are named by primary key, so they are never duplicated | `tests/unit/test_export_r2.py` |
+| An export interrupted | The next run carries on from its last checkpoint; objects are named by each record's key, so they are never duplicated | `tests/unit/test_export_r2.py` |
 
 ## Export to R2
 
@@ -176,16 +176,16 @@ sequenceDiagram
 
 | In the bucket | What it is |
 | --- | --- |
-| `earthquakes/<id>.json` | One object per row, every column |
+| `earthquakes/<key>.json` | One object per row, every column but the database's `id`; `key` is the USGS ID the record was created with |
 | `_state/earthquakes-manifest.json.gz` | SHA-256 of each row as last uploaded |
 | `_state/lock.json` | Held while a run is in progress (expires after 2 hours if a run crashes) |
 | `runs/<run_id>.json` | One record per run: status, counts, timings, errors (also in `reports/exports/`) |
-| `analytics/earthquakes.parquet` | The whole table in one Parquet file for the dashboard, every row and column with types kept (about 7.5 MB for 115,000 rows) |
+| `analytics/earthquakes.parquet` | The whole table in one Parquet file for the dashboard, every row and published column with types kept, in `key` order (about 7.5 MB for 115,000 rows) |
 | `analytics/meta.json` | What the snapshot holds: run, row count, size, SHA-256, column types |
 
 **What a run does:**
 - **Uploads only what changed.** A run uploads new or changed rows and skips unchanged ones. It deletes the objects of rows that left the table, which are merged events.
-- **Never duplicates.** Each row is one object named by its primary key, so reruns and interrupted runs can't create duplicates. A failed upload is retried by the next run.
+- **Never duplicates.** Each row is one object named by its key, so reruns and interrupted runs can't create duplicates. A failed upload is retried by the next run.
 - **Saves progress every 10 pages** (10,000 rows), so a run carries on after an interruption.
 - **Trusts the manifest by default** to say what the bucket holds, so a run with a few changes takes about 35 s, most of it rewriting the Parquet snapshot, and one with none about 8 s.
 - **`VERIFY=1` also lists the bucket** (about 100 s for 115,000 objects), to:

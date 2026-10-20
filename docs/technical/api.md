@@ -436,6 +436,7 @@ Response: `200 OK`
   "rows": [
     {
       "id": 1,
+      "key": "us01",
       "preferred_event_id": "us01",
       "event_time": "2026-10-10T00:15:00Z",
       "event_time_ms": 1791591300000,

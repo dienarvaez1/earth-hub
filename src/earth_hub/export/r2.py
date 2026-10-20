@@ -4,7 +4,7 @@
     python -m earth_hub.export.r2 runs          # make export-r2-runs
 
 Bucket layout:
-    earthquakes/<id>.json                  one object per row: every column, exactly as stored
+    earthquakes/<key>.json                 one object per row: every column but `id`, as stored
     _state/earthquakes-manifest.json.gz    SHA-256 of each row as last uploaded
     _state/lock.json                       held while a run is in progress
     runs/<run_id>.json                     one record per run (also kept in reports/exports/)
@@ -22,8 +22,10 @@ and any run without a readable manifest) lists the bucket once, after the upload
 checks it: it also deletes objects the manifest does not know and re-uploads rows whose
 object was removed outside the exporter. Changes made to the bucket by hand are therefore
 found only by the next verified run.
-Each row is one object named by its primary key, so a rerun or an interrupted run can only
-overwrite, never duplicate. A run succeeds only when the bucket then holds exactly the rows
+Each row is one object named by its key (the USGS ID the record was created with), so a rerun
+or an interrupted run can only overwrite, never duplicate. Rows are published without the
+database's `id`, which differs between stores: the bucket is the same whichever store
+processed the events (Milestone 8). A run succeeds only when the bucket then holds exactly the rows
 read. The manifest lists only uploads that succeeded, so anything that failed is retried
 next time. It is saved every CHECKPOINT_PAGES pages and when a run stops, so the next run
 skips what an interrupted one already uploaded. A run that succeeded then rewrites the
@@ -72,16 +74,23 @@ CHECKPOINT_PAGES = 10
 LOCK_TTL = timedelta(hours=2)
 MAX_ERRORS = 20
 LOCAL_RUNS_DIR = Path("reports/exports")
-_ROW_KEY = re.compile(rf"^{TABLE_PREFIX}(\d+)\.json$")
+_ROW_KEY = re.compile(rf"^{TABLE_PREFIX}([^/]+)\.json$")
 
 
-def row_key(row_id: int) -> str:
-    return f"{TABLE_PREFIX}{row_id}.json"
+def row_key(key: str) -> str:
+    """The object name of a row."""
+    return f"{TABLE_PREFIX}{key}.json"
 
 
-def key_row_id(key: str) -> int | None:
-    match = _ROW_KEY.match(key)
-    return int(match.group(1)) if match else None
+def object_row(name: str) -> str | None:
+    """The row key an object name holds, if it is a row object."""
+    match = _ROW_KEY.match(name)
+    return match.group(1) if match else None
+
+
+def published(row: dict) -> dict:
+    """A row as the bucket holds it: every column but the database's own `id`."""
+    return {column: value for column, value in row.items() if column != "id"}
 
 
 def encode(row: dict) -> bytes:
@@ -94,9 +103,9 @@ def fingerprint(body: bytes) -> str:
     return hashlib.sha256(body).hexdigest()
 
 
-def kept(known: dict[int, str], ids: set[int]) -> dict[int, str]:
-    """The manifest entries for `ids`."""
-    return {k: v for k, v in known.items() if k in ids}
+def kept(known: dict[str, str], keys: set[str]) -> dict[str, str]:
+    """The manifest entries for `keys`."""
+    return {k: v for k, v in known.items() if k in keys}
 
 
 class LockHeld(Exception):
@@ -173,7 +182,8 @@ class Exporter:
         self.lock_ttl = lock_ttl
         self.git_commit = git_commit
         self.local_dir = local_dir
-        self._saved: dict[int, str] = {}
+        self._saved: dict[str, str] = {}
+        self._ids: dict[str, int] = {}  # each row read: key -> the API's id, for paging
 
     def run(self, *, dry_run: bool = False, verify: bool = False) -> RunRecord:
         started = self.clock()
@@ -216,45 +226,45 @@ class Exporter:
         # Without a manifest nothing says what the bucket holds, so the bucket is listed.
         record.verified = verify = verify or not manifest
         logger.info("manifest lists %d rows; verify %s", len(manifest), verify)
-        read: set[int] = set()
-        failed_ids: set[int] = set()
+        read: set[str] = set()
+        failed_keys: set[str] = set()
         # What each object in the bucket holds, as far as this run knows: the last manifest,
         # updated as uploads are confirmed. A failed upload leaves the object, and its entry,
         # as they were.
         known = dict(manifest)
         snapshot = None if dry_run else SnapshotFile()
         try:
-            self._sync(record, manifest, known, read, failed_ids, snapshot, verify=verify)
+            self._sync(record, manifest, known, read, failed_keys, snapshot, verify=verify)
         finally:
             if snapshot is not None:
                 snapshot.close()
 
-    def _sync(self, record, manifest, known, read, failed_ids, snapshot, *, verify) -> None:
+    def _sync(self, record, manifest, known, read, failed_keys, snapshot, *, verify) -> None:
         """Upload, delete, save the manifest, check, then write the snapshot."""
         counts = record.counts
         dry_run = snapshot is None
         try:
-            self._upload_changes(record, manifest, known, read, failed_ids, snapshot)
+            self._upload_changes(record, manifest, known, read, failed_keys, snapshot)
         except BaseException:
             if not dry_run and known != self._saved:
                 self._checkpoint(known, record)
             raise
 
         # What the bucket holds: listed, or as the manifest and this run's uploads say.
-        stored = self._stored_ids() if verify else set(known)
+        stored = self._stored_keys() if verify else set(known)
         gone = sorted(stored - read)
         if dry_run:
             counts.deleted = len(gone)
             return
-        failed = set(self.bucket.delete(row_key(row_id) for row_id in gone))
+        failed = set(self.bucket.delete(row_key(key) for key in gone))
         counts.deleted = len(gone) - len(failed)
         for key in sorted(failed):
             counts.failed += 1
             record.error(f"delete of {key} failed")
-        stored -= {row_id for row_id in gone if row_key(row_id) not in failed}
+        stored -= {key for key in gone if row_key(key) not in failed}
         if verify:
             # Skipped because the manifest listed them, yet not in the bucket (removed by hand).
-            stored |= self._repair(record, read - stored - failed_ids, known)
+            stored |= self._repair(record, read - stored - failed_keys, known)
         # Only rows in the bucket: an object whose delete failed stays listed, so the next run
         # deletes it again.
         rows = kept(known, stored)
@@ -266,7 +276,7 @@ class Exporter:
         if not record.errors:  # only a bucket that holds exactly the rows read
             self._write_snapshot(record, rows, snapshot)
 
-    def _write_snapshot(self, record: RunRecord, rows: dict[int, str], snapshot) -> None:
+    def _write_snapshot(self, record: RunRecord, rows: dict[str, str], snapshot) -> None:
         content = content_hash(rows)
         meta = self._load_meta()
         if meta and meta.get("content_sha256") == content:
@@ -305,31 +315,32 @@ class Exporter:
         except ValueError:
             return None  # unreadable: the snapshot is rewritten
 
-    def _repair(self, record: RunRecord, ids: set[int], known: dict[int, str]) -> set[int]:
+    def _repair(self, record: RunRecord, keys: set[str], known: dict[str, str]) -> set[str]:
         """Fetch and upload rows the manifest wrongly listed as stored; returns those uploaded."""
         counts = record.counts
-        repaired: set[int] = set()
-        for row_id in sorted(ids):
+        repaired: set[str] = set()
+        for key in sorted(keys):
+            row_id = self._ids[key]
             rows = self._page(row_id - 1, limit=1)["rows"]
-            if not rows or rows[0]["id"] != row_id:
+            if not rows or rows[0]["key"] != key:
                 continue  # gone from the table since it was read; the verification reports it
-            body = encode(rows[0])
+            body = encode(published(rows[0]))
             try:
-                self.bucket.put(row_key(row_id), body)
+                self.bucket.put(row_key(key), body)
             except Exception as exc:
                 counts.failed += 1
-                record.error(f"upload of row {row_id} failed: {exc}")
+                record.error(f"upload of row {key} failed: {exc}")
                 continue
             counts.unchanged -= 1
             counts.new += 1
             counts.bytes_uploaded += len(body)
-            known[row_id] = fingerprint(body)
-            repaired.add(row_id)
+            known[key] = fingerprint(body)
+            repaired.add(key)
         if repaired:
             logger.warning("%d rows listed in the manifest were missing; uploaded", len(repaired))
         return repaired
 
-    def _upload_changes(self, record, manifest, known, read, failed_ids, snapshot) -> None:
+    def _upload_changes(self, record, manifest, known, read, failed_keys, snapshot) -> None:
         """Upload what changed. `snapshot` collects every row read; None on a dry run."""
         counts = record.counts
         dry_run = snapshot is None
@@ -338,43 +349,44 @@ class Exporter:
             for number, page in enumerate(self._pages(), start=1):
                 pending = []
                 for row in page:
-                    row_id = row["id"]
-                    body = encode(row)
+                    key = row["key"]
+                    self._ids[key] = row["id"]
+                    body = encode(published(row))
                     digest = fingerprint(body)
-                    read.add(row_id)
+                    read.add(key)
                     counts.read += 1
                     if snapshot is not None:
                         snapshot.add(body)
-                    if manifest.get(row_id) == digest:
+                    if manifest.get(key) == digest:
                         counts.unchanged += 1
                     else:
-                        kind = "updated" if row_id in manifest else "new"
-                        pending.append((row_id, body, digest, kind))
+                        kind = "updated" if key in manifest else "new"
+                        pending.append((key, body, digest, kind))
                 if dry_run:
                     for *_, kind in pending:
                         setattr(counts, kind, getattr(counts, kind) + 1)
                     continue
                 futures = {
-                    pool.submit(self.bucket.put, row_key(row_id), body): (
-                        row_id,
+                    pool.submit(self.bucket.put, row_key(key), body): (
+                        key,
                         digest,
                         kind,
                         len(body),
                     )
-                    for row_id, body, digest, kind in pending
+                    for key, body, digest, kind in pending
                 }
                 for future in as_completed(futures):
-                    row_id, digest, kind, size = futures[future]
+                    key, digest, kind, size = futures[future]
                     try:
                         future.result()
                     except Exception as exc:
                         counts.failed += 1
-                        failed_ids.add(row_id)
-                        record.error(f"upload of row {row_id} failed: {exc}")
+                        failed_keys.add(key)
+                        record.error(f"upload of row {key} failed: {exc}")
                         continue
                     setattr(counts, kind, getattr(counts, kind) + 1)
                     counts.bytes_uploaded += size
-                    known[row_id] = digest
+                    known[key] = digest
                     unsaved += 1
                 if number % self.checkpoint_pages == 0:
                     logger.info(
@@ -388,7 +400,7 @@ class Exporter:
                         self._save_manifest(known, record)
                         unsaved = 0
 
-    def _checkpoint(self, known: dict[int, str], record: RunRecord) -> None:
+    def _checkpoint(self, known: dict[str, str], record: RunRecord) -> None:
         """Save progress on the way out of an interrupted or failed run, if possible."""
         try:
             self._save_manifest(known, record)
@@ -416,11 +428,11 @@ class Exporter:
             )
         return response.json()
 
-    def _stored_ids(self) -> set[int]:
-        return {i for key in self.bucket.keys(TABLE_PREFIX) if (i := key_row_id(key)) is not None}
+    def _stored_keys(self) -> set[str]:
+        return {k for name in self.bucket.keys(TABLE_PREFIX) if (k := object_row(name)) is not None}
 
     @staticmethod
-    def _verify(read: set[int], stored: set[int], *, listed: bool) -> dict:
+    def _verify(read: set[str], stored: set[str], *, listed: bool) -> dict:
         """Compare the rows read with the bucket: the run's listing (or, unverified, the
         manifest and this run's uploads), less confirmed deletes, plus confirmed repairs."""
         return {
@@ -432,19 +444,21 @@ class Exporter:
             "match": stored == read,
         }
 
-    def _load_manifest(self) -> dict[int, str]:
+    def _load_manifest(self) -> dict[str, str]:
         found = self.bucket.get(MANIFEST_KEY)
         if found is None:
             return {}
         try:
             rows = json.loads(gzip.decompress(found[0]))["rows"]
-            return {int(k): v for k, v in rows.items()}
+            # Keys are strings. A manifest from before keys lists ids: none matches a key, so
+            # every row is uploaded under its key and the objects named by id are deleted.
+            return {str(k): v for k, v in rows.items()}
         except (OSError, ValueError, KeyError, TypeError):
             # Unreadable: every stored row counts as changed and is uploaded again.
             logger.warning("manifest unreadable; every row will be uploaded again")
             return {}
 
-    def _save_manifest(self, rows: dict[int, str], record: RunRecord) -> None:
+    def _save_manifest(self, rows: dict[str, str], record: RunRecord) -> None:
         body = {
             "table": "earthquakes",
             "run_id": record.run_id,

@@ -28,7 +28,7 @@ As of 2026-10-20. The plan below is the original, with Milestone 7 revised; the 
 | 8.2 `BucketStore`, the direct runner, parity tests | Planned | |
 | 8.3 The mode switch, handovers with log replay | Planned | |
 
-Current numbers: 140 requirements, all covered by a passing test; 39 defects, all fixed; about 870 tests in the full regression.
+Current numbers: 142 requirements, all covered by a passing test; 39 defects, all fixed; about 870 tests in the full regression.
 
 ## 1. Project vision
 

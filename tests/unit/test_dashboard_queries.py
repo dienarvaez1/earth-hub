@@ -18,9 +18,14 @@ def dash(tmp_path):
     dashboard.close()
 
 
+def number(row) -> int:
+    """The test row a result comes from: support/export.py:make_row keys row n `us000n`."""
+    return int(row["key"][2:])
+
+
 def ids(dash, **filters):
     dash.set_filter(**filters)
-    return [p["id"] for p in dash.query("map_points")]
+    return [number(p) for p in dash.query("map_points")]
 
 
 def at(text):
@@ -177,15 +182,15 @@ def test_the_summary(dash):
 @pytest.mark.req("REQ-DASH-005")
 def test_significant_events_newest_first(dash):
     dash.set_filter()
-    assert [r["id"] for r in dash.query("significant")] == [6, 3]  # 4.5 is included
+    assert [number(r) for r in dash.query("significant")] == [6, 3]  # 4.5 is included
     dash.set_filter(significant_magnitude=5.0)
-    assert [r["id"] for r in dash.query("significant")] == [6]
+    assert [number(r) for r in dash.query("significant")] == [6]
 
 
 @pytest.mark.req("REQ-DASH-005")
 def test_largest_events_strongest_first(dash):
     dash.set_filter(significant_magnitude=1.0)
-    assert [(r["id"], r["magnitude"]) for r in dash.query("largest")] == [
+    assert [(number(r), r["magnitude"]) for r in dash.query("largest")] == [
         (6, 5.2),
         (3, 4.5),
         (2, 2.5),
@@ -193,7 +198,7 @@ def test_largest_events_strongest_first(dash):
         (8, 1.0),
     ]
     dash.set_filter(significant_magnitude=1.0, top_n=2)
-    assert [r["id"] for r in dash.query("largest")] == [6, 3]
+    assert [number(r) for r in dash.query("largest")] == [6, 3]
 
 
 @pytest.mark.req("REQ-DASH-005")
@@ -208,8 +213,8 @@ def test_largest_breaks_ties_newest_first(tmp_path):
     dash = Dashboard(build(tmp_path, rows))
     dash.set_filter(min_magnitude=6.0, max_magnitude=9.0)
     # The ten latest are all October's; the largest are June's two and the 7.0s.
-    assert {r["id"] for r in dash.query("significant")} == set(range(12, 22))
-    assert [r["id"] for r in dash.query("largest")][:4] == [2, 3, 4, 1]
+    assert {number(r) for r in dash.query("significant")} == set(range(12, 22))
+    assert [number(r) for r in dash.query("largest")][:4] == [2, 3, 4, 1]
     dash.close()
 
 
@@ -218,7 +223,7 @@ def test_map_points_carry_what_the_map_shows(dash):
     dash.set_filter()
     point = dash.query("map_points")[0]
     assert point == {
-        "id": 1,
+        "key": "us0001",
         "longitude": -155.6123,
         "latitude": 57.4401,
         "depth_km": 10.0,

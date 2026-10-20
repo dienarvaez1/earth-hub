@@ -141,7 +141,7 @@ The exporter reads through the API, so start it first (`make api`).
 | `/eh-r2 ls runs/` | `make r2-ls PREFIX=runs/ LIMIT=10` | Keys, sizes and times under a prefix |
 | `/eh-r2 count earthquakes/` | `make r2-count PREFIX=earthquakes/` | Objects and bytes (one object per row) |
 | `/eh-r2 get analytics/meta.json` | `make r2-get KEY=analytics/meta.json` | One object; `.gz` objects are printed gunzipped |
-| `/eh-r2 get earthquakes/1.json` | `make r2-get KEY=earthquakes/1.json` | One exported row |
+| `/eh-r2 get earthquakes/us7000abcd.json` | `make r2-get KEY=earthquakes/us7000abcd.json` | One exported row, named by its record's key |
 | `/eh-r2 snapshot` | `make r2-get KEY=analytics/earthquakes.parquet OUT=/tmp/earthquakes.parquet` | Saves the dashboard's Parquet snapshot |
 
 ## Dashboard

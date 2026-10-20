@@ -151,7 +151,7 @@ export class EventMap {
       type: "Feature" as const,
       geometry: { type: "Point" as const, coordinates: [p.longitude as number, p.latitude as number] },
       properties: {
-        id: p.id,
+        key: p.key,
         magnitude: p.magnitude,
         depth_km: p.depth_km,
         time: p.event_time_ms,
@@ -197,7 +197,7 @@ export class EventMap {
     const [lon, lat] = (feature.geometry as { coordinates: number[] }).coordinates;
     const body = document.createElement("div");
     const title = document.createElement("strong");
-    title.textContent = String(p.title ?? p.place ?? `Event ${p.id}`);
+    title.textContent = String(p.title ?? p.place ?? `Event ${p.key}`);
     const details = document.createElement("div");
     const magnitude = p.magnitude === null || p.magnitude === undefined ? "no magnitude" : `M ${p.magnitude}`;
     details.textContent =

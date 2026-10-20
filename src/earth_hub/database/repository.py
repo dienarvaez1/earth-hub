@@ -170,7 +170,7 @@ _EVENT_COLUMNS = tuple(
     c.name
     for c in earthquakes.columns
     if c.name
-    not in ("id", "preferred_event_id", "revision_count", "first_seen_at", "last_applied_at")
+    not in ("id", "key", "preferred_event_id", "revision_count", "first_seen_at", "last_applied_at")
 )
 
 
@@ -203,6 +203,7 @@ def _load(conn: Connection, all_ids: list[str]) -> Ledger:
     )
     records = {
         r["id"]: Record(
+            key=r["key"],
             preferred_event_id=r["preferred_event_id"],
             source_updated_ms=r["source_updated_ms"],
             deleted=r["review_status"] == "deleted",
@@ -238,7 +239,10 @@ def _write(conn: Connection, ledger: Ledger, now: datetime) -> dict[Key, int]:
         created = (
             conn.execute(
                 insert(earthquakes).returning(earthquakes.c.id, sort_by_parameter_order=True),
-                [_values(ledger.initial[k]) for k in ledger.created],
+                [
+                    _values(ledger.initial[k]) | {"key": ledger.initial[k].key}
+                    for k in ledger.created
+                ],
             )
             .scalars()
             .all()

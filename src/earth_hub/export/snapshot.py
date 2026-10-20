@@ -2,7 +2,7 @@
 
 The per-row objects suit incremental sync; a dashboard would need one request per row to
 read them. After a run that succeeded, the exporter also writes
-    analytics/earthquakes.parquet   every row it read, every column, in id order
+    analytics/earthquakes.parquet   every row it read, every published column, in key order
     analytics/meta.json             what the file holds: run, row count, SHA-256, columns
 built from the same rows it uploaded, so the snapshot is exactly what the bucket holds. It
 is rewritten only when the rows changed: `content_sha256` in meta.json is a fingerprint of
@@ -22,10 +22,10 @@ PARQUET_TYPE = "application/vnd.apache.parquet"
 
 TIMESTAMPTZ = "TIMESTAMP WITH TIME ZONE"  # DuckDB's own name for it, as Parquet readers report
 
-# Every `earthquakes` column, in table order, with the type it keeps in Parquet. A test
-# checks this against EarthquakeRow (and so against the table).
+# Every published `earthquakes` column (all but the database's `id`), in table order, with
+# the type it keeps in Parquet. A test checks this against EarthquakeRow (and so the table).
 COLUMNS = {
-    "id": "BIGINT",
+    "key": "VARCHAR",
     "preferred_event_id": "VARCHAR",
     "event_time": TIMESTAMPTZ,
     "event_time_ms": "BIGINT",
@@ -58,7 +58,7 @@ COLUMNS = {
 }
 
 
-def content_hash(rows: dict[int, str]) -> str:
+def content_hash(rows: dict[str, str]) -> str:
     """A fingerprint of the rows a snapshot holds, from their manifest entries."""
     return hashlib.sha256(json.dumps(sorted(rows.items())).encode()).hexdigest()
 
@@ -94,7 +94,7 @@ class SnapshotFile:
         try:
             con.execute("SET TimeZone = 'UTC'")
             con.execute(
-                f"COPY (SELECT * FROM {source} ORDER BY id) TO {_quote(out)} "
+                f"COPY (SELECT * FROM {source} ORDER BY key) TO {_quote(out)} "
                 "(FORMAT parquet, COMPRESSION zstd)"
             )
         finally:

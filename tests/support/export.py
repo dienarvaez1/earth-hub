@@ -13,6 +13,7 @@ BUCKET = "earth-hub-test"
 def make_row(row_id: int, **changes) -> dict:
     row = {
         "id": row_id,
+        "key": f"us{row_id:04d}",  # zero-padded: key order is id order, as in most tables
         "preferred_event_id": f"us{row_id:04d}",
         "event_time": "2026-10-17T20:26:51.123456Z",
         "event_time_ms": 1792268811123,

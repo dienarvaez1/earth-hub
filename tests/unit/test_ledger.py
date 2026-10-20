@@ -23,6 +23,7 @@ def at(minutes: int) -> datetime:
 
 def stored(preferred, ids, updated, *, count=1, seen=0, deleted=False) -> Record:
     return Record(
+        key=ids[0],
         preferred_event_id=preferred,
         source_updated_ms=updated,
         deleted=deleted,
@@ -81,6 +82,7 @@ def test_records_that_are_one_event_merge_into_the_oldest_with_the_newest_data()
     survivor = book.records[3]
     assert survivor.preferred_event_id == "ak1" and survivor.source_updated_ms == 2000
     assert survivor.revision_count == 3 and survivor.first_seen_at == at(5)
+    assert survivor.key == "ak1"  # the surviving record keeps its key
     assert 8 not in book.records and book.event_of["us1"] == 3
     (merge,) = book.merges
     assert (merge.survivor, merge.others) == (3, (8,)) and book.resolve(8) == 3
@@ -97,6 +99,7 @@ def test_a_three_way_merge_and_a_newer_merging_revision():
     assert (step.outcome, step.key) == ("applied", 1)
     survivor = book.records[1]
     assert survivor.preferred_event_id == "b1" and survivor.columns["magnitude"] == 6.1
+    assert survivor.key == "a1"  # not the newest record's, b1
     assert survivor.revision_count == 4 and survivor.last_applied_at == at(9)
     assert set(book.records) == {1} and book.merges[0].others == (2, 4)
 
@@ -113,6 +116,7 @@ def test_records_created_and_merged_within_one_batch():
     assert step.key == NewKey(0) and book.resolve(NewKey(1)) == NewKey(0)
     assert book.initial[NewKey(1)].preferred_event_id == "us9"
     assert book.records[NewKey(0)].revision_count == 3
+    assert book.records[NewKey(0)].key == "ak9"
 
 
 @pytest.mark.req("REQ-DQ-DEL-002")

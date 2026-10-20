@@ -48,6 +48,10 @@ class Earthquake(Base):
     __tablename__ = "earthquakes"
 
     id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
+    # The record's identity outside the database (R2 object names, the snapshot): the USGS
+    # ID it was created with, kept through merges by the surviving record. Unlike `id`, the
+    # same whatever store processed the events (Milestone 8).
+    key: Mapped[str] = mapped_column(Text, unique=True)
     preferred_event_id: Mapped[str] = mapped_column(Text, unique=True)
     event_time: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     event_time_ms: Mapped[int] = mapped_column(BigInteger)

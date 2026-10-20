@@ -65,7 +65,8 @@ One row per physical event, whatever USGS IDs it has had. Deleted events stay, w
 
 | Column | Type | Null | Meaning |
 | --- | --- | --- | --- |
-| `id` | bigint | no | Primary key (identity). Stable while the row exists; the R2 export names objects by it |
+| `id` | bigint | no | Primary key (identity): this database's row number, used for paging. It can have gaps, and isn't published to R2 |
+| `key` | text | no | The record's identity outside the database: the USGS ID it was created with, kept by the surviving record of a merge. Unique. R2 objects and the snapshot are named and ordered by it, so they are the same in full and direct mode |
 | `preferred_event_id` | text | no | USGS's current preferred ID. Unique |
 | `event_time` | timestamptz | no | When the event happened |
 | `event_time_ms` | bigint | no | The same, in milliseconds since 1970, as USGS sends it |
