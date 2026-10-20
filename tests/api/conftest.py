@@ -1,6 +1,5 @@
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import text
 
 from earth_hub.api.main import create_app
 from earth_hub.database.repository import IncomingMessage, process_message
@@ -32,8 +31,7 @@ def empty_client(module_databases):
 @pytest.fixture(scope="module")
 def documented_engine(module_databases, feature_template):
     """The dataset of the documented examples (docs/technical/api.md and sql-examples.md):
-    the API dataset, then three messages that are not applied. first_seen_at is set by the database
-    clock, so it is fixed here to when the dataset was processed, for responses that repeat."""
+    the API dataset, then three messages that are not applied."""
     engine = module_databases.engine(module_databases.create(migrate=True))
     seed(engine, feature_template)
     with engine.begin() as conn:
@@ -42,7 +40,6 @@ def documented_engine(module_databases, feature_template):
             message = build_message(f, fetched_at=PROCESSED_AT, feed_generated_ms=None)
             incoming = IncomingMessage("earthquakes.raw", 0, offset, message.key, message.to_json())
             assert process_message(conn, incoming, now=PROCESSED_AT).outcome == outcome
-        conn.execute(text("UPDATE earthquakes SET first_seen_at = :at"), {"at": PROCESSED_AT})
     return engine
 
 

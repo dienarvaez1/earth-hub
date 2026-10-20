@@ -54,9 +54,9 @@ def mixed_messages(make_envelope, make_feature, feed_doc) -> list[IncomingMessag
 
 def snapshot(engine) -> dict:
     with engine.connect() as conn:
+        # Every column, first_seen_at included: both paths take it from `now`.
         quakes = [
-            {k: v for k, v in row.items() if k != "first_seen_at"}
-            for row in conn.execute(select(Earthquake).order_by(Earthquake.id)).mappings()
+            dict(row) for row in conn.execute(select(Earthquake).order_by(Earthquake.id)).mappings()
         ]
         ids = conn.execute(
             select(EarthquakeId.event_id, EarthquakeId.earthquake_id).order_by(
@@ -251,10 +251,11 @@ def test_random_streams_give_identical_results_batched_or_one_by_one(
     assert snapshot(second_db) == snapshot(db)
     kept = [r for r in snapshot(db)["raw"] if r.reason and "a duplicate merged into" in r.reason]
     assert kept, "no stream exercised a duplicate's deletion"
-    if merges:
-        assert fallbacks[0] > 0  # merges went through the one-by-one path
-    else:
-        assert fallbacks[0] == 0  # everything went through the set-based path
+    # Everything goes through the set-based path, merges included (processing/ledger.py).
+    assert fallbacks[0] == 0
+    # Only a merge deletes a record, leaving a gap in the ids: the streams with merges merged.
+    ids = [row["id"] for row in snapshot(db)["earthquakes"]]
+    assert (ids != list(range(1, len(ids) + 1))) == merges
 
 
 @pytest.mark.req("REQ-PER-017")

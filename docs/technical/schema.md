@@ -46,13 +46,14 @@ erDiagram
 
 ## How a message changes the tables
 
-The consumer handles each message in one transaction (`repository.process_message`; the backfill consumer's batches go through `process_batch`, one transaction per batch, with the same results):
+The consumer handles each message, or each batch of the backfill consumer, in one transaction (`repository.process_message`, `process_batch`; the same results either way). The decisions are made in memory by `processing/ledger.py`, then written:
 
-1. **`raw_events` first.** The row is inserted with its topic, partition and offset; if that offset is already there, the message is a redelivery and nothing else happens.
-2. **Validation.** A message that breaks a [data-quality rule](data-quality-rules.md) is kept in `raw_events` as `rejected`, with the rule's ID, and goes no further.
-3. **Finding the event** through any of the message's IDs in `earthquake_ids`. If its IDs point to two stored events, those are merged: IDs and `raw_events` rows move to the oldest row, which takes the newest revision's data, and the others are deleted.
-4. **The revision rule** (`database/revisions.py`): a newer `updated` replaces the stored revision (`applied`); the same one is a `duplicate`, an older one `stale`. A duplicate's deletion never hides the event that absorbed it (DEF-026).
-5. **Commit**, and only then the Kafka offset.
+1. **Locks and redeliveries.** Advisory locks on the messages' IDs; an offset that already has a `raw_events` row is a redelivery, and nothing else happens.
+2. **Validation.** A message that breaks a [data-quality rule](data-quality-rules.md) is recorded in `raw_events` as `rejected`, with the rule's ID, and goes no further.
+3. **Finding the event** through any of the message's IDs in `earthquake_ids`. If its IDs point to two stored events, those are merged: IDs and `raw_events` rows move to the oldest record, which takes the newest record's data, the sum of their revision counts and the earliest `first_seen_at`; the others are deleted.
+4. **The revision rule** (`database/revisions.py`): a newer `updated` replaces the stored revision (`applied`); the same one is a `duplicate`, an older one `stale`. A duplicate's deletion never hides the event that absorbed it (DEF-026). The message's IDs are recorded either way.
+5. **Writing**, in the order one message at a time would: new records, merges, updated records, new IDs, then each message's `raw_events` row with its outcome. Times are the processing time passed in (REQ-PER-018).
+6. **Commit**, and only then the Kafka offset.
 
 Advisory locks on each USGS ID, taken in sorted order, keep two consumers from creating or merging the same event at once. [The SQL examples](sql-examples.md#inspecting-postgresql) show queries over these tables and their results.
 
