@@ -249,3 +249,34 @@ def test_locks_are_taken_in_sorted_order_whatever_order_they_are_given(db):
     finally:
         holder.close()
         watcher.close()
+
+
+@pytest.mark.req("REQ-MODE-010", "REQ-PER-018")
+def test_messages_carrying_processing_times_are_processed_as_the_batches_they_were(
+    db, second_db, make_envelope, make_feature
+):
+    """Replayed from direct mode: one consumer batch spans several of direct mode's rounds,
+    each with its own processing time; the result is that of those rounds as batches."""
+    import random
+    from dataclasses import replace
+    from datetime import timedelta
+
+    rng = random.Random(3)
+    values = random_stream(rng, "pt", make_envelope, make_feature, merges=True)
+    rounds, cursor = [], 0
+    while cursor < len(values):
+        size = rng.randint(1, 9)
+        rounds.append(values[cursor : cursor + size])
+        cursor += size
+    offset, messages = 0, []
+    for number, chunk in enumerate(rounds):
+        at = NOW + timedelta(minutes=number, microseconds=number)
+        batch = [IncomingMessage("t", 0, offset + i, b"k", v) for i, v in enumerate(chunk)]
+        offset += len(chunk)
+        with db.begin() as conn:
+            expected = process_batch(conn, batch, now=at)
+        messages += [replace(m, processed_at=at) for m in batch]
+        assert expected  # each round stored as its own batch
+    with second_db.begin() as conn:
+        process_batch(conn, messages, now=NOW + timedelta(days=9))  # the header wins
+    assert snapshot(second_db) == snapshot(db)

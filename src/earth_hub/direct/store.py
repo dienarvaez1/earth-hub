@@ -70,6 +70,7 @@ IDS_KEY = "_state/ids.json.gz"
 PENDING_KEY = "_state/direct-pending.json"
 LOG_PREFIX = "log/"
 NDJSON = "application/x-ndjson"
+GZIP = "application/gzip"
 
 # The columns a revision sets (ValidEvent.fields), as in database/repository.py.
 EVENT_COLUMNS = tuple(
@@ -122,6 +123,17 @@ def row_body(record: Record) -> bytes:
         }
     ).model_dump(mode="json")
     return encode(published(row))
+
+
+def ids_body(next_number: int, order: dict[str, int], ids: dict[str, tuple[str, str]]) -> bytes:
+    """The ID map as stored: gzipped with a fixed time, so the same map gives the same bytes
+    (DEF-041)."""
+    body = {
+        "next": next_number,
+        "records": dict(sorted(order.items())),
+        "ids": {i: list(ids[i]) for i in sorted(ids)},
+    }
+    return gzip.compress(json.dumps(body, separators=(",", ":")).encode(), mtime=0)
 
 
 def empty_status() -> dict:
@@ -306,16 +318,7 @@ class BucketState:
         self.next = max(self.next, pending["next"])
         if not (pending["ids"] or pending["order"] or pending["removed"]):
             return  # no ID or record added or merged
-        body = {
-            "next": self.next,
-            "records": dict(sorted(self.order.items())),
-            "ids": {i: list(self.ids[i]) for i in sorted(self.ids)},
-        }
-        self._put(
-            IDS_KEY,
-            gzip.compress(json.dumps(body, separators=(",", ":")).encode(), mtime=0),
-            content_type="application/gzip",
-        )
+        self._put(IDS_KEY, ids_body(self.next, self.order, self.ids), content_type=GZIP)
 
     def _apply_snapshot(self, pending: dict, bodies: list[bytes], removed: set[str]) -> None:
         content = content_hash(self.manifest)

@@ -51,6 +51,9 @@ class FakeMessage:
     def timestamp(self):
         return (1, 1792137522341)
 
+    def headers(self):
+        return None
+
 
 class FakeKafka:
     def __init__(self, messages, commit_error=None):

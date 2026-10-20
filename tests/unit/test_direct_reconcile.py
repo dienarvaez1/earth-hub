@@ -5,7 +5,7 @@ import json
 from datetime import UTC, datetime, timedelta
 
 import pytest
-from support.export import BUCKET
+from support.export import BUCKET, start_direct
 
 from earth_hub.direct.reconcile import main, reconcile
 from earth_hub.direct.runner import DirectRunner
@@ -20,6 +20,7 @@ UPDATED = 1792137700000
 @pytest.fixture
 def bucket(s3, tmp_path, make_envelope, make_feature):
     """A bucket after three rounds, with a merge."""
+    start_direct(s3)
     runner = DirectRunner(Bucket(s3, BUCKET), workdir=tmp_path, workers=2)
 
     def f(event_id, ids=None, **props):

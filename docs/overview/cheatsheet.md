@@ -143,6 +143,9 @@ The exporter reads through the API, so start it first (`make api`).
 | `/eh-r2 get analytics/meta.json` | `make r2-get KEY=analytics/meta.json` | One object; `.gz` objects are printed gunzipped |
 | `/eh-r2 get earthquakes/us7000abcd.json` | `make r2-get KEY=earthquakes/us7000abcd.json` | One exported row, named by its record's key |
 | `/eh-r2 snapshot` | `make r2-get KEY=analytics/earthquakes.parquet OUT=/tmp/earthquakes.parquet` | Saves the dashboard's Parquet snapshot |
+| | `make mode` | Which mode writes the bucket: `full` or `direct`, and since when |
+| | `make mode-direct` ⚠ / `make mode-full` ⚠ | Hand over to direct mode / back to full mode ([how](../technical/architecture.md#switching-modes)) |
+| | `make direct-once` ⚠ / `make direct-run` ⚠ | Direct mode: one poller round (and catch-up if due) / until stopped |
 | | `make reconcile-direct [DEEP=1]` | Direct mode's state in the bucket: rows, manifest, snapshot, ID map and log agree ([direct mode](../technical/architecture.md#direct-mode)) |
 
 ## Dashboard

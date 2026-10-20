@@ -17,6 +17,7 @@ import json
 import logging
 import secrets
 import tempfile
+import threading
 import time
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
@@ -27,7 +28,7 @@ from pathlib import Path
 from earth_hub.database.repository import decode_value, envelope_ids
 from earth_hub.database.revisions import Revision, needed
 from earth_hub.direct.store import BucketState, BucketStore, Inconsistent, iso, log_key
-from earth_hub.export import lock
+from earth_hub.export import lock, mode
 from earth_hub.export.bucket import Bucket
 from earth_hub.ingestion.events import EventMessage
 from earth_hub.ingestion.producer import PublishResult
@@ -38,6 +39,15 @@ logger = logging.getLogger(__name__)
 
 # A round takes seconds; a lock left by one that crashed should not block the next for long.
 LOCK_TTL = timedelta(minutes=15)
+
+
+def _one_at_a_time(method):
+    def wrapper(self, *args, **kwargs):
+        with self._turn:
+            return method(self, *args, **kwargs)
+
+    wrapper.__doc__, wrapper.__name__ = method.__doc__, method.__name__
+    return wrapper
 
 
 @dataclass(frozen=True)
@@ -68,7 +78,11 @@ class DirectRunner:
         self.state = BucketState(bucket, workdir, workers=workers)
         self.clock = clock
         self.lock_ttl = lock_ttl
+        # The poller and catch-up share one runner, from two threads; its cache is not
+        # safe to share, so they take turns.
+        self._turn = threading.RLock()
 
+    @_one_at_a_time
     def process(
         self,
         values: list[bytes],
@@ -78,7 +92,8 @@ class DirectRunner:
         now: datetime | None = None,
     ) -> list[Outcome]:
         """Process messages in one round. `sent`: the poller's state, saved with the round,
-        including these messages. Raises LockHeld or Inconsistent before writing anything;
+        including these messages. Raises LockHeld, WrongMode (the bucket is not in direct
+        mode) or Inconsistent before writing anything;
         any other failure leaves either nothing or a pending round the next one finishes."""
         if not values:
             return []
@@ -95,16 +110,19 @@ class DirectRunner:
 
     # Catch-up and the poller's state.
 
+    @_one_at_a_time
     def sent_state(self) -> SentState:
         """The poller's 26-hour state, as the last round saved it."""
         self.state.refresh()
         return SentState.from_entries(self.state.status["sent"])
 
+    @_one_at_a_time
     def checkpoint(self, name: str) -> datetime | None:
         self.state.refresh()
         value = self.state.status["checkpoints"].get(name)
         return datetime.fromisoformat(value) if value else None
 
+    @_one_at_a_time
     def set_checkpoint(self, name: str, value: datetime) -> None:
         now = self.clock()
         with self._locked(f"{now:%Y-%m-%dT%H-%M-%SZ}-{secrets.token_hex(2)}", now):
@@ -113,6 +131,7 @@ class DirectRunner:
             status["checkpoints"] = {**status["checkpoints"], name: iso(value)}
             self.state.save_status(status)
 
+    @_one_at_a_time
     def needed(self, messages: list[EventMessage]) -> list[EventMessage]:
         """The messages a round would apply: Progress.needs_publish, against the bucket."""
         self.state.refresh()
@@ -139,8 +158,11 @@ class DirectRunner:
         finally:
             lock.release(self.bucket, run_id, self.lock_ttl)
 
-    def _prepare(self) -> None:
-        """Read what changed, finish a round left pending, and check the state."""
+    def _prepare(self, *, in_direct_mode: bool = True) -> None:
+        """Check the mode, read what changed, finish a round left pending, and check the
+        state. A handover finishes a pending round while the bucket is no longer active."""
+        if in_direct_mode:
+            mode.require(self.bucket, mode.DIRECT)
         self.state.refresh()
         if self.state.pending is not None:
             logger.warning(
@@ -255,11 +277,21 @@ class DirectPublisher:
     """What the Poller and CatchUp publish to in direct mode: each publish is one round.
     Either every message is processed or none is (failed, retried next round)."""
 
-    def __init__(self, runner: DirectRunner, *, source: str, state: SentState | None = None):
+    def __init__(
+        self,
+        runner: DirectRunner,
+        *,
+        source: str,
+        state: SentState | None = None,
+        on_wrong_mode: Callable[[], None] | None = None,
+    ):
         self.runner = runner
         self.source = source
         self.state = state  # the poller's; None for catch-up, as in full mode
         self.topic = f"direct ({source})"
+        # Called when the bucket is no longer in direct mode (a handover froze it), so a
+        # long-running process can stop instead of failing every round.
+        self.on_wrong_mode = on_wrong_mode
 
     def publish(self, messages: list[EventMessage]) -> PublishResult:
         if not messages:
@@ -273,6 +305,11 @@ class DirectPublisher:
             sent.prune(self.runner.clock())
         try:
             self.runner.process([m.to_json() for m in messages], source=self.source, sent=sent)
+        except mode.WrongMode as exc:
+            if self.on_wrong_mode is not None:
+                logger.warning("the bucket left direct mode; stopping", extra={"error": str(exc)})
+                self.on_wrong_mode()
+            return PublishResult(failed=[(m, str(exc)) for m in messages])
         except (lock.LockHeld, Inconsistent) as exc:
             return PublishResult(failed=[(m, str(exc)) for m in messages])
         except Exception as exc:  # retried next round; a pending round is finished first

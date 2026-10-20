@@ -169,6 +169,7 @@ sequenceDiagram
 | An outage longer than the live feed's day | Catch-up's hourly `all_month` pass covers up to 30 days; beyond that, `make backfill` | `tests/e2e/test_backfill.py` |
 | Both services restarted | The data survives | `tests/disruptive/test_outages.py`, `make smoke-restart` |
 | An export interrupted | The next run carries on from its last checkpoint; objects are named by each record's key, so they are never duplicated | `tests/unit/test_export_r2.py` |
+| A handover to full mode interrupted while replaying | The bucket stays frozen; run again, the handover sends only the log entries not yet in the topic | `tests/e2e/test_mode_handover.py` |
 | A direct round interrupted | The next round finishes it from its redo record, and the bucket ends byte for byte as if nothing had happened, wherever the interruption was | `tests/unit/test_direct.py` |
 
 ## Export to R2
@@ -180,6 +181,7 @@ sequenceDiagram
 | `earthquakes/<key>.json` | One object per row, every column but the database's `id`; `key` is the USGS ID the record was created with |
 | `_state/earthquakes-manifest.json.gz` | SHA-256 of each row as last uploaded |
 | `_state/lock.json` | Held while a run is in progress (expires after 2 hours if a run crashes) |
+| `_state/mode.json` | Which mode writes the bucket; an export runs only in full mode ([direct mode](#switching-modes)) |
 | `runs/<run_id>.json` | One record per run: status, counts, timings, errors (also in `reports/exports/`) |
 | `analytics/earthquakes.parquet` | The whole table in one Parquet file for the dashboard, every row and published column with types kept, in `key` order (about 7.5 MB for 115,000 rows) |
 | `analytics/meta.json` | What the snapshot holds: run, row count, size, SHA-256, column types |
@@ -209,11 +211,12 @@ make export-r2-runs        # past runs; one that never finished shows as interru
 
 ## Direct mode
 
-Milestone 8, in progress: the same pipeline without Docker, Kafka or PostgreSQL. The real poller and catch-up publish to the bucket instead of Kafka, and each publish is one **round**: its messages are decoded and validated as the consumer does, then the ledger (`processing/ledger.py`) makes the same decisions over a second store, `BucketStore` (`direct/store.py`). The result is the bucket full mode's export would write from the same messages, byte for byte: the same row objects, manifest and snapshot. Step 3 adds the commands to run it (`make direct-once`, `make direct-run`) and the switch between modes; until then it runs only in the tests, on moto.
+Milestone 8: the same pipeline without Docker, Kafka or PostgreSQL. The real poller and catch-up publish to the bucket instead of Kafka, and each publish is one **round**: its messages are decoded and validated as the consumer does, then the ledger (`processing/ledger.py`) makes the same decisions over a second store, `BucketStore` (`direct/store.py`). The result is the bucket full mode's export would write from the same messages, byte for byte: the same row objects, manifest and snapshot. `make direct-once` runs one poller round (and catch-up if due) and exits; `make direct-run` runs the poller and catch-up until stopped. Both need only R2 credentials, and run only while the bucket is in direct mode ([switching modes](#switching-modes)).
 
 | In the bucket, added by direct mode | What it is |
 | --- | --- |
 | `_state/ids.json.gz` | The ID map: every USGS ID ever seen → its record's key and when the ID was first seen (`earthquake_ids`); and each record's creation number, full mode's `id` order, which decides the survivor of a merge |
+| `_state/mode.json` | Which mode writes the bucket (`full` or `direct`), and the log's sequence number at the last handover. No marker means full mode |
 | `_state/direct.json` | The last sequence number, the poller's 26-hour state (rebuilt from `earthquakes.raw` in full mode) and catch-up's checkpoints |
 | `_state/direct-pending.json` | A round's writes, while they are being made |
 | `log/<date>/<first>-<last>.ndjson` | Every message processed, in order: sequence number, processing time, source, outcome, rule, reason, record key and envelope (`raw_events`) |
@@ -224,6 +227,29 @@ Milestone 8, in progress: the same pipeline without Docker, Kafka or PostgreSQL.
 - **Holds the bucket's lock**, the exporter's, so a round and an export never write at once. A round that finds it held fails, and the poller retries its messages next round.
 - **Writes behind a redo record.** The round's writes are first saved whole to `_state/direct-pending.json`, only if no other is there. Then come the rows (and deletes of merged records), the ID map, the manifest, the snapshot and its `meta.json`, the log and the state, and then the record is removed. Each step gives the same result when repeated, so a round interrupted anywhere is finished by the next one before it does anything else.
 - **Logs what it processed** as the consumer does, with each message's sequence number and record key; a record's key is one of its USGS IDs, so the ID map says where a merged record is now.
+
+### Switching modes
+
+One marker in the bucket, `_state/mode.json`, chooses the mode. It is the setting every process checks: the exporter writes only in full mode, a direct round only in direct mode, so they never write at once. It lives in the bucket rather than in `.env`, so two machines can't disagree about it. Changing it is a handover, which checks that the other mode holds everything before switching, and changes the marker with conditional writes.
+
+```bash
+make mode          # full (active) since …; log sequence at the last change: …
+make mode-direct   # stop the poller and catch-up, export, write direct mode's state
+make direct-run    # direct mode, until stopped
+make mode-full     # replay direct mode's log into full mode, check, switch back
+```
+
+**Switching loses nothing.** While a handover runs, neither mode polls, but USGS's day feed lists every event of the last 24 hours, so the first round of the mode taking over picks up what was published or revised meanwhile: the events are late by the handover's length, never lost. `make mode-direct` restarts full mode's poller and catch-up if the handover fails; `make mode-full` restarts them when it succeeds, and a running `make direct-run` stops by itself once the bucket is frozen. `tests/e2e/test_mode_switching.py` switches back and forth twice while the feed changes, during the handovers too, and checks after every switch that every event is served at its latest version.
+
+**Full → direct** (`make mode-direct`) needs full mode idle: the poller and catch-up stopped, every message stored, `make reconcile` clean. It exports, then writes direct mode's state from PostgreSQL and Kafka: the ID map from `earthquake_ids`, with each record's `id` as its creation number; the poller's 26-hour state from `earthquakes.raw`, as a restarted poller rebuilds it; and catch-up's checkpoints. Then the marker says `direct`, with the log's sequence number at that moment.
+
+**Direct → full** (`make mode-full`):
+1. **Freezes the bucket.** The marker says `handing-over`, and no direct round writes any more; a round left unfinished is finished.
+2. **Reads the log since the last handover.** A gap stops the handover: replay is not possible, and the fallback is a backfill of the period from FDSN (`make backfill START=…`).
+3. **Replays every entry, in order,** onto partition 0 of `earthquakes.backfill`, with its processing time and sequence number in Kafka headers. The backfill consumer stores each one with that time, and processes each of direct mode's rounds as a batch, so PostgreSQL gets the same records, IDs, processing times and outcomes.
+4. **Checks before switching.** Once the consumers have caught up, `make reconcile` must pass and an export dry run must find nothing to change. Only then does the marker say `full`, with catch-up's checkpoints copied to PostgreSQL.
+
+If a check fails, the bucket goes back to direct mode. A replay interrupted and run again finds what it already sent by sequence number in the topic, and sends only the rest.
 
 Catch-up's "is this stored?" is answered from the ID map and the snapshot, with the same rule as full mode (`revisions.needed`); its checkpoints are kept in `_state/direct.json`. A full-year backfill stays a full-mode job.
 

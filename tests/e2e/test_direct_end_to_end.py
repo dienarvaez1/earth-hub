@@ -15,6 +15,7 @@ import duckdb
 import pytest
 from fastapi.testclient import TestClient
 from moto import mock_aws
+from support.export import start_direct
 from support.feed import FeedServer, revised
 
 from earth_hub.api.main import create_app
@@ -50,6 +51,7 @@ class Direct:
     """Direct mode over the same mock services: the real Poller and CatchUp."""
 
     def __init__(self, s3, tmp_path, feed, month, fdsn):
+        start_direct(s3, "direct-mode")
         self.runner = DirectRunner(Bucket(s3, "direct-mode"), workdir=tmp_path, workers=4)
         state = self.runner.sent_state()
         self.poller = Poller(

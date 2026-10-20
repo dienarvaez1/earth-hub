@@ -19,6 +19,7 @@ import pytest
 from fastapi.testclient import TestClient
 from moto import mock_aws
 from sqlalchemy import select
+from support.export import start_direct
 from support.streams import random_stream
 
 from earth_hub.api.main import create_app
@@ -53,6 +54,7 @@ class Modes:
         self.offset = 0
         self.batches = 0
         (tmp_path / "direct").mkdir()
+        start_direct(s3, "direct-mode")
         self.direct = DirectRunner(
             Bucket(s3, "direct-mode"), workdir=tmp_path / "direct", workers=4
         )
