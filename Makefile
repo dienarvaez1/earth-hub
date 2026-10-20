@@ -1,4 +1,4 @@
-.PHONY: help install up down reset ingest ingest-once ingest-logs ingest-stop api api-dev api-stop kafka-ui kafka-ui-stop backfill catchup-once consume reconcile export-r2 export-r2-runs dashboard-install dashboard-build dashboard-dev dashboard-deploy test-dashboard check-db-outage lint format test test-integration test-e2e test-disruptive test-performance test-all regression flake-check traceability smoke smoke-restart migrate coverage
+.PHONY: help install up down reset ingest ingest-once ingest-logs ingest-stop api api-dev api-stop kafka-ui kafka-ui-stop backfill catchup-once consume reconcile export-r2 export-r2-runs r2-ls r2-count r2-get dashboard-install dashboard-build dashboard-dev dashboard-deploy test-dashboard check-db-outage lint format test test-integration test-e2e test-disruptive test-performance test-all regression flake-check traceability smoke smoke-restart migrate coverage
 
 help: ## List the available commands
 	@grep -E '^[a-z0-9-]+:.*## ' $(MAKEFILE_LIST) | awk -F ':.*## ' '{printf "  %-17s %s\n", $$1, $$2}'
@@ -60,6 +60,16 @@ export-r2: ## Upload new and changed earthquakes rows to R2 through the API: mak
 
 export-r2-runs: ## List the latest R2 export runs and their counts
 	uv run python -m earth_hub.export.r2 runs
+
+r2-ls: ## List R2 keys (read-only): make r2-ls [PREFIX=runs/] [LIMIT=50]
+	uv run python -m earth_hub.export.browse ls $(PREFIX) --limit $(or $(LIMIT),50)
+
+r2-count: ## Count R2 objects and bytes (read-only): make r2-count [PREFIX=earthquakes/]
+	uv run python -m earth_hub.export.browse count $(PREFIX)
+
+r2-get: ## Print one R2 object (read-only): make r2-get KEY=analytics/meta.json [OUT=file]
+	@test -n "$(KEY)" || (echo "usage: make r2-get KEY=analytics/meta.json [OUT=file]"; exit 1)
+	uv run python -m earth_hub.export.browse get $(KEY) $(if $(OUT),--out $(OUT))
 
 dashboard-install: ## Install the dashboard's Node dependencies (dashboard/package-lock.json) and the test browser
 	cd dashboard && npm ci
