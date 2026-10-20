@@ -147,6 +147,7 @@ Milestone 8: the pipeline without Docker, keeping its state in the bucket ([arch
 | REQ-MODE-011 | A handover to full mode interrupted while replaying keeps the bucket frozen (no direct round writes), and run again sends only what it had not sent, recognized by sequence number in the topic |
 | REQ-MODE-012 | `make direct-once` and `make direct-run` run the real poller and catch-up in direct mode, needing only R2 credentials, and refuse to start unless the bucket is in direct mode |
 | REQ-MODE-013 | Switching modes back and forth while USGS keeps publishing, during the handovers too, loses no event and no revision: after each switch, the first round of the mode taking over picks up what changed meanwhile, and the API (full mode) or the bucket (direct mode) holds every event at its latest version |
+| REQ-MODE-014 | Run on a schedule (`--skip-unless-direct`), `direct once` and `make reconcile-direct` exit 0 without writing or checking while the bucket is not in direct mode, including when a handover freezes it during a round (catch-up then does not run); missing R2 settings still fail |
 
 ## Dashboard
 
@@ -191,6 +192,7 @@ The dashboard's SQL lives in `dashboard/queries/`; the page runs it in the brows
 | REQ-CI-002 | Each run keeps its reports (JUnit, coverage, traceability matrix, regression summary) as artifacts for 30 days and shows the regression summary on the run's page |
 | REQ-CI-003 | A layer left out with `regression.py --skip` is reported as skipped and does not fail the run; requirements covered only by its tests are listed as not run; any layer that runs and fails, or a requirement left without a passing test otherwise, still fails it |
 | REQ-CI-004 | The workflow's actions are pinned to commit SHAs and its token can only read the repository |
+| REQ-CI-005 | A second workflow runs direct mode every hour and its reconciliation every day, only from `main`'s schedule or by hand: one run at a time, never cancelled, catch-up intervals shorter than the schedule, actions pinned to commit SHAs, a read-only token, and R2 credentials given only to the step that runs the command; no other workflow uses secrets |
 
 ## Documentation
 

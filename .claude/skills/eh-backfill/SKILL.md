@@ -20,6 +20,9 @@ which `consumer-backfill` stores (it must run: `make ingest`).
 - Afterwards, check the backfill consumer caught up (`/eh-status`: lag 0 for `earth-hub-consumer-backfill`)
   and run `make reconcile`.
 - If it stops on a USGS outage it says "run again to resume": run the same command again.
+- **Full mode only** (`make -s mode`). In direct mode, catch-up runs inside direct rounds (`/eh-mode once`), and
+  a backfill or `catchup-once` would store events the handover back then finds unexpected. A long backfill
+  waits until the bucket is back in full mode (`/eh-mode full`).
 
 ## Report
 

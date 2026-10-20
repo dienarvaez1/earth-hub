@@ -4,12 +4,14 @@ The everyday commands, each next to the Claude Code skill that runs it for you. 
 
 Commands that **call live services or change state** are marked ⚠. The skills ask before the destructive ones.
 
+**Which mode first.** `make mode` says who writes the R2 bucket. In **full** mode your machine runs the pipeline (Docker, Kafka, PostgreSQL) and `make export-r2` updates the dashboard. In **direct** mode GitHub Actions updates the bucket every hour with no machine of yours running, and full mode's poller, catch-up, backfill and export stay stopped. See [Modes](#modes-full-and-direct).
+
 ## Skills
 
 | Skill | Does | Main commands behind it |
 | --- | --- | --- |
 | `/eh [area]` | Shows this cheat sheet, or one section of it | |
-| `/eh-status [reconcile]` | Health of every service, consumer lag, newest event, API, last export | `docker compose ps`, `make reconcile` |
+| `/eh-status [reconcile]` | Health of every service, consumer lag, newest event, API, last export, the mode and the hourly schedule's last runs | `docker compose ps`, `make reconcile`, `make mode`, `gh run list --workflow direct.yml` |
 | `/eh-start [infra\|pipeline\|api\|ui\|dashboard\|all]` | Starts services and waits until healthy | `make up`, `make ingest`, `make api` |
 | `/eh-stop [pipeline\|api\|ui\|all\|reset]` | Stops services, keeping data (or wipes it, after asking) | `make ingest-stop`, `make down`, `make reset` |
 | `/eh-logs [service\|ID\|errors\|rejected\|summary]` | Reads the JSON logs with `jq`, follows one event | `docker compose logs … \| jq` |
@@ -20,6 +22,7 @@ Commands that **call live services or change state** are marked ⚠. The skills 
 | `/eh-db [counts\|outcomes\|rejected\|event ID\|merged\|latest\|strongest\|SQL]` | Read-only SQL on PostgreSQL | `psql` in the database container |
 | `/eh-api [health\|list\|event\|stats\|hourly\|magnitude\|export]` | Calls the REST API (served from PostgreSQL) | `curl` on `/api/v1/…` |
 | `/eh-r2 [ls\|count\|get\|snapshot\|runs]` | Looks inside the R2 bucket, read-only | `make r2-ls`, `make r2-get` |
+| `/eh-mode [status\|direct\|full\|once\|run\|reconcile\|schedule\|runs]` | The mode, the handovers, direct mode by hand or on GitHub's hourly schedule | `make mode`, `make mode-direct`, `make mode-full`, `gh workflow run direct.yml` |
 | `/eh-export [dry\|run\|verify\|runs]` | Copies PostgreSQL's table to R2 through the API, and the dashboard's snapshot | `make export-r2` |
 | `/eh-dashboard [check\|dev\|build\|test\|deployments\|deploy]` | The live page and its data, a local server, tests, deploys | `make dashboard-dev`, `make dashboard-deploy` |
 | `/eh-test [layer\|regression\|flake\|REQ-…\|keyword]` | Runs the tests by layer, or everything | `make test`, `make regression` |
@@ -29,13 +32,14 @@ Commands that **call live services or change state** are marked ⚠. The skills 
 | Skill | Command | What it does |
 | --- | --- | --- |
 | `/eh-start` | `make up && make migrate` | Kafka (KRaft) and PostgreSQL, both topics, the schema |
-| `/eh-start pipeline` | `make ingest` ⚠ | migrate, poller, consumer, consumer-backfill, catch-up, on the live feed |
+| `/eh-start pipeline` | `make ingest` ⚠ | migrate, poller, consumer, consumer-backfill, catch-up, on the live feed (full mode only) |
 | `/eh-start api` | `make api` | The REST API: http://127.0.0.1:8000/docs |
 | `/eh-start ui` | `make kafka-ui` | A read-only Kafka viewer: http://127.0.0.1:8080 |
 | `/eh-start dashboard` | `make dashboard-dev` | The page, http://127.0.0.1:8787, over the real bucket |
+| `/eh-start all` | `make ingest` ⚠, then `make api` | Everything but the UI and the dashboard (full mode only) |
 | `/eh-stop` | `make ingest-stop` | Stops the pipeline; Kafka and PostgreSQL keep running |
 | `/eh-stop api` / `/eh-stop ui` | `make api-stop` / `make kafka-ui-stop` | Stops the API / the viewer |
-| `/eh-stop all` | `make down` | Stops everything, keeping the data |
+| `/eh-stop all` | `make down` | Stops everything, keeping the data (in direct mode the dashboard keeps updating) |
 | `/eh-stop reset` | `make reset` ⚠ | Stops everything and **deletes all data** |
 | `/eh` | `make help` | Lists every make target |
 
@@ -46,6 +50,10 @@ Commands that **call live services or change state** are marked ⚠. The skills 
 | `/eh-status` | `docker compose --profile ingest --profile api --profile tools ps` | Every container and its health |
 | `/eh-logs poller` | `docker compose logs --no-log-prefix --since 1h poller` | One service's recent logs (`-f` to follow) |
 | `/eh-logs` | `make ingest-logs` | Follows the four pipeline services |
+| `/eh-logs us7000abcd` | `docker compose logs --no-log-prefix poller consumer consumer-backfill catchup \| jq -cR --arg id us7000abcd 'fromjson? \| select(.event_id == $id)'` | Everything about one event, across services, in order |
+| `/eh-logs errors` | `docker compose logs --no-log-prefix --since 1h poller consumer consumer-backfill catchup api \| jq -cR 'fromjson? \| select(.level == "WARNING" or .level == "ERROR")'` | Warnings and errors only |
+| `/eh-logs rejected` | `docker compose logs --no-log-prefix consumer consumer-backfill \| jq -cR 'fromjson? \| select(.message == "message rejected") \| {ts, event_id, reason}'` | Rejections and the rule behind each |
+| `/eh-logs summary` | `docker compose logs --no-log-prefix --since 1h consumer consumer-backfill \| jq -cR 'fromjson? \| select(.message == "consumer summary") \| {ts, logger, lag, outcomes}' \| tail -10` | The consumers' minute summaries: counts and lag |
 | `/eh-poller restart` | `docker compose --profile ingest restart poller` | Restarts one service (any of `poller`, `consumer`, `consumer-backfill`, `catchup`) |
 | | `docker compose --profile api restart api` | Restarts the API |
 | | `docker compose stats --no-stream` | CPU and memory per container |
@@ -105,6 +113,7 @@ With `q() { docker compose exec -T postgres psql -U earth_hub_app earth_hub -c "
 | `/eh-db event us7000abcd` | `q "SELECT e.* FROM earthquakes e JOIN earthquake_ids i ON i.earthquake_id = e.id WHERE i.event_id = 'us7000abcd'"` | One event, by any of its IDs (add `-x` for one field per line) |
 | `/eh-db event us7000abcd` | `q "SELECT r.kafka_offset, r.event_id, r.outcome FROM raw_events r JOIN earthquake_ids i ON i.earthquake_id = r.earthquake_id WHERE i.event_id = 'us7000abcd' ORDER BY r.received_at"` | Every message that touched it |
 | `/eh-db merged` | `q "SELECT e.preferred_event_id, array_agg(i.event_id) FROM earthquakes e JOIN earthquake_ids i ON i.earthquake_id = e.id GROUP BY e.id HAVING count(*) > 1"` | Events USGS merged |
+| `/eh-db latest` | `q "SELECT preferred_event_id, event_time, magnitude, place, review_status FROM earthquakes ORDER BY event_time DESC LIMIT 10"` | The newest stored events |
 | `/eh-db strongest` | `q "SELECT preferred_event_id, event_time, magnitude, place FROM earthquakes WHERE review_status <> 'deleted' ORDER BY magnitude DESC NULLS LAST LIMIT 10"` | The strongest stored events |
 | | `make migrate` | Apply the schema's migrations |
 
@@ -125,7 +134,7 @@ With `q() { docker compose exec -T postgres psql -U earth_hub_app earth_hub -c "
 
 ## Export from PostgreSQL to R2
 
-The exporter reads through the API, so start it first (`make api`).
+Full mode only: in direct mode the exporter refuses, and direct rounds write the rows and snapshot. The exporter reads through the API, so start it first (`make api`).
 
 | Skill | Command | What it does |
 | --- | --- | --- |
@@ -143,10 +152,26 @@ The exporter reads through the API, so start it first (`make api`).
 | `/eh-r2 get analytics/meta.json` | `make r2-get KEY=analytics/meta.json` | One object; `.gz` objects are printed gunzipped |
 | `/eh-r2 get earthquakes/us7000abcd.json` | `make r2-get KEY=earthquakes/us7000abcd.json` | One exported row, named by its record's key |
 | `/eh-r2 snapshot` | `make r2-get KEY=analytics/earthquakes.parquet OUT=/tmp/earthquakes.parquet` | Saves the dashboard's Parquet snapshot |
-| | `make mode` | Which mode writes the bucket: `full` or `direct`, and since when |
-| | `make mode-direct` ⚠ / `make mode-full` ⚠ | Hand over to direct mode / back to full mode ([how](../technical/architecture.md#switching-modes)) |
-| | `make direct-once` ⚠ / `make direct-run` ⚠ | Direct mode: one poller round (and catch-up if due) / until stopped |
-| | `make reconcile-direct [DEEP=1]` | Direct mode's state in the bucket: rows, manifest, snapshot, ID map and log agree ([direct mode](../technical/architecture.md#direct-mode)) |
+| `/eh-r2 ls log/` | `make r2-ls PREFIX=log/ LIMIT=1000 \| tail -3` | Direct mode's newest log files: every message it processed |
+| `/eh-r2 get _state/mode.json` | `make r2-get KEY=_state/mode.json` | The mode marker itself (`make mode` says it in one line) |
+
+## Modes: full and direct
+
+One marker in the bucket, `_state/mode.json`, says which mode writes it ([how it works](../technical/architecture.md#switching-modes)). Full mode is the whole pipeline on your machine; direct mode needs only Python and the R2 credentials, and runs [every hour on GitHub Actions](../technical/ci.md#direct-mode-on-a-schedule), so the dashboard stays current with your computer closed.
+
+| Skill | Command | What it does |
+| --- | --- | --- |
+| `/eh-mode` | `make mode` | Which mode writes the bucket: `full` or `direct`, and since when |
+| `/eh-mode direct` | `make mode-direct` ⚠ | Full → direct: stops the poller and catch-up, exports, writes direct mode's state. The schedule takes over |
+| `/eh-mode full` | `make mode-full` ⚠ | Direct → full: replays direct mode's log into Kafka and PostgreSQL, checks, switches back, restarts the poller. Pauses the schedule |
+| `/eh-mode once` | `make direct-once` ⚠ | One direct round from your machine (and catch-up if due) |
+| `/eh-mode run` | `make direct-run` ⚠ | Direct mode from your machine until Ctrl-C: a round a minute instead of an hour. Not while the schedule is on |
+| `/eh-mode reconcile` | `make reconcile-direct [DEEP=1]` | Rows, manifest, snapshot, ID map and log agree, read-only ([direct mode](../technical/architecture.md#direct-mode)) |
+| `/eh-mode schedule` | `gh workflow run direct.yml -f job=round` ⚠ | A scheduled round now (also `-f job=reconcile`) |
+| `/eh-mode runs` | `gh run list --workflow direct.yml` | The schedule's recent runs; `gh run view <id> --log-failed` for a failure |
+| | `gh secret set -f <file>` ⚠ | The workflow's four `R2_*` repository secrets, from a file of `NAME=value` lines (empty values make every run fail) |
+
+**Before closing the computer:** `make mode` says `direct (active)`, and no `make direct-run` is left running. **Back at it:** `make mode-full` brings PostgreSQL and the API up to date.
 
 ## Dashboard
 
@@ -154,12 +179,13 @@ The exporter reads through the API, so start it first (`make api`).
 
 | Skill | Command | What it does |
 | --- | --- | --- |
-| `/eh-dashboard` | `curl -s $URL/data/meta.json \| jq '{run_id, written_at, rows}'` | Which export the live page shows |
+| `/eh-dashboard` | `curl -s $URL/data/meta.json \| jq '{run_id, written_at, rows}'` | Which snapshot the live page shows (an export's, or a direct round's) |
 | `/eh-dashboard` | `curl -sI $URL/data/earthquakes.parquet \| grep -iE '^(etag\|content-length\|x-robots-tag)'` | The snapshot's headers |
 | `/eh-dashboard dev` | `make dashboard-dev` | Builds, then serves http://127.0.0.1:8787 over the real bucket |
 | `/eh-dashboard build` | `make dashboard-build` | Builds `dashboard/dist`, with the license notices |
 | `/eh-dashboard test` | `make test-dashboard` | The page in Chromium, against a simulated R2 |
 | `/eh-dashboard deploy` | `make dashboard-deploy` ⚠ | Publishes to Cloudflare Workers |
+| `/eh-dashboard deployments` | `cd dashboard && npx --no-install wrangler deployments list 2>&1 \| grep -v '@'` | Past deploys and their versions |
 | | `make dashboard-install` | Once: Node dependencies and the test browser |
 
 ## Tests

@@ -10,6 +10,10 @@ Run from the repository root. The exporter reads only the API (`GET /api/v1/expo
 PostgreSQL directly, so **the API must be running**: check `curl -s -m 5 http://127.0.0.1:8000/api/v1/health`,
 and if it doesn't answer, start it with `make api` first (say so).
 
+**Full mode only.** The exporter checks the bucket's mode marker after taking the lock, and refuses in
+direct mode ("the bucket is in direct mode, not full (make mode)"): there, the hourly direct rounds write the
+rows and the snapshot themselves. Check `make -s mode` first; to export again, hand back with `/eh-mode full`.
+
 | Argument | Command | Writes to R2 |
 | --- | --- | --- |
 | `dry` (default) | `make export-r2 DRY_RUN=1` | no: counts new, updated, unchanged and deleted rows |

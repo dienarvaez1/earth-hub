@@ -19,6 +19,10 @@ Run from the repository root. Each target waits until the services are healthy.
 
 - If `.env` is missing, stop and say: `cp .env.example .env` first (never create or print `.env` yourself).
 - `pipeline` and `all` start polling USGS: run them only when the user asked for that (the argument counts).
+- **Before `pipeline` or `all`, check `make -s mode`.** If the bucket is in direct mode, don't start them: the
+  marker doesn't stop full mode's poller, and events it stores make the handover back fail. Say so and offer
+  `/eh-mode full` (which starts what it needs and restarts the poller and catch-up itself). `infra` and
+  `api` are fine in either mode.
 - `dashboard` needs `make dashboard-install` once, and R2 settings in `.env`.
 - If a start fails, show the failing service's last 50 log lines (`docker compose logs --tail 50 <service>`).
 

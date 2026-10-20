@@ -153,6 +153,21 @@ make dashboard-install && make dashboard-dev     # http://127.0.0.1:8787, over t
 
 Without an account, `make test-dashboard` runs the page in Chromium against a simulated R2, offline. It compares the browser's answers with Python's on every report. The page's queries, with results, are in [the SQL examples](../technical/sql-examples.md#dashboard-reports).
 
+### Direct mode (optional)
+
+The same bucket can be written without Docker: [direct mode](../technical/architecture.md#direct-mode) runs the poller and the consumer's rules straight to R2, and GitHub Actions runs it every hour. The handovers write the real bucket, so try them only on your own:
+
+```bash
+make mode                # full (active): this machine's export writes the bucket
+make mode-direct         # hand over: stops the poller and catch-up, exports, switches
+make direct-once         # one round from this machine (or let the hourly schedule run)
+make reconcile-direct    # the bucket's state agrees with itself
+make mode-full           # replay direct mode's log into Kafka and PostgreSQL, check, switch back
+make reconcile           # and full mode has every event direct mode processed
+```
+
+**With Claude Code:** `/eh-mode`, `/eh-mode direct`, `/eh-mode once`, `/eh-mode full`.
+
 ## 8. Clean up
 
 ```bash

@@ -27,9 +27,10 @@ As of 2026-10-20. The plan below is the original, with Milestone 7 revised; the 
 | 8.1 Persistence decisions in memory (`processing/ledger.py`), `EventStore`, `PostgresStore`; the record key | Done | #22, #23 |
 | 8.2 `BucketStore`, the direct runner, parity tests | Done | #24 |
 | 8.3 The mode switch, handovers with log replay | Done | #25 |
-| Load test of the API with Locust, after 8 | In progress | |
+| Direct mode on GitHub Actions' hourly schedule, after 8.3 | Done | #27; skills and docs for the modes #28 |
+| Load test of the API with Locust, after 8 | Done | #26 |
 
-Current numbers: 156 requirements, all covered by a passing test; 41 defects, all fixed; about 985 tests in the full regression.
+Current numbers: 158 requirements, all covered by a passing test; 41 defects, all fixed; about 985 tests in the full regression.
 
 ## 1. Project vision
 
@@ -520,6 +521,8 @@ Full mode stays the reference implementation; none of its behavior, tests or evi
 - A replay repeated after a crash changes nothing; a budget test keeps direct mode inside R2's free operations.
 
 **Exit gate:** the same input gives the same bucket and snapshot in both modes; a handover in either direction keeps parity; direct mode runs with Docker stopped; full mode's suite passes unchanged; CI enforces it on every pull request.
+
+**Direct mode on a schedule** (approved on 2026-10-20). Direct mode needs a machine running it; to keep the bucket current with none of ours on, `.github/workflows/direct.yml` runs `direct once` every hour and `reconcile-direct` every day, at no cost ([how](../technical/ci.md#direct-mode-on-a-schedule)). This takes the R2-secrets decision early, for this workflow only: a dedicated, revocable R2 token as repository secrets (GitHub Free has no environments for private repositories; one limited to `main` comes with going public); the rest of the release stays deferred. Both commands get `--skip-unless-direct`, so the mode marker pauses and resumes the schedule (REQ-MODE-014); the workflow's catch-up intervals are shorter than its schedule, so GitHub's late starts never skip a pass. Tests: the workflow file (REQ-CI-005), the skip in each mode and during a handover, and the R2 budget at the schedule's rate. Cloudflare was considered: Workers' free plan allows 10 ms of CPU a run (a round takes tens of seconds), and Containers need the $5 paid plan.
 
 ## 5. Recommended repository structure
 
