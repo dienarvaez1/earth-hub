@@ -1,6 +1,6 @@
 ---
 name: eh-status
-description: Health of the whole Earth-Hub stack in one look — which containers run and are healthy, consumer lag per topic, newest stored event, API health, the last R2 export — or a full topic-versus-database reconciliation. Use for /eh-status, "is everything running", "is the pipeline healthy", "any lag", or "reconcile".
+description: Health of the whole Earth-Hub stack in one look — which containers run and are healthy, consumer lag per topic, newest stored event, API health, the last R2 export, the mode and its hourly schedule — or a full topic-versus-database reconciliation. Use for /eh-status, "is everything running", "is the pipeline healthy", "any lag", or "reconcile".
 argument-hint: "[reconcile]"
 ---
 
@@ -19,14 +19,22 @@ Read-only. Run from the repository root.
 - API, if its container runs: `curl -s -m 5 http://127.0.0.1:8000/api/v1/health`
 - Last export: `make -s export-r2-runs` (first line), only if `.env` has `R2_BUCKET` set (check with
   `grep -q '^R2_BUCKET=.' .env`; never print `.env`).
+- Mode (same condition): `make -s mode`; in direct mode also the schedule's last runs,
+  `gh run list --workflow direct.yml --limit 3` (filter lines with `@`).
 
 With the argument `reconcile`: also run `make reconcile` (read-only; about 10 s).
 
 If Kafka or PostgreSQL isn't running, say so and suggest `/eh-start`; skip the checks that need it.
 
+**In direct mode the bucket is written without Docker** (`/eh-mode`): a stopped poller and catch-up are
+expected then, not a fault, and PostgreSQL falls behind until `make mode-full`. Judge freshness from the
+newest log file (`make -s r2-ls PREFIX=log/ LIMIT=1000 | tail -1`) and the last scheduled run instead.
+
 ## Report
 
 A short table: service, state (healthy / unhealthy / stopped). Then one line each: lag per group, stored
-events and the newest event time (and how long ago), last hour's outcomes, API health, last export run.
+events and the newest event time (and how long ago), last hour's outcomes, API health, last export run,
+the mode (and in direct mode, the last scheduled run and the newest log file).
 With `reconcile`: each topic's RESULT, and any lost or pending messages. Flag anything wrong first: an
-unhealthy service, lag that isn't 0, a newest event older than ~15 minutes while the poller runs, lost messages.
+unhealthy service, lag that isn't 0, a newest event older than ~15 minutes while the poller runs, lost messages,
+a failed scheduled run, or a newest log file older than ~2 hours in direct mode.

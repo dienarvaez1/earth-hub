@@ -2,7 +2,7 @@
 
 A local-first earthquake data platform, built as a QA engineering portfolio project. The live USGS feed flows through Apache Kafka into validated PostgreSQL tables. A read-only REST API serves them, and a public dashboard shows them from an export to Cloudflare R2. The point is less the pipeline than the evidence that it works: every requirement traces to a passing test, every defect found is logged with how it was found and how it was fixed, and CI runs the regression on every pull request.
 
-**Status:** Milestones 1 to 6 are complete, and so are Milestone 7's CI and documentation; the public release, the rest of Milestone 7, is deferred. Milestone 8, a second mode that runs without Docker and keeps its state in R2, is in progress ([status](docs/progress/plan.md#status)). The dashboard runs at **https://earth-hub.diego-narvaez.workers.dev**, marked as a preview and kept out of search engines until the release.
+**Status:** Milestones 1 to 6 are complete, and so are Milestone 7's CI and documentation; the public release, the rest of Milestone 7, is deferred. Milestone 8 is complete too: a second mode that runs without Docker, keeps its state in R2, and runs every hour on GitHub Actions ([status](docs/progress/plan.md#status)). The dashboard runs at **https://earth-hub.diego-narvaez.workers.dev**, marked as a preview and kept out of search engines until the release.
 
 ## For reviewers
 
@@ -15,8 +15,11 @@ A local-first earthquake data platform, built as a QA engineering portfolio proj
 ```mermaid
 flowchart LR
     usgs[("USGS feeds")] --> poller --> kafka[["Kafka"]] --> consumer["consumer + validation"] --> pg[("PostgreSQL")] --> api["REST API"]
-    api -- "make export-r2" --> r2[("Cloudflare R2")] --> dash["dashboard<br/>(DuckDB in the browser)"]
+    api -- "full mode: make export-r2" --> r2[("Cloudflare R2")] --> dash["dashboard<br/>(DuckDB in the browser)"]
+    usgs --> direct["direct mode: poller + validation<br/>(GitHub Actions, hourly)"] --> r2
 ```
+
+Two modes write the same bucket, one at a time: **full** (the whole pipeline, on a developer machine) and **direct** (no Docker, Kafka or PostgreSQL, run hourly by GitHub Actions so the dashboard stays current with no machine on). A marker in the bucket says which one; the handovers check both agree before switching.
 
 ## Quality at a glance
 
@@ -90,6 +93,7 @@ The [demo walkthrough](docs/overview/demo.md) goes through these with what to lo
 | `make export-r2 [DRY_RUN=1] [VERIFY=1]` / `make export-r2-runs` | Copy the `earthquakes` table to Cloudflare R2 through the API, only new and changed rows / list past runs |
 | `make mode` / `make mode-direct` / `make mode-full` | Which mode writes the bucket / hand over to direct mode / back to full mode, checked before switching |
 | `make direct-once` / `make direct-run` / `make reconcile-direct` | Direct mode: one round / run until stopped / check its state in the bucket |
+| `gh workflow run direct.yml -f job=round` / `gh run list --workflow direct.yml` | Direct mode on GitHub Actions' hourly schedule: a round now / the recent runs |
 | `make r2-ls [PREFIX=…]` / `make r2-count` / `make r2-get KEY=…` | List, count or read the bucket's objects, read-only |
 | `make dashboard-install` / `make dashboard-dev` / `make dashboard-deploy` | The dashboard's Node dependencies and test browser / a local server over the real bucket / publish to Cloudflare Workers |
 
@@ -101,7 +105,7 @@ The [demo walkthrough](docs/overview/demo.md) goes through these with what to lo
 | **Persistence** | The consumer validates each message against [16 data-quality rules](docs/technical/data-quality-rules.md), merges records USGS turns out to be one event, and stores the newest revision. Every message is kept with its outcome, rejected ones included | [Schema](docs/technical/schema.md) |
 | **REST API** | Read-only, over PostgreSQL: events, lookups by any former ID, statistics, hourly and magnitude summaries, with one error format | [API reference](docs/technical/api.md) |
 | **Export** | `make export-r2` copies the table to R2 on demand, uploading only what changed, then writes a Parquet snapshot | [Architecture](docs/technical/architecture.md#export-to-r2) |
-| **Direct mode** | The same poller and catch-up straight to R2, with no Docker, Kafka or PostgreSQL: the bucket full mode's export would write, byte for byte, which tests check against full mode. A marker in the bucket says which mode writes it; the handovers replay direct mode's log into Kafka and check both sides agree before switching (Milestone 8) | [Architecture](docs/technical/architecture.md#direct-mode) |
+| **Direct mode** | The same poller and catch-up straight to R2, with no Docker, Kafka or PostgreSQL: the bucket full mode's export would write, byte for byte, which tests check against full mode. A marker in the bucket says which mode writes it; the handovers replay direct mode's log into Kafka and check both sides agree before switching. GitHub Actions runs it every hour, so the dashboard stays current with no machine on (Milestone 8) | [Architecture](docs/technical/architecture.md#direct-mode) |
 | **Dashboard** | A Cloudflare Worker serves the page and the snapshot; the browser runs the reports itself with DuckDB-WASM, and draws the map and charts | [Architecture](docs/technical/architecture.md#dashboard), [SQL](docs/technical/sql-examples.md#dashboard-reports) |
 | **Observability** | JSON logs where every pipeline line has a `stage` and every line about an event its `event_id`, plus a consumer summary every minute | [Observability](docs/technical/architecture.md#observability) |
 

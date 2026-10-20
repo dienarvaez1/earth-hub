@@ -21,6 +21,10 @@ settings are missing (the message names them).
 What's in the bucket (`docs/technical/architecture.md`, Export to R2): `earthquakes/<key>.json` (one per row, named by its key),
 `_state/earthquakes-manifest.json.gz` (SHA-256 per row), `_state/lock.json` (only during a run),
 `runs/<run_id>.json`, `analytics/earthquakes.parquet` and `analytics/meta.json` (the dashboard's snapshot).
+Direct mode's state (architecture, Direct mode): `_state/mode.json` (which mode writes the bucket; `make mode`),
+`_state/ids.json.gz` (the ID map), `_state/direct.json` (last sequence number, poller and catch-up state),
+`_state/direct-pending.json` (only while a round writes), and `log/<date>/<first>-<last>.ndjson` (every
+message processed, in order: e.g. `ls log/` with `LIMIT=1000 | tail` for the newest).
 
 The public dashboard serves only the two `analytics/` files, at `/data/earthquakes.parquet` and
 `/data/meta.json` (see `/eh-dashboard check`).
