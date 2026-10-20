@@ -283,6 +283,8 @@ make direct-run    # direct mode, until stopped
 make mode-full     # replay direct mode's log into full mode, check, switch back
 ```
 
+**With Claude Code:** `/eh-mode` (the mode and the schedule's last runs), `/eh-mode direct`, `/eh-mode full`, `/eh-mode once`, and `/eh-mode reconcile` for the bucket's state.
+
 **Switching loses nothing.** While a handover runs, neither mode polls, but USGS's day feed lists every event of the last 24 hours, so the first round of the mode taking over picks up what was published or revised meanwhile: the events are late by the handover's length, never lost. `make mode-direct` restarts full mode's poller and catch-up if the handover fails; `make mode-full` restarts them when it succeeds, and a running `make direct-run` stops by itself once the bucket is frozen. `tests/e2e/test_mode_switching.py` switches back and forth twice while the feed changes, during the handovers too, and checks after every switch that every event is served at its latest version.
 
 **Full → direct** (`make mode-direct`):

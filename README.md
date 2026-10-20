@@ -178,8 +178,10 @@ Earth-Hub was built with [Claude Code](https://claude.com/claude-code), Anthropi
 **Decisions that stayed with the author:**
 - **Scope and order.** The milestone plan and the initial prompt, written before any code. Each milestone's proposal approved, revised or narrowed, and what to defer, such as the public release and the license.
 - **What counts as done.** The exit gates: every layer green, every requirement traced, the end-to-end suite passing 5 runs out of 5, and defects fixed with a regression test.
-- **Risk and exposure.** Keeping everything bound to `127.0.0.1`, the R2 export on demand only, and the dashboard public but marked as a preview until the release.
-- **When to stop.** Each merge, deploy and live operation (`make ingest`, `make export-r2`, `make dashboard-deploy`).
+- **Risk and exposure.** Keeping everything bound to `127.0.0.1`, writing R2 only on demand in full mode or from the one scheduled direct-mode workflow (the only one holding secrets), and the dashboard public but marked as a preview until the release.
+- **When to stop.** Each merge, deploy and live operation (`make ingest`, `make export-r2`, `make dashboard-deploy`, the handovers `make mode-direct` and `make mode-full`).
+
+**Skills for operating it.** The everyday operations are Claude Code skills in `.claude/skills/` (`/eh-status`, `/eh-mode`, `/eh-kafka`, `/eh-db`, …), each next to the command it runs in the [cheat sheet](docs/overview/cheatsheet.md); a unit test checks that every skill, argument and make target named in the docs exists.
 
 **Not trusting AI-written tests either.** The [test strategy](docs/progress/test-strategy.md#ai-assisted-development) applies the same safeguards to tests as to code:
 - mutation spot checks;

@@ -36,6 +36,7 @@ Commands that **call live services or change state** are marked ⚠. The skills 
 | `/eh-start api` | `make api` | The REST API: http://127.0.0.1:8000/docs |
 | `/eh-start ui` | `make kafka-ui` | A read-only Kafka viewer: http://127.0.0.1:8080 |
 | `/eh-start dashboard` | `make dashboard-dev` | The page, http://127.0.0.1:8787, over the real bucket |
+| `/eh-start all` | `make ingest` ⚠, then `make api` | Everything but the UI and the dashboard (full mode only) |
 | `/eh-stop` | `make ingest-stop` | Stops the pipeline; Kafka and PostgreSQL keep running |
 | `/eh-stop api` / `/eh-stop ui` | `make api-stop` / `make kafka-ui-stop` | Stops the API / the viewer |
 | `/eh-stop all` | `make down` | Stops everything, keeping the data (in direct mode the dashboard keeps updating) |
@@ -49,6 +50,10 @@ Commands that **call live services or change state** are marked ⚠. The skills 
 | `/eh-status` | `docker compose --profile ingest --profile api --profile tools ps` | Every container and its health |
 | `/eh-logs poller` | `docker compose logs --no-log-prefix --since 1h poller` | One service's recent logs (`-f` to follow) |
 | `/eh-logs` | `make ingest-logs` | Follows the four pipeline services |
+| `/eh-logs us7000abcd` | `docker compose logs --no-log-prefix poller consumer consumer-backfill catchup \| jq -cR --arg id us7000abcd 'fromjson? \| select(.event_id == $id)'` | Everything about one event, across services, in order |
+| `/eh-logs errors` | `docker compose logs --no-log-prefix --since 1h poller consumer consumer-backfill catchup api \| jq -cR 'fromjson? \| select(.level == "WARNING" or .level == "ERROR")'` | Warnings and errors only |
+| `/eh-logs rejected` | `docker compose logs --no-log-prefix consumer consumer-backfill \| jq -cR 'fromjson? \| select(.message == "message rejected") \| {ts, event_id, reason}'` | Rejections and the rule behind each |
+| `/eh-logs summary` | `docker compose logs --no-log-prefix --since 1h consumer consumer-backfill \| jq -cR 'fromjson? \| select(.message == "consumer summary") \| {ts, logger, lag, outcomes}' \| tail -10` | The consumers' minute summaries: counts and lag |
 | `/eh-poller restart` | `docker compose --profile ingest restart poller` | Restarts one service (any of `poller`, `consumer`, `consumer-backfill`, `catchup`) |
 | | `docker compose --profile api restart api` | Restarts the API |
 | | `docker compose stats --no-stream` | CPU and memory per container |
@@ -108,6 +113,7 @@ With `q() { docker compose exec -T postgres psql -U earth_hub_app earth_hub -c "
 | `/eh-db event us7000abcd` | `q "SELECT e.* FROM earthquakes e JOIN earthquake_ids i ON i.earthquake_id = e.id WHERE i.event_id = 'us7000abcd'"` | One event, by any of its IDs (add `-x` for one field per line) |
 | `/eh-db event us7000abcd` | `q "SELECT r.kafka_offset, r.event_id, r.outcome FROM raw_events r JOIN earthquake_ids i ON i.earthquake_id = r.earthquake_id WHERE i.event_id = 'us7000abcd' ORDER BY r.received_at"` | Every message that touched it |
 | `/eh-db merged` | `q "SELECT e.preferred_event_id, array_agg(i.event_id) FROM earthquakes e JOIN earthquake_ids i ON i.earthquake_id = e.id GROUP BY e.id HAVING count(*) > 1"` | Events USGS merged |
+| `/eh-db latest` | `q "SELECT preferred_event_id, event_time, magnitude, place, review_status FROM earthquakes ORDER BY event_time DESC LIMIT 10"` | The newest stored events |
 | `/eh-db strongest` | `q "SELECT preferred_event_id, event_time, magnitude, place FROM earthquakes WHERE review_status <> 'deleted' ORDER BY magnitude DESC NULLS LAST LIMIT 10"` | The strongest stored events |
 | | `make migrate` | Apply the schema's migrations |
 
@@ -179,6 +185,7 @@ One marker in the bucket, `_state/mode.json`, says which mode writes it ([how it
 | `/eh-dashboard build` | `make dashboard-build` | Builds `dashboard/dist`, with the license notices |
 | `/eh-dashboard test` | `make test-dashboard` | The page in Chromium, against a simulated R2 |
 | `/eh-dashboard deploy` | `make dashboard-deploy` ⚠ | Publishes to Cloudflare Workers |
+| `/eh-dashboard deployments` | `cd dashboard && npx --no-install wrangler deployments list 2>&1 \| grep -v '@'` | Past deploys and their versions |
 | | `make dashboard-install` | Once: Node dependencies and the test browser |
 
 ## Tests
