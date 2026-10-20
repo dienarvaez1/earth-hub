@@ -1,4 +1,4 @@
-.PHONY: help install up down reset ingest ingest-once ingest-logs ingest-stop api api-dev api-stop kafka-ui kafka-ui-stop backfill catchup-once consume reconcile reconcile-direct mode mode-direct mode-full direct-once direct-run export-r2 export-r2-runs r2-ls r2-count r2-get dashboard-install dashboard-build dashboard-dev dashboard-deploy test-dashboard check-db-outage lint format test test-integration test-e2e test-disruptive test-performance test-all regression flake-check traceability smoke smoke-restart migrate coverage
+.PHONY: help install up down reset ingest ingest-once ingest-logs ingest-stop api api-dev api-stop kafka-ui kafka-ui-stop backfill catchup-once consume reconcile reconcile-direct mode mode-direct mode-full direct-once direct-run export-r2 export-r2-runs r2-ls r2-count r2-get dashboard-install dashboard-build dashboard-dev dashboard-deploy test-dashboard check-db-outage lint format test test-integration test-e2e test-disruptive test-performance load load-ui test-all regression flake-check traceability smoke smoke-restart migrate coverage
 
 help: ## List the available commands
 	@grep -E '^[a-z0-9-]+:.*## ' $(MAKEFILE_LIST) | awk -F ':.*## ' '{printf "  %-17s %s\n", $$1, $$2}'
@@ -141,6 +141,12 @@ test-disruptive: ## Run tests that stop and start the shared Kafka and PostgreSQ
 
 test-performance: ## Backfill a full year of synthetic events through the pipeline, timed
 	uv run pytest tests/performance --run-performance -s
+
+load: ## Load-test the API with Locust over 140,000 synthetic events: reports/load-report.html
+	uv run python scripts/load_test.py $(if $(USERS),--users $(USERS)) $(if $(RUN_TIME),--run-time $(RUN_TIME))
+
+load-ui: ## The same load test in Locust's web UI, at http://127.0.0.1:8089
+	uv run python scripts/load_test.py --ui
 
 test-all: ## Run every non-disruptive test in one process (needs `make up`)
 	uv run pytest

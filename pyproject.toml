@@ -44,6 +44,7 @@ markers = [
 [dependency-groups]
 dev = [
     "httpx2>=2.13.1",
+    "locust==2.46.7",
     "moto[s3]>=5.2.4",
     "pytest>=9.1.1",
     "pytest-cov>=7.1.0",

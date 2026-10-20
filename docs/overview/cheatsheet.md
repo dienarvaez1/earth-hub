@@ -200,7 +200,9 @@ One marker in the bucket, `_state/mode.json`, says which mode writes it ([how it
 | `/eh-test e2e` | `make test-e2e` | Mock feed → poller → Kafka → consumer → PostgreSQL → API |
 | `/eh-test dashboard` | `make test-dashboard` | The page in Chromium |
 | `/eh-test disruptive` | `make test-disruptive` ⚠ | Stops and starts the shared containers |
-| `/eh-test performance` | `make test-performance` | A year of synthetic history, timed |
+| `/eh-test performance` | `make test-performance` | A year of synthetic history, timed; the API under load |
+| `/eh-test load` | `make load` | Locust: 50 users over 140,000 events; `reports/load-report.html` |
+| `/eh-test load-ui` | `make load-ui` | The same in Locust's web UI, http://127.0.0.1:8089 |
 | `/eh-test regression` | `make regression` | Every layer in order, with reports in `reports/` |
 | `/eh-test flake` | `make flake-check` | The end-to-end suite 5 times |
 | `/eh-test traceability` | `make traceability` | The traceability matrix, from the last run |

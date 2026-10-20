@@ -50,7 +50,7 @@ stateDiagram-v2
 
 | | |
 | --- | --- |
-| **Requirements** | 157 requirements, each with a stable ID and at least one passing test that names it (`@pytest.mark.req`). A test naming an unknown ID fails at collection, and `make traceability` fails if any requirement has no passing test |
+| **Requirements** | 158 requirements, each with a stable ID and at least one passing test that names it (`@pytest.mark.req`). A test naming an unknown ID fails at collection, and `make traceability` fails if any requirement has no passing test |
 | **Tests** | About 980, in eight layers: unit, integration, API, contract (Schemathesis), end-to-end, dashboard (in Chromium), disruptive (real outages) and performance. About 91% coverage across all layers |
 | **Defects** | 41 defects found and fixed, each with its milestone, severity, how it was found and the commit that fixed it; [six written up in full](docs/progress/defects.md) with root cause and prevention (kept in the git history) |
 | **CI** | On every pull request and push to `main`, lint and unit tests, then the regression of every layer except performance, from the example settings and with no secrets ([docs/technical/ci.md](docs/technical/ci.md)) |
@@ -104,7 +104,8 @@ The [demo walkthrough](docs/overview/demo.md) goes through these with what to lo
 | `make test-integration` / `make smoke` | Integration, API and contract tests against the running services |
 | `make test-e2e` / `make test-dashboard` | End-to-end tests, from a mock feed to the API / the dashboard in Chromium against a simulated R2 |
 | `make test-disruptive` | Tests that stop and start the shared Kafka and PostgreSQL containers |
-| `make test-performance` | A year of synthetic backfill through the pipeline, and the dashboard at 115,000 and 1,000,000 rows, timed |
+| `make test-performance` | A year of synthetic backfill through the pipeline, the dashboard at 115,000 and 1,000,000 rows, and the API under load, timed |
+| `make load` / `make load-ui` | Load-test the API with Locust over 140,000 synthetic events: an HTML report in `reports/` / Locust's web UI |
 | `make test-all` / `make flake-check` | Every test but the disruptive and performance ones, in one process / the end-to-end suite 5 times in a row |
 | `make traceability` | Rebuild the traceability matrix from the last regression run |
 | `make smoke-restart` / `make check-db-outage` | Restart both services and check data survives / stop PostgreSQL mid-stream and check nothing is lost (both disruptive) |
@@ -152,11 +153,11 @@ It writes `reports/regression-summary.md`, JUnit XML for each layer, a coverage 
 | End-to-end | `tests/e2e/` | A mock USGS feed → the real poller → Kafka → the real consumer → PostgreSQL → the API, checked only through the API: new, duplicate, revised, invalid, merged and deleted events, restarts, backfill and catch-up |
 | Dashboard | `tests/dashboard/` | The built page and Worker under `wrangler dev`, over a simulated R2, in Chromium, offline. It checks the Worker's headers and ranges, DuckDB-WASM's answers against Python's on every report, and the page's controls, charts, empty results and phone layout; it fails on any console error |
 | Disruptive | `tests/disruptive/` | Stops and starts the shared containers: PostgreSQL stopped while events arrive, a Kafka restart, data surviving a restart of both |
-| Performance | `tests/performance/` | A full year of synthetic history (139,579 events) through backfill, Kafka, the consumer and the API in about 42 s; the dashboard at 115,000 and 1,000,000 rows. Local only: shared CI runners can't repeat the timings |
+| Performance | `tests/performance/` | A full year of synthetic history (139,579 events) through backfill, Kafka, the consumer and the API in about 42 s; the dashboard at 115,000 and 1,000,000 rows; the API under load with Locust (50 users over 140,000 events, a p95 budget per endpoint). Local only: shared CI runners can't repeat the timings |
 
 **QA documents** in `docs/`:
 - the [test strategy](docs/progress/test-strategy.md): risks, levels, techniques, scope, reports and testing by milestone;
-- the [requirements](docs/progress/requirements.md), 157 of them, and the [traceability matrix](docs/progress/traceability-matrix.md);
+- the [requirements](docs/progress/requirements.md), 158 of them, and the [traceability matrix](docs/progress/traceability-matrix.md);
 - the [defect log](docs/progress/defects.md): 41 defects found and fixed, 6 with full reports in the git history;
 - the [data-quality rules](docs/technical/data-quality-rules.md) and the [known limitations](docs/overview/limitations.md).
 

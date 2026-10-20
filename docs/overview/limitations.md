@@ -24,7 +24,8 @@ What Earth-Hub doesn't do, or does only within limits. These are deliberate trad
 
   Losing the machine's disk loses the data. It can be backfilled again from USGS, but rows' `first_seen_at` times can't be recovered.
 - **No authentication on Kafka, JMX or the API.** All three are bound to `127.0.0.1`, and the API is read-only. Exposing any of them beyond the machine would need authentication, TLS and rate limiting first.
-- **The API pages with `offset`** (up to 10,000,000), and counts `total` on every request. Deep pages get slower, so the export endpoint pages by `id` instead.
+- **The API pages with `offset`** (up to 10,000,000), and counts `total` on every request. Deep pages get slower, so the export endpoint pages by `id` instead. Under load (`make load`: 50 users, 140,000 events), the unfiltered list's p95 is about 230 ms and a deep page's about 730 ms, against 33 ms for a lookup by ID.
+- **The load test runs on one machine:** Locust, the API and PostgreSQL share it, so its figures are relative, a baseline to catch regressions, not a capacity for a deployment.
 - **The hourly summary covers at most 31 days** (744 buckets).
 
 ## Data
@@ -44,7 +45,7 @@ What Earth-Hub doesn't do, or does only within limits. These are deliberate trad
 
 ## Testing and CI
 
-- **The performance layer runs only on a developer machine.** Shared CI runners can't repeat its timings within ±15%, so CI reports it as skipped, and its two requirements as not run (REQ-BF-011, REQ-DASH-008).
+- **The performance layer runs only on a developer machine.** Shared CI runners can't repeat its timings within ±15%, so CI reports it as skipped, and its three requirements as not run (REQ-BF-011, REQ-DASH-008, REQ-API-014).
 - **CI shows a failing check, but can't block a merge yet.** On GitHub's free plan, a branch can be protected only in a public repository; making it public and protecting `main` are part of the release.
 - **The live feed is never part of the automated tests.** `make ingest` and `make reconcile` check the real feed by hand.
 - **Contract testing samples the inputs.** Schemathesis generates 60 requests per endpoint by default (`CONTRACT_EXAMPLES=1000` for a deeper run), which isn't an exhaustive search.
