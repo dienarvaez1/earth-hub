@@ -24,6 +24,9 @@ As of 2026-10-20. The plan below is the original, with Milestone 7 revised; the 
 | 7.1 CI, third-party licenses, preview marking | Done | #16 |
 | 7.2 Documentation and demo | Done | #18; skills and cheat sheet #19; defect reports to history #20; docs reorganized #21 |
 | 7.3 Release: audit, license, public repository, branch protection, `USGS_CONTACT`, preview marking removed | **Deferred** | |
+| 8.1 Persistence decisions in memory (`processing/ledger.py`), `EventStore`, `PostgresStore` | In progress | |
+| 8.2 `BucketStore`, the direct runner, parity tests | Planned | |
+| 8.3 The mode switch, handovers with log replay | Planned | |
 
 Current numbers: 140 requirements, all covered by a passing test; 39 defects, all fixed; about 870 tests in the full regression.
 
@@ -486,6 +489,36 @@ Revised on 2026-10-19: the release (license, public repository, branch protectio
 **QA deliverables:** CI workflow, README, architecture diagrams, test documentation, traceability matrix, quality reports, and demo instructions.
 
 **Exit gate:** A reviewer can clone Earth-Hub, start it, run tests, inspect persisted records, query the API, and understand the quality controls; every pull request is checked by CI.
+
+### Milestone 8 — Direct mode, with parity
+
+Approved on 2026-10-20, with the recommended decisions. Earth-Hub runs in either of two modes, chosen by one setting, and both produce **the same R2 bucket and dashboard snapshot** from the same USGS input:
+
+| Mode | Path | Needs |
+| --- | --- | --- |
+| `full` (the default) | poller → Kafka → consumer → PostgreSQL → API → export → R2 | Docker, Kafka, PostgreSQL |
+| `direct` | poller → validate → apply → R2, state kept in the bucket | Python and R2 credentials |
+
+Full mode stays the reference implementation; none of its behavior, tests or evidence changes.
+
+**Implementation**
+
+1. **Decisions apart from storage.** The persistence decisions (record identity, merges, revisions, recorded IDs) move from SQL into a pure module, `processing/ledger.py`, behind an `EventStore` interface; `PostgresStore` loads and writes for it. `process_message` becomes a batch of one, and merges go through the set-based path. Processing times come from the `now` passed in, never the database clock (REQ-PER-018). No other behavior change: the whole suite, `test_batch.py`'s random streams included, must pass unchanged.
+2. **`BucketStore` and the direct runner.** Rows `earthquakes/<key>.json`, an ID map `ids/<usgs id>`, an append-only log `log/<date>/<run>.ndjson` (each applied envelope, its sequence, time and outcome: the replacement for `raw_events`), and the poller's 26-hour state; conditional writes, the existing lock. The snapshot is updated, not rebuilt. Catch-up and the deleted-events check in direct mode; a full-year backfill stays a full-mode job. `make reconcile-direct`.
+3. **The mode switch.** `EARTH_HUB_MODE=full|direct`; `make direct-once` / `make direct-run`; a mode marker and checkpoint in `_state/mode.json`, so the modes take turns and never write at once.
+   - **full → direct:** export, then build direct mode's ID map and 26-hour state, then write the checkpoint.
+   - **direct → full:** freeze the bucket; replay every log entry after the checkpoint, in order, through `earthquakes.backfill`, so Kafka, `raw_events` and PostgreSQL get the deltas full mode never saw, with their original processing times; wait for lag 0; then `make reconcile`, and an export dry run that must find no differences from the bucket. Only then switch; otherwise abort and stay in direct mode. Fallback without a log: an FDSN backfill of the period, reporting any differences.
+
+**Decisions:** a mode-independent row key (a `key` column, the first USGS ID of the surviving record; a migration and a one-time rename in the bucket); processing times carried by the log, so parity covers every column; direct mode runs on the developer machine first, a scheduled GitHub Actions job only after the release audit decides on R2 secrets in GitHub; the work starts after the documentation reorganization (#21).
+
+**QA work**
+
+- Parity at the store level, in CI: the same random event streams (revisions, duplicates, ID changes, two- and three-way merges, deletions, invalid events) and every defect scenario through `PostgresStore` and `BucketStore` (moto), exported with the same writer: identical buckets and snapshots.
+- Parity end to end: the same mock feed and FDSN service through the full pipeline and the direct runner.
+- Round trips: full → direct (revisions, merges, deletions) → full must leave PostgreSQL as a run that stayed in full mode would; a gap in the log, or a broken rule in one mode, must fail the check.
+- A replay repeated after a crash changes nothing; a budget test keeps direct mode inside R2's free operations.
+
+**Exit gate:** the same input gives the same bucket and snapshot in both modes; a handover in either direction keeps parity; direct mode runs with Docker stopped; full mode's suite passes unchanged; CI enforces it on every pull request.
 
 ## 5. Recommended repository structure
 

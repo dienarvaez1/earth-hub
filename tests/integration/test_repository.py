@@ -339,3 +339,14 @@ def test_concurrent_deliveries_of_one_event_create_one_record(db, make_envelope,
         assert sorted(results) == ["applied", "duplicate"]
     assert len(rows(db, Earthquake)) == 10
     assert_invariants(db)
+
+
+@pytest.mark.req("REQ-PER-018")
+def test_processing_times_come_from_the_time_given_not_the_database_clock(
+    db, deliver, make_envelope, make_feature
+):
+    # The database's clock would differ by mode and by run (Milestone 8 parity).
+    deliver(make_envelope(make_feature("us5", ["us5"])))
+    (quake,) = rows(db, Earthquake)
+    assert quake["first_seen_at"] == NOW_FIXTURE and quake["last_applied_at"] == NOW_FIXTURE
+    assert {r["first_seen_at"] for r in rows(db, EarthquakeId)} == {NOW_FIXTURE}

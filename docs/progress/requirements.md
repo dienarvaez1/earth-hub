@@ -62,6 +62,7 @@ Every table row that starts with `| REQ-` is read by the tooling: keep one requi
 | REQ-PER-015 | Processing messages in a batch gives exactly the same stored results as processing them one by one |
 | REQ-PER-016 | A batch that fails for a non-database reason is redone one message at a time, so only the bad message is recorded as an error |
 | REQ-PER-017 | Consumers processing overlapping batches never deadlock |
+| REQ-PER-018 | An event's `first_seen_at` and `last_applied_at`, and an ID's `first_seen_at`, are the processing time the consumer passes in, never the database's clock |
 
 ## Data quality
 
