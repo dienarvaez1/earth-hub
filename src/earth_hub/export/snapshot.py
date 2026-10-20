@@ -63,8 +63,70 @@ def content_hash(rows: dict[str, str]) -> str:
     return hashlib.sha256(json.dumps(sorted(rows.items())).encode()).hexdigest()
 
 
+def snapshot_meta(run_id: str, written_at: str, rows: int, body: bytes, content: str) -> bytes:
+    """analytics/meta.json for a snapshot file `body` built from rows with fingerprint
+    `content` (content_hash of their manifest entries)."""
+    meta = {
+        "table": "earthquakes",
+        "run_id": run_id,
+        "written_at": written_at,
+        "rows": rows,
+        "bytes": len(body),
+        "sha256": hashlib.sha256(body).hexdigest(),
+        "content_sha256": content,
+        "columns": COLUMNS,
+    }
+    return json.dumps(meta, indent=2).encode()
+
+
 def _quote(path: Path) -> str:
     return "'" + str(path).replace("'", "''") + "'"
+
+
+def _columns() -> str:
+    return "{" + ", ".join(f"'{name}': '{kind}'" for name, kind in COLUMNS.items()) + "}"
+
+
+def _rows_source(path: Path) -> str:
+    # Explicit types: nothing is inferred, and an empty table still has every column.
+    return f"read_json({_quote(path)}, format = 'newline_delimited', columns = {_columns()})"
+
+
+def _write_parquet(con, source: str, out: Path) -> None:
+    con.execute(
+        f"COPY (SELECT * FROM {source} ORDER BY key) TO {_quote(out)} "
+        "(FORMAT parquet, COMPRESSION zstd)"
+    )
+
+
+def updated_snapshot(previous: Path | None, bodies: list[bytes], removed: set[str]) -> bytes:
+    """A snapshot built from the `previous` file (None: no rows yet) without the rows in
+    `removed` or replaced by `bodies` (row objects, as uploaded), plus those rows. The same
+    rows give the same file as a rebuild (SnapshotFile), without reading every row again.
+    Applying the same change twice gives the same result."""
+    with tempfile.TemporaryDirectory(prefix="earth-hub-snapshot-") as tmp:
+        rows_path = Path(tmp) / "rows.ndjson"
+        rows_path.write_bytes(b"".join(body + b"\n" for body in bodies))
+        out = Path(tmp) / "earthquakes.parquet"
+        con = duckdb.connect()
+        try:
+            con.execute("SET TimeZone = 'UTC'")
+            con.execute(f"CREATE TABLE changed AS SELECT * FROM {_rows_source(rows_path)}")
+            con.execute("CREATE TABLE gone (key VARCHAR)")
+            if removed:
+                con.executemany("INSERT INTO gone VALUES (?)", [[key] for key in sorted(removed)])
+            if previous is None:
+                kept = "SELECT * FROM changed WHERE false"
+            else:
+                kept = (
+                    f"SELECT * FROM read_parquet({_quote(previous)}) "
+                    "WHERE key NOT IN (SELECT key FROM changed) "
+                    "AND key NOT IN (SELECT key FROM gone)"
+                )
+            _write_parquet(con, f"({kept} UNION ALL BY NAME SELECT * FROM changed)", out)
+        finally:
+            con.close()
+        return out.read_bytes()
 
 
 class SnapshotFile:
@@ -84,19 +146,10 @@ class SnapshotFile:
     def build(self) -> bytes:
         self._file.close()
         out = Path(self._dir.name) / "earthquakes.parquet"
-        columns = "{" + ", ".join(f"'{name}': '{kind}'" for name, kind in COLUMNS.items()) + "}"
-        # Explicit types: nothing is inferred, and an empty table still has every column.
-        source = (
-            f"read_json({_quote(self._rows_path)}, format = 'newline_delimited', "
-            f"columns = {columns})"
-        )
         con = duckdb.connect()
         try:
             con.execute("SET TimeZone = 'UTC'")
-            con.execute(
-                f"COPY (SELECT * FROM {source} ORDER BY key) TO {_quote(out)} "
-                "(FORMAT parquet, COMPRESSION zstd)"
-            )
+            _write_parquet(con, _rows_source(self._rows_path), out)
         finally:
             con.close()
         return out.read_bytes()

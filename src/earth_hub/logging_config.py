@@ -21,6 +21,7 @@ DEFAULT_STAGES = {
     "earth_hub.consumers": "persist",
     "earth_hub.database": "persist",
     "earth_hub.validation": "persist",
+    "earth_hub.direct": "persist",
 }
 
 

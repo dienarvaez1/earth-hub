@@ -50,6 +50,15 @@ What Earth-Hub doesn't do, or does only within limits. These are deliberate trad
 - **Contract testing samples the inputs.** Schemathesis generates 60 requests per endpoint by default (`CONTRACT_EXAMPLES=1000` for a deeper run), which isn't an exhaustive search.
 - **No dependency or secret scanning in CI.** A secret scan of the whole history is part of the release audit.
 
+## Direct mode
+
+Milestone 8 is in progress ([architecture](../technical/architecture.md#direct-mode)).
+- **It runs only in the tests so far.** The commands to run it, and the handovers between modes, are step 3; until then, running it against the real bucket would write next to full mode's exports.
+- **One direct process at a time.** The lock keeps a round and an export apart, but two direct runners would each poll the feed; the mode switch (step 3) is what keeps them to one.
+- **The log grows** by about 3 MB a day at today's load, about 1 GB a year, inside R2's 10 GB of free storage for years; nothing prunes it yet.
+- **About 10 R2 writes per live round**, 16% of the free monthly Class A operations at today's load. Merging the state and the ID map into one object would save one write a round.
+- **Processing times differ between the modes when each runs on its own clock.** The parity tests compare them exactly only with the same `now` given to both; step 3's handover carries them in the log.
+
 ## Not yet done
 
 The release is deferred. These are planned, but not in place:

@@ -127,6 +127,21 @@ One requirement per rule in [data-quality-rules.md](../technical/data-quality-ru
 | REQ-EXP-011 | `make r2-ls`, `make r2-count` and `make r2-get` list, count and read the bucket's objects (gunzipping `.gz`, saving binary objects only to a file) and never write to it |
 | REQ-EXP-012 | Each record has a `key`, the USGS ID it was created with, kept by the surviving record of a merge (existing rows: the earliest-seen of their IDs); R2 rows and the snapshot are named and ordered by `key` and never carry the database's `id`, so they are the same whatever store processed the events |
 
+## Direct mode
+
+Milestone 8: the pipeline without Docker, keeping its state in the bucket ([architecture](../technical/architecture.md#direct-mode)).
+
+| ID | Requirement |
+| --- | --- |
+| REQ-MODE-001 | The same messages, in the same batches with the same processing times, through full mode (PostgreSQL, the API and the exporter) or direct mode give the same bucket: every row object byte for byte, the manifest, the snapshot's rows, types and fingerprint, the ID map (each USGS ID's record and first-seen time, as `earthquake_ids`) and each message's outcome, rule, reason and record (the log, as `raw_events`) |
+| REQ-MODE-002 | A direct round saves its writes in a redo record before making them; a round interrupted at any write is finished by the next one, and the bucket ends as if it had not been interrupted. No round starts on top of another's unfinished writes |
+| REQ-MODE-003 | Every message direct mode processes is logged under `log/`, in order, with its sequence number, processing time, source, outcome, rule, reason, record key and envelope; sequence numbers have no gaps, and each log object is named by its first and last |
+| REQ-MODE-004 | Each direct round that writes holds the bucket's lock, the exporter's, so a round and an export never write at once; direct mode refuses a bucket whose snapshot does not match its manifest, or whose ID map and manifest list different records, before writing anything |
+| REQ-MODE-005 | The poller and catch-up run unchanged in direct mode: the poller's 26-hour state and catch-up's checkpoints are saved in the bucket and survive a restart, and catch-up skips exactly the messages full mode would (one rule, `revisions.needed`) |
+| REQ-MODE-006 | `make reconcile-direct` checks the bucket's invariants (row objects, manifest, snapshot and ID map agree; every record's IDs point to it; the log has no gap; no round is unfinished) and exits 1 if any is broken; `DEEP=1` also reads every row object |
+| REQ-MODE-007 | Direct mode keeps inside R2's free operations at three times the measured live load (437 live rounds and 24 catch-up passes a day): under half of the monthly Class A allowance (writes, listings) and a tenth of Class B (reads) |
+| REQ-MODE-008 | A record's values survive the snapshot exactly: a row read back from the snapshot gives the same row object, byte for byte, so direct mode can load records from it |
+
 ## Dashboard
 
 The dashboard's SQL lives in `dashboard/queries/`; the page runs it in the browser over the R2 snapshot, and the tests run the same files.

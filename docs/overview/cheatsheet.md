@@ -143,6 +143,7 @@ The exporter reads through the API, so start it first (`make api`).
 | `/eh-r2 get analytics/meta.json` | `make r2-get KEY=analytics/meta.json` | One object; `.gz` objects are printed gunzipped |
 | `/eh-r2 get earthquakes/us7000abcd.json` | `make r2-get KEY=earthquakes/us7000abcd.json` | One exported row, named by its record's key |
 | `/eh-r2 snapshot` | `make r2-get KEY=analytics/earthquakes.parquet OUT=/tmp/earthquakes.parquet` | Saves the dashboard's Parquet snapshot |
+| | `make reconcile-direct [DEEP=1]` | Direct mode's state in the bucket: rows, manifest, snapshot, ID map and log agree ([direct mode](../technical/architecture.md#direct-mode)) |
 
 ## Dashboard
 

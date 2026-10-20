@@ -8,7 +8,7 @@ from sqlalchemy import Engine, func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from earth_hub.database.models import BackfillWindow, Earthquake, EarthquakeId, IngestionCheckpoint
-from earth_hub.database.revisions import Revision, compare
+from earth_hub.database.revisions import Revision, needed
 from earth_hub.ingestion.events import EventMessage
 from earth_hub.ingestion.windows import Window
 
@@ -61,21 +61,7 @@ class Progress:
             )
             for r in rows
         }
-        newest: dict[str, EventMessage] = {}
-        for message in messages:
-            incoming = Revision(
-                message.event_id,
-                tuple(dict.fromkeys([message.event_id, *message.ids])),
-                message.source_updated_ms,
-                (message.payload.get("properties") or {}).get("status") == "deleted",
-            )
-            matched = {event_of[i] for i in incoming.ids if i in event_of}
-            if matched and all(compare(stored[e], incoming)[0] != "applied" for e in matched):
-                continue
-            current = newest.get(message.event_id)
-            if current is None or message.source_updated_ms > current.source_updated_ms:
-                newest[message.event_id] = message
-        return list(newest.values())
+        return needed(messages, event_of, stored)
 
     # --- windows -------------------------------------------------------------------------
 

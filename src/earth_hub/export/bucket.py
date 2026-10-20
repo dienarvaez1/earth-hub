@@ -83,6 +83,22 @@ class Bucket:
             raise
         return response["Body"].read(), response["ETag"]
 
+    def get_if_changed(self, key: str, etag: str | None) -> tuple[bytes, str] | None | str:
+        """Like get, but only the ETag when the object still has `etag` (a conditional
+        request: the body is not sent again)."""
+        if etag is None:
+            return self.get(key)
+        try:
+            response = self.client.get_object(Bucket=self.name, Key=key, IfNoneMatch=etag)
+        except ClientError as exc:
+            code = exc.response["Error"]["Code"]
+            if code in ("304", "NotModified"):
+                return etag
+            if code in ("NoSuchKey", "404"):
+                return None
+            raise
+        return response["Body"].read(), response["ETag"]
+
     def put(
         self,
         key: str,

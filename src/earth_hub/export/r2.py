@@ -49,21 +49,22 @@ from pathlib import Path
 
 import httpx
 
-from earth_hub.export.bucket import Bucket, PreconditionFailed
+from earth_hub.export import lock
+from earth_hub.export.bucket import Bucket
+from earth_hub.export.lock import LOCK_KEY, LockHeld  # noqa: F401  (LOCK_KEY: for callers)
 from earth_hub.export.snapshot import (
-    COLUMNS,
     META_KEY,
     PARQUET_TYPE,
     SNAPSHOT_KEY,
     SnapshotFile,
     content_hash,
+    snapshot_meta,
 )
 
 logger = logging.getLogger(__spec__.name)  # the module name, also under `python -m`
 
 TABLE_PREFIX = "earthquakes/"
 MANIFEST_KEY = "_state/earthquakes-manifest.json.gz"
-LOCK_KEY = "_state/lock.json"
 RUNS_PREFIX = "runs/"
 EXPORT_PATH = "export/earthquakes"
 PAGE_SIZE = 1000
@@ -108,8 +109,27 @@ def kept(known: dict[str, str], keys: set[str]) -> dict[str, str]:
     return {k: v for k, v in known.items() if k in keys}
 
 
-class LockHeld(Exception):
-    """Another run is in progress."""
+def manifest_body(rows: dict[str, str], run_id: str, written_at: str) -> bytes:
+    """The manifest as stored: each row's fingerprint, by key, gzipped."""
+    body = {
+        "table": "earthquakes",
+        "run_id": run_id,
+        "written_at": written_at,
+        "rows": {str(k): rows[k] for k in sorted(rows)},
+    }
+    return gzip.compress(json.dumps(body).encode(), mtime=0)  # same rows, same bytes
+
+
+def parse_manifest(body: bytes) -> dict[str, str]:
+    """A stored manifest's rows; an unreadable one is empty, so every row counts as changed."""
+    try:
+        rows = json.loads(gzip.decompress(body))["rows"]
+        # Keys are strings. A manifest from before keys lists ids: none matches a key, so
+        # every row is uploaded under its key and the objects named by id are deleted.
+        return {str(k): v for k, v in rows.items()}
+    except (OSError, ValueError, KeyError, TypeError, AttributeError):
+        logger.warning("manifest unreadable; every row will be uploaded again")
+        return {}
 
 
 class ApiUnavailable(Exception):
@@ -288,18 +308,9 @@ class Exporter:
         try:
             body = snapshot.build()
             self.bucket.put(SNAPSHOT_KEY, body, content_type=PARQUET_TYPE)
-            meta = {
-                "table": "earthquakes",
-                "run_id": record.run_id,
-                "written_at": _iso(self.clock()),
-                "rows": len(rows),
-                "bytes": len(body),
-                "sha256": hashlib.sha256(body).hexdigest(),
-                "content_sha256": content,
-                "columns": COLUMNS,
-            }
+            meta = snapshot_meta(record.run_id, _iso(self.clock()), len(rows), body, content)
             # After the file: meta.json never describes a snapshot that is not there.
-            self.bucket.put(META_KEY, json.dumps(meta, indent=2).encode())
+            self.bucket.put(META_KEY, meta)
         except Exception as exc:
             record.error(f"snapshot not written: {type(exc).__name__}: {exc}")
             return
@@ -446,27 +457,13 @@ class Exporter:
 
     def _load_manifest(self) -> dict[str, str]:
         found = self.bucket.get(MANIFEST_KEY)
-        if found is None:
-            return {}
-        try:
-            rows = json.loads(gzip.decompress(found[0]))["rows"]
-            # Keys are strings. A manifest from before keys lists ids: none matches a key, so
-            # every row is uploaded under its key and the objects named by id are deleted.
-            return {str(k): v for k, v in rows.items()}
-        except (OSError, ValueError, KeyError, TypeError):
-            # Unreadable: every stored row counts as changed and is uploaded again.
-            logger.warning("manifest unreadable; every row will be uploaded again")
-            return {}
+        return {} if found is None else parse_manifest(found[0])
 
     def _save_manifest(self, rows: dict[str, str], record: RunRecord) -> None:
-        body = {
-            "table": "earthquakes",
-            "run_id": record.run_id,
-            "written_at": _iso(self.clock()),
-            "rows": {str(k): rows[k] for k in sorted(rows)},
-        }
         self.bucket.put(
-            MANIFEST_KEY, gzip.compress(json.dumps(body).encode()), content_type="application/gzip"
+            MANIFEST_KEY,
+            manifest_body(rows, record.run_id, _iso(self.clock())),
+            content_type="application/gzip",
         )
         self._saved = dict(rows)
 
@@ -484,55 +481,16 @@ class Exporter:
                 logger.exception("could not save run record %s to the bucket", record.run_id)
 
     def _acquire_lock(self, record: RunRecord, now: datetime) -> None:
-        body = json.dumps(
-            {
-                "run_id": record.run_id,
-                "started_at": record.started_at,
-                "expires_at": _iso(now + self.lock_ttl),
-            }
-        ).encode()
-        try:
-            self.bucket.put(LOCK_KEY, body, if_none_match=True)
-            return
-        except PreconditionFailed:
-            pass
-        current = self.bucket.get(LOCK_KEY)
-        if current is None:  # released in between
-            try:
-                self.bucket.put(LOCK_KEY, body, if_none_match=True)
-                return
-            except PreconditionFailed:
-                raise LockHeld("another run took the lock") from None
-        holder = json.loads(current[0])
-        if datetime.fromisoformat(holder["expires_at"]) > now:
-            raise LockHeld(
-                f"run {holder['run_id']} has been in progress since {holder['started_at']}"
-            )
-        logger.warning("taking over the expired lock of run %s", holder["run_id"])
-        try:
-            self.bucket.put(LOCK_KEY, body, if_match=current[1])  # only if still that lock
-        except PreconditionFailed:
-            raise LockHeld("another run took the expired lock") from None
+        lock.acquire(self.bucket, record.run_id, record.started_at, now, self.lock_ttl)
 
     def _release_lock(self, record: RunRecord) -> None:
-        try:
-            current = self.bucket.get(LOCK_KEY)
-            if current is not None and json.loads(current[0])["run_id"] == record.run_id:
-                self.bucket.delete([LOCK_KEY])
-        except Exception:
-            logger.exception("could not release the lock; it expires after %s", self.lock_ttl)
+        lock.release(self.bucket, record.run_id, self.lock_ttl)
 
 
 def list_runs(bucket: Bucket, *, limit: int = 20, now: datetime | None = None) -> list[dict]:
     """The latest run records, oldest first. A record still `running` without a live lock
     belongs to a run that never finished, and is reported as `interrupted`."""
-    now = now or datetime.now(UTC)
-    lock = bucket.get(LOCK_KEY)
-    live = None
-    if lock is not None:
-        holder = json.loads(lock[0])
-        if datetime.fromisoformat(holder["expires_at"]) > now:
-            live = holder["run_id"]
+    live = lock.live_holder(bucket, now or datetime.now(UTC))
     runs = []
     for key in sorted(bucket.keys(RUNS_PREFIX))[-limit:]:
         found = bucket.get(key)

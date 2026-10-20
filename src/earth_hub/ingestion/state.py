@@ -41,6 +41,17 @@ class SentState:
         sent = self._sent.get(event_id)
         return sent[0] if sent else None
 
+    def entries(self) -> dict[str, tuple[int, int]]:
+        """A copy of what is tracked: event_id -> (source_updated_ms, event_time_ms)."""
+        return dict(self._sent)
+
+    @classmethod
+    def from_entries(cls, entries: dict[str, tuple[int, int]]) -> "SentState":
+        """State saved elsewhere, e.g. in the bucket by direct mode, which has no topic."""
+        state = cls()
+        state._sent = {event_id: (int(u), int(t)) for event_id, (u, t) in entries.items()}
+        return state
+
     def prune(self, now: datetime) -> int:
         """Forget events too old to appear in the feed again. Returns how many were dropped."""
         cutoff_ms = int((now - STATE_WINDOW).timestamp() * 1000)

@@ -19,6 +19,7 @@ PIPELINE = (
     "earth_hub.consumers",
     "earth_hub.database",
     "earth_hub.validation",
+    "earth_hub.direct",
 )
 
 
