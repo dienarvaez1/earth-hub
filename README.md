@@ -19,7 +19,16 @@ flowchart LR
     usgs --> direct["direct mode: poller + validation<br/>(GitHub Actions, hourly)"] --> r2
 ```
 
-Two modes write the same bucket, one at a time: **full** (the whole pipeline, on a developer machine) and **direct** (no Docker, Kafka or PostgreSQL, run hourly by GitHub Actions so the dashboard stays current with no machine on). A marker in the bucket says which one; the handovers check both agree before switching.
+Two modes write the same bucket, one at a time: **full** (the whole pipeline, on a developer machine) and **direct** (no Docker, Kafka or PostgreSQL, run hourly by GitHub Actions so the dashboard stays current with no machine on). A marker in the bucket says which one; the handovers check both agree before switching:
+
+```mermaid
+stateDiagram-v2
+    direction LR
+    full: full (your machine)
+    direct: direct (GitHub Actions, hourly)
+    full --> direct: make mode-direct<br/>export, write direct state
+    direct --> full: make mode-full<br/>replay the log into Kafka, reconcile
+```
 
 ## Quality at a glance
 

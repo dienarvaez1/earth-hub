@@ -256,19 +256,16 @@ One marker in the bucket, `_state/mode.json`, chooses the mode. It is the settin
 stateDiagram-v2
     direction LR
     [*] --> full: no marker
-    full --> handing_over_d: make mode-direct
-    handing_over_d --> direct: exported, state written
-    handing_over_d --> full: a check failed
-    direct --> handing_over_f: make mode-full
-    handing_over_f --> full: replayed, reconcile and dry run clean
-    handing_over_f --> direct: a check failed
-    state "handing-over (to direct)" as handing_over_d
-    state "handing-over (to full)" as handing_over_f
+    full --> direct: make mode-direct<br/>(exported, state written, under the lock)
+    direct --> handing_over: make mode-full
+    handing_over --> full: replayed, reconcile<br/>and dry run clean
+    handing_over --> direct: a check failed
+    state "handing-over" as handing_over
     note right of full: exporter writes, schedule skips
     note right of direct: direct rounds write (hourly on GitHub Actions),<br/>exporter refuses
 ```
 
-While the marker says `handing-over`, neither mode writes.
+While the marker says `handing-over`, neither mode writes. The handover to direct mode needs no such state: it holds the bucket's lock, so no export can run, and changes the marker from `full` to `direct` in one conditional write. If anything fails before that write, the marker still says `full`.
 
 ```bash
 make mode          # full (active) since …; log sequence at the last change: …
@@ -279,7 +276,31 @@ make mode-full     # replay direct mode's log into full mode, check, switch back
 
 **Switching loses nothing.** While a handover runs, neither mode polls, but USGS's day feed lists every event of the last 24 hours, so the first round of the mode taking over picks up what was published or revised meanwhile: the events are late by the handover's length, never lost. `make mode-direct` restarts full mode's poller and catch-up if the handover fails; `make mode-full` restarts them when it succeeds, and a running `make direct-run` stops by itself once the bucket is frozen. `tests/e2e/test_mode_switching.py` switches back and forth twice while the feed changes, during the handovers too, and checks after every switch that every event is served at its latest version.
 
-**Full → direct** (`make mode-direct`) needs full mode idle: the poller and catch-up stopped, every message stored, `make reconcile` clean. It exports, then writes direct mode's state from PostgreSQL and Kafka: the ID map from `earthquake_ids`, with each record's `id` as its creation number; the poller's 26-hour state from `earthquakes.raw`, as a restarted poller rebuilds it; and catch-up's checkpoints. Then the marker says `direct`, with the log's sequence number at that moment.
+**Full → direct** (`make mode-direct`):
+
+```mermaid
+sequenceDiagram
+    participant M as make mode-direct
+    participant D as Docker
+    participant H as handover
+    participant P as PostgreSQL and Kafka
+    participant R as R2 bucket
+    M->>D: stop poller and catch-up
+    M->>H: handover direct
+    H->>R: marker must say full
+    H->>P: idle? (make reconcile clean, no lag)
+    H->>R: export through the API (as make export-r2)
+    H->>P: read earthquake_ids, record order, checkpoints,<br/>the poller's 26 h state from earthquakes.raw
+    H->>R: take the lock
+    H->>R: _state/ids.json.gz, _state/direct.json
+    H->>R: check the ID map against the export
+    H->>R: marker: direct (active), from this sequence number
+    H->>R: release the lock
+    Note over M,R: on any failure: marker still full,<br/>make restarts poller and catch-up
+    Note over R: the hourly schedule (or make direct-run) writes from now on
+```
+
+It needs full mode idle: the poller and catch-up stopped, every message stored, `make reconcile` clean. It exports, then writes direct mode's state from PostgreSQL and Kafka: the ID map from `earthquake_ids`, with each record's `id` as its creation number; the poller's 26-hour state from `earthquakes.raw`, as a restarted poller rebuilds it; and catch-up's checkpoints. Then the marker says `direct`, with the log's sequence number at that moment.
 
 **Direct → full** (`make mode-full`):
 

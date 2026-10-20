@@ -99,7 +99,7 @@ mode: ## Which mode writes the R2 bucket: full or direct
 mode-direct: ## Hand over to direct mode: stop the poller and catch-up, export, write direct mode's state
 	docker compose stop poller catchup
 	uv run python -m earth_hub.direct.handover direct || { docker compose start poller catchup; echo "Handover failed: full mode resumed"; exit 1; }
-	@echo "Direct mode: start it with make direct-run"
+	@echo "Direct mode: the hourly schedule writes the bucket now (or make direct-run, not both)"
 
 mode-full: ## Hand over to full mode: replay direct mode's log into Kafka, check, then switch
 	docker compose up -d --wait consumer consumer-backfill api
