@@ -5,12 +5,13 @@ GitHub Actions runs `.github/workflows/ci.yml` on every pull request, on every p
 A second workflow, `.github/workflows/direct.yml`, is not a check: it runs [direct mode on a schedule](#direct-mode-on-a-schedule).
 
 ```mermaid
-flowchart LR
+%%{init: {"flowchart": {"rankSpacing": 30, "nodeSpacing": 50}}}%%
+flowchart TB
     pr["pull request,<br/>push to main"] --> ci["ci.yml<br/>lint, unit, regression<br/>(no secrets)"]
     cron["every hour at :17,<br/>daily at 05:41 UTC,<br/>or by hand"] --> direct["direct.yml<br/>round / reconcile<br/>(R2 secrets)"]
     direct --> check{"_state/mode.json<br/>direct (active)?"}
     check -- yes --> r2[("R2 bucket:<br/>rows, snapshot, log")]
-    check -- "no: full or handing-over" --> skip["skip, succeed"]
+    check -- "no: full or<br/>handing-over" --> skip["skip, succeed"]
 ```
 
 ## The jobs

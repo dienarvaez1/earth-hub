@@ -5,15 +5,15 @@ How Earth-Hub is put together: what each part does, what it may read and write, 
 ## Overview
 
 ```mermaid
-flowchart LR
+%%{init: {"flowchart": {"rankSpacing": 20, "nodeSpacing": 90}}}%%
+flowchart TB
     usgs[("USGS<br/>GeoJSON feeds")]
     fdsn[("USGS<br/>FDSN event service")]
 
-    backfill["make backfill<br/>(on the host)"]
-
-    subgraph docker["Docker Compose, on 127.0.0.1"]
+    subgraph docker["full mode: Docker Compose"]
         poller["poller"]
         catchup["catchup<br/>all_month hourly,<br/>deletions daily"]
+        backfill["make backfill<br/>(on the host)"]
         raw[["earthquakes.raw"]]
         bf[["earthquakes.backfill"]]
         consumer["consumer"]
@@ -22,21 +22,23 @@ flowchart LR
         api["api<br/>(FastAPI, read-only)"]
     end
 
-    subgraph gha["GitHub Actions (direct mode)"]
-        direct["direct once, hourly<br/>poller + catch-up + validation<br/>+ ledger over BucketStore"]
+    subgraph gha["direct mode"]
+        direct["GitHub Actions, hourly:<br/>poller + catch-up<br/>+ validation + ledger<br/>over BucketStore"]
     end
 
     subgraph cloud["Cloudflare"]
-        r2[("R2 bucket<br/>_state/mode.json says<br/>who writes")]
+        r2[("R2 bucket<br/>_state/mode.json<br/>says who writes")]
         worker["Worker"]
     end
 
-    browser["Browser<br/>DuckDB-WASM, MapLibre, Plot"]
+    browser["Browser<br/>DuckDB-WASM,<br/>MapLibre, Plot"]
 
     usgs -- "all_day, every minute" --> poller
     usgs --> catchup
     fdsn --> catchup
     fdsn -- "one week per request" --> backfill
+    usgs --> direct
+    fdsn --> direct
     poller --> raw
     catchup --> bf
     backfill --> bf
@@ -45,11 +47,8 @@ flowchart LR
     consumer --> pg
     consumerbf --> pg
     pg --> api
-    api -- "full mode: make export-r2" --> r2
-    usgs -- "direct mode" --> direct
-    fdsn --> direct
-    direct -- "rows, snapshot, log, state" --> r2
-    r2 -.->|"make mode-full: log replayed"| bf
+    api -- "full mode:<br/>make export-r2" --> r2
+    direct -- "rows, snapshot,<br/>log, state" --> r2
     r2 --> worker
     worker --> browser
 ```
@@ -95,7 +94,8 @@ All ports are bound to `127.0.0.1`. Kafka uses `PLAINTEXT` and JMX has no authen
 ## Topics and consumer groups
 
 ```mermaid
-flowchart LR
+%%{init: {"flowchart": {"rankSpacing": 110, "nodeSpacing": 30}}}%%
+flowchart TB
     poller["poller"] -- "key: USGS ID" --> raw[["earthquakes.raw<br/>3 partitions"]]
     catchup["catchup"] --> bf[["earthquakes.backfill<br/>3 partitions"]]
     backfill["make backfill"] --> bf
@@ -231,14 +231,23 @@ Milestone 8: the same pipeline without Docker, Kafka or PostgreSQL. The real pol
 | `log/<date>/<first>-<last>.ndjson` | Every message processed, in order: sequence number, processing time, source, outcome, rule, reason, record key and envelope (`raw_events`) |
 
 ```mermaid
-flowchart LR
-    feed[("USGS feeds,<br/>FDSN")] --> runner["poller and catch-up<br/>(direct/runner.py)"]
-    runner -- "envelopes" --> validate["decode + validate<br/>(the consumer's rules)"]
-    validate --> ledger["ledger<br/>(processing/ledger.py)"]
-    snap[("snapshot + ID map<br/>in the bucket")] -- "records it touches" --> ledger
-    ledger -- "decisions" --> redo["redo record<br/>_state/direct-pending.json"]
-    redo --> writes["rows, deletes, ID map, manifest,<br/>snapshot + meta.json, log, state"]
-    writes --> bucket[("R2 bucket")]
+flowchart TB
+    subgraph read["read"]
+        direction LR
+        feed[("USGS feeds,<br/>FDSN")] --> runner["poller and catch-up<br/>(direct/runner.py)"]
+    end
+    subgraph decide["decide, in memory"]
+        direction LR
+        validate["decode + validate<br/>(the consumer's rules)"] --> ledger["ledger<br/>(processing/ledger.py)"]
+        snap[("snapshot + ID map<br/>from the bucket")] -- "records it touches" --> ledger
+    end
+    subgraph write["write, each step repeatable"]
+        direction LR
+        redo["redo record<br/>_state/direct-pending.json"] --> writes["rows, deletes, ID map,<br/>manifest, snapshot +<br/>meta.json, log, state"]
+        writes --> bucket[("R2 bucket")]
+    end
+    read -- "envelopes" --> decide
+    decide -- "decisions" --> write
 ```
 
 **What a round does:**
@@ -254,15 +263,15 @@ One marker in the bucket, `_state/mode.json`, chooses the mode. It is the settin
 
 ```mermaid
 stateDiagram-v2
-    direction LR
+    direction TB
     [*] --> full: no marker
     full --> direct: make mode-direct<br/>(exported, state written, under the lock)
     direct --> handing_over: make mode-full
     handing_over --> full: replayed, reconcile<br/>and dry run clean
     handing_over --> direct: a check failed
     state "handing-over" as handing_over
-    note right of full: exporter writes, schedule skips
-    note right of direct: direct rounds write (hourly on GitHub Actions),<br/>exporter refuses
+    note left of full: exporter writes,<br/>schedule skips
+    note right of direct: direct rounds write<br/>(hourly on GitHub Actions),<br/>exporter refuses
 ```
 
 While the marker says `handing-over`, neither mode writes. The handover to direct mode needs no such state: it holds the bucket's lock, so no export can run, and changes the marker from `full` to `direct` in one conditional write. If anything fails before that write, the marker still says `full`.

@@ -13,21 +13,37 @@ A local-first earthquake data platform, built as a QA engineering portfolio proj
 | An hour | The [architecture](docs/technical/architecture.md), the [test strategy](docs/progress/test-strategy.md), the [requirements](docs/progress/requirements.md) and their [traceability matrix](docs/progress/traceability-matrix.md), and [how Claude Code was used](#how-claude-code-was-used) |
 
 ```mermaid
+%%{init: {"flowchart": {"rankSpacing": 40, "nodeSpacing": 30}}}%%
 flowchart LR
-    usgs[("USGS feeds")] --> poller --> kafka[["Kafka"]] --> consumer["consumer + validation"] --> pg[("PostgreSQL")] --> api["REST API"]
-    api -- "full mode: make export-r2" --> r2[("Cloudflare R2")] --> dash["dashboard<br/>(DuckDB in the browser)"]
-    usgs --> direct["direct mode: poller + validation<br/>(GitHub Actions, hourly)"] --> r2
+    usgs[("USGS<br/>feeds")]
+    subgraph full["full mode"]
+        direction TB
+        poller --> kafka[["Kafka"]] --> consumer["consumer +<br/>validation"]
+        consumer --> pg[("PostgreSQL")] --> api["REST API"]
+    end
+    subgraph directmode["direct mode"]
+        direction TB
+        direct["poller + validation<br/>(GitHub Actions,<br/>hourly)"]
+    end
+    subgraph cf["Cloudflare"]
+        direction TB
+        r2[("R2 bucket")] --> dash["dashboard<br/>(DuckDB in<br/>the browser)"]
+    end
+    usgs --> full
+    usgs --> directmode
+    full -- "make export-r2" --> cf
+    directmode --> cf
 ```
 
 Two modes write the same bucket, one at a time: **full** (the whole pipeline, on a developer machine) and **direct** (no Docker, Kafka or PostgreSQL, run hourly by GitHub Actions so the dashboard stays current with no machine on). A marker in the bucket says which one; the handovers check both agree before switching:
 
 ```mermaid
 stateDiagram-v2
-    direction LR
-    full: full (your machine)
-    direct: direct (GitHub Actions, hourly)
+    direction TB
+    full: full mode<br/>(your machine)
+    direct: direct mode<br/>(GitHub Actions, hourly)
     full --> direct: make mode-direct<br/>export, write direct state
-    direct --> full: make mode-full<br/>replay the log into Kafka, reconcile
+    direct --> full: make mode-full<br/>replay the log, reconcile
 ```
 
 ## Quality at a glance
