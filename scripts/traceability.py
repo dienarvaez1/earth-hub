@@ -62,7 +62,8 @@ def marked_in(directories: list[str]) -> set[str]:
     found: set[str] = set()
     for directory in directories:
         for path in (REPO / directory).rglob("*.py"):
-            found |= set(re.findall(r"REQ-[A-Z0-9]+-\d+", path.read_text()))
+            # Any number of parts, e.g. REQ-DQ-GEO-002 (DEF-037).
+            found |= set(re.findall(r"REQ-(?:[A-Z0-9]+-)+\d+", path.read_text()))
     return found
 
 

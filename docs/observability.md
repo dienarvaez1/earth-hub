@@ -21,7 +21,7 @@ The stages, in pipeline order (`earth_hub/observability.py`):
 | `publish` | poller, backfill, catch-up | each event sent to Kafka (`event published`), delivery failures, the round summary |
 | `persist` | consumers | each message stored, rejected or failed, retries while the database is down, the summary |
 
-The poller logs every event it publishes. The consumer logs every rejection (warning) and error (error) on a line of its own. It also logs every routine outcome when it runs one message at a time; in batches (the backfill consumer, up to 500 messages), routine outcomes are at debug level and a `batch processed` line counts them.
+The poller logs every event it publishes. The consumer logs every rejection (warning) and error (error) on a line of its own. It also logs every routine outcome when it runs one message at a time, as the live consumer does (DEF-036); in batches (the backfill consumer, up to 500 messages), routine outcomes are at debug level and a `batch processed` line counts them.
 
 ## The summaries
 

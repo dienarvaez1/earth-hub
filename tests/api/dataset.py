@@ -1,4 +1,4 @@
-"""The fixed API test dataset: 21 messages that become 20 events (two are merged)."""
+"""The fixed API test dataset: 22 messages that become 20 events (two are merged)."""
 
 import copy
 from dataclasses import dataclass, replace
@@ -105,3 +105,14 @@ def seed(engine, template: dict) -> None:
                 now=PROCESSED_AT,
             )
             assert result.outcome == "applied", (f["id"], result)
+
+
+# For the documented examples only (the `documented_engine` fixture), after the messages above:
+# a redelivery under a new offset, an older revision, and an event outside the latitude range.
+# (spec, seconds from event time to `updated`, the outcome expected)
+_BY_ID = {s.event_id: s for s in SPECS}
+NOT_APPLIED = [
+    (_BY_ID["us02"], 60, "duplicate"),
+    (_BY_ID["us12"], 30, "stale"),
+    (Spec("us99", 4.0, "mb", "Nowhere", 2.0, lat=95.0), 60, "rejected"),
+]
