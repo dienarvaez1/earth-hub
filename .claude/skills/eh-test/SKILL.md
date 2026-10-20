@@ -1,7 +1,7 @@
 ---
 name: eh-test
-description: Run Earth-Hub's tests by layer — lint, unit, integration, API, contract, end-to-end, dashboard, disruptive, performance — or the whole regression, the flake check, traceability, coverage, or the tests matching a keyword or naming a requirement. Use for /eh-test, "run the unit tests", "run the regression", "test the API", "run the tests for REQ-API-005", "is it flaky".
-argument-hint: "[lint | unit | integration | api | contract | e2e | dashboard | disruptive | performance | regression | flake | traceability | coverage | REQ-… | <keyword>]"
+description: Run Earth-Hub's tests by layer — lint, unit, integration, API, contract, end-to-end, dashboard, disruptive, performance — the API load test with Locust, or the whole regression, the flake check, traceability, coverage, or the tests matching a keyword or naming a requirement. Use for /eh-test, "run the unit tests", "run the regression", "test the API", "run the tests for REQ-API-005", "is it flaky", "load-test the API".
+argument-hint: "[lint | unit | integration | api | contract | e2e | dashboard | disruptive | performance | load | load-ui | regression | flake | traceability | coverage | REQ-… | <keyword>]"
 ---
 
 # Tests
@@ -18,7 +18,9 @@ Run from the repository root. Report real results; never call something passing 
 | `e2e` | `make test-e2e` | `make up` | ~40 s |
 | `dashboard` | `make test-dashboard` | `make dashboard-install` | 3–6 min |
 | `disruptive` | `make test-disruptive` | `make up`; **stops and starts the shared Kafka and PostgreSQL** | ~1 min |
-| `performance` | `make test-performance` | `make up` | ~4 min |
+| `performance` | `make test-performance` | `make up` | ~6 min |
+| `load` | `make load [USERS=50] [RUN_TIME=60s]`: Locust over 140,000 synthetic events in a temporary database; report `reports/load-report.html` and `reports/load_*.csv` | `make up` | ~2 min |
+| `load-ui` | `make load-ui`: the same in Locust's web UI, http://127.0.0.1:8089, until Ctrl-C | `make up` | |
 | `regression` | `make regression`: every layer in order, reports in `reports/`, the traceability matrix | all of the above | ~15 min |
 | `flake` | `make flake-check`: the end-to-end suite 5 times | `make up` | ~4 min |
 | `traceability` | `make traceability` (from the last regression's results) | — | < 1 s |
@@ -28,7 +30,9 @@ Run from the repository root. Report real results; never call something passing 
 
 - `disruptive` restarts containers the live pipeline uses (`make ingest`): warn the user if the pipeline is
   running, and run it only on request.
-- Run long layers (`dashboard`, `performance`, `regression`, `flake`) in the background and report when done.
+- Run long layers (`dashboard`, `performance`, `load`, `regression`, `flake`) in the background and report when done.
+- For `load`, report the requests, failures and requests per second, and each endpoint's p50 and p95 from
+  `reports/load_stats.csv`; for `load-ui`, start it in the background and give the address.
 - For a regression, report from `reports/regression-summary.md`: the result, each layer's counts and time,
   coverage, traceability.
 - A failing test: show its name and the assertion, read the code it tests, and say what broke. Don't change a

@@ -35,7 +35,7 @@ Testing effort follows what would hurt most if it failed.
 | End-to-end | `tests/e2e/` | `make up` | The whole pipeline: mock feed → real poller → Kafka → real consumer → PostgreSQL → API, checked only through the API |
 | Dashboard | `tests/dashboard/` | `make dashboard-install` | The built page and Worker under `wrangler dev` over a simulated R2, in Chromium, offline: the Worker's responses, the reports' answers against Python's, the page's controls |
 | Disruptive | `tests/disruptive/` | `make up`, plus `--run-disruptive` | Real outages: PostgreSQL stopped while events arrive, a Kafka restart, data surviving a restart of both |
-| Performance | `tests/performance/` | `make up`, plus `--run-performance` | A year of synthetic history through the pipeline, and the dashboard at up to 1,000,000 rows, within time budgets |
+| Performance | `tests/performance/` | `make up`, plus `--run-performance` | A year of synthetic history through the pipeline, the dashboard at up to 1,000,000 rows, and the API under load (Locust: 50 users over 140,000 events, a p95 budget per endpoint), within time budgets |
 | Live checks (manual) | `make ingest`, `make reconcile` (`/eh-start pipeline`, `/eh-status reconcile`) | Internet | The real feed end to end; never part of the automated suite |
 
 Each layer uses throwaway resources: a temporary Kafka topic, a temporary database migrated to the latest schema, and a unique consumer group per test. Nothing writes to `earthquakes.raw` or the main database, so the suites can run while the live pipeline is collecting data.
@@ -115,6 +115,7 @@ The [requirements](requirements.md) list it, grouped by area.
 | `coverage-html/index.html` and `coverage.xml` | Line coverage accumulated across all layers |
 | `trace-<layer>.json` | Requirement-to-test outcomes; `make traceability` turns them into the [traceability matrix](traceability-matrix.md) |
 | `dashboard-performance.json` | The dashboard's measured timings |
+| `load-report.html` and `load_*.csv` | Locust's report of the API under load: requests, failures, and percentiles per endpoint |
 
 ## Testing by milestone
 
@@ -129,6 +130,7 @@ The [requirements](requirements.md) list it, grouped by area.
 | R2 export | The exporter on moto; interrupted and resumed runs; the snapshot's values and types |
 | 6 | The dashboard in Chromium against a simulated R2, its reports compared with Python's; log fields and a failure diagnosed from logs alone |
 | 7 | CI and tests of the workflow file; documentation tested: examples replayed, schema and links checked |
+| Load test, after 8 | Locust's browser and analyst users against the API over 140,000 events: no failures, and each endpoint's p95 within 2.5 times its measured baseline (`make load`, `make load-ui`) |
 | 8 | The ledger checked alone; parity of the two stores on random streams and every persistence defect scenario (identical buckets, byte for byte), and end to end from the same mock USGS services; a direct round interrupted at each of its writes; the R2 operations budget; `make reconcile-direct` against each broken invariant; round trips full → direct → full on real Kafka and PostgreSQL against a database that stayed in full mode, a gap in the log, a rule broken in one mode, and a replay interrupted and run again; switching back and forth twice while the feed changes, during the handovers too, with every event checked at its latest version after each switch |
 
 Claude Code writes and runs the tests, and the project owner approves each milestone's proposal and reviews each pull request before merging (see the README, *How Claude Code was used*).

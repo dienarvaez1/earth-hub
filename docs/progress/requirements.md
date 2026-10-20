@@ -109,6 +109,7 @@ One requirement per rule in [data-quality-rules.md](../technical/data-quality-ru
 | REQ-API-011 | Every error uses `{"error": {"code", "message", "details"}}`, including `404`, `405` (with `Allow`), `503` and `500`, and never exposes internals |
 | REQ-API-012 | The OpenAPI schema documents every endpoint, parameter and error, and responses conform to it |
 | REQ-API-013 | The API is read-only and serves data from PostgreSQL only |
+| REQ-API-014 | Under load, 50 users browsing and analyzing at once over 140,000 events, no request fails, the API serves at least 15 requests a second, and each endpoint's 95th-percentile response time stays within its budget; `make load` writes the Locust report (`reports/load-report.html`, CSV) |
 
 ## Export to R2
 

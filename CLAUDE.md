@@ -34,7 +34,8 @@ Local-first earthquake data platform: USGS GeoJSON feed → Python poller → Ka
 - `make migrate`: `alembic upgrade head`
 - `make ingest` / `make ingest-once`: run the pipeline (migrate, poller, consumer) on the live feed / one poller round on the host. Never part of the test suite.
 - `make regression`: every layer in order, with reports in `reports/` and the traceability matrix. Run it before proposing a milestone as done.
-- `make backfill START=2026-01-01 [END=...]`, `make catchup-once`, `make test-performance` (a year of synthetic backfill, timed).
+- `make backfill START=2026-01-01 [END=...]`, `make catchup-once`, `make test-performance` (a year of synthetic backfill, timed; the API under load).
+- `make load [USERS=] [RUN_TIME=]` / `make load-ui`: Locust against the API over a temporary, seeded database (`scripts/load_test.py`, `tests/load/locustfile.py`); report in `reports/load-report.html`. Locust runs as a subprocess and is never imported by pytest (gevent patches networking on import).
 - `make test-e2e`, `make test-disruptive` (stops shared containers), `make flake-check` (end-to-end suite ×5), `make traceability`.
 - `make reconcile`: topic-versus-database check.
 - `make reconcile-direct [DEEP=1]`: direct mode's bucket invariants (read-only).

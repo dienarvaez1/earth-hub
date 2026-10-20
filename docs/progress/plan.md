@@ -26,10 +26,10 @@ As of 2026-10-20. The plan below is the original, with Milestone 7 revised; the 
 | 7.3 Release: audit, license, public repository, branch protection, `USGS_CONTACT`, preview marking removed | **Deferred** | |
 | 8.1 Persistence decisions in memory (`processing/ledger.py`), `EventStore`, `PostgresStore`; the record key | Done | #22, #23 |
 | 8.2 `BucketStore`, the direct runner, parity tests | Done | #24 |
-| 8.3 The mode switch, handovers with log replay | In progress | |
-| Load test of the API with Locust, after 8 | Planned | |
+| 8.3 The mode switch, handovers with log replay | Done | #25 |
+| Load test of the API with Locust, after 8 | In progress | |
 
-Current numbers: 155 requirements, all covered by a passing test; 41 defects, all fixed; about 980 tests in the full regression.
+Current numbers: 156 requirements, all covered by a passing test; 41 defects, all fixed; about 985 tests in the full regression.
 
 ## 1. Project vision
 
