@@ -22,7 +22,7 @@ flowchart LR
 
 | | |
 | --- | --- |
-| **Requirements** | 137 requirements, each with a stable ID and at least one passing test that names it (`@pytest.mark.req`). A test naming an unknown ID fails at collection, and `make traceability` fails if any requirement has no passing test |
+| **Requirements** | 139 requirements, each with a stable ID and at least one passing test that names it (`@pytest.mark.req`). A test naming an unknown ID fails at collection, and `make traceability` fails if any requirement has no passing test |
 | **Tests** | About 830, in eight layers: unit, integration, API, contract (Schemathesis), end-to-end, dashboard (in Chromium), disruptive (real outages) and performance. About 91% coverage across all layers |
 | **Defects** | 37 defects found and fixed, each with its milestone, severity, how it was found and the commit that fixed it; [six written up in full](docs/defects/README.md) with root cause and prevention |
 | **CI** | On every pull request and push to `main`, lint and unit tests, then the regression of every layer except performance, from the example settings and with no secrets ([docs/ci.md](docs/ci.md)) |
@@ -88,6 +88,7 @@ The [demo walkthrough](docs/demo.md) goes through these with what to look for.
 | `make api` / `make api-stop` / `make api-dev` | Start / stop the API container, or run it on your machine with reload |
 | `make kafka-ui` / `make kafka-ui-stop` | A read-only web viewer for the topics at `http://127.0.0.1:8080` |
 | `make export-r2 [DRY_RUN=1] [VERIFY=1]` / `make export-r2-runs` | Copy the `earthquakes` table to Cloudflare R2 through the API, only new and changed rows / list past runs |
+| `make r2-ls [PREFIX=…]` / `make r2-count` / `make r2-get KEY=…` | List, count or read the bucket's objects, read-only |
 | `make dashboard-install` / `make dashboard-dev` / `make dashboard-deploy` | The dashboard's Node dependencies and test browser / a local server over the real bucket / publish to Cloudflare Workers |
 
 ## What is in it
@@ -123,7 +124,7 @@ It writes `reports/regression-summary.md`, JUnit XML for each layer, a coverage 
 
 **QA documents** in `docs/`:
 - the [test strategy](docs/test-strategy.md) and the [test plan](docs/test-plan.md) for Milestones 1–5;
-- the [requirements](docs/requirements.md), 137 of them, and the [traceability matrix](docs/traceability-matrix.md);
+- the [requirements](docs/requirements.md), 139 of them, and the [traceability matrix](docs/traceability-matrix.md);
 - the [defect log](docs/defects/README.md): 37 defects found and fixed, 6 with full reports;
 - the [data-quality rules](docs/data-quality-rules.md) and the [known limitations](docs/limitations.md).
 
@@ -161,6 +162,7 @@ Five of the 37 defects were in the test tooling itself (DEF-007, DEF-008, DEF-02
 | Page | What it holds |
 | --- | --- |
 | [Demo walkthrough](docs/demo.md) | A 10-minute guided tour |
+| [Cheat sheet](docs/cheatsheet.md) | The everyday commands, each next to the Claude Code skill (`/eh-*`) that runs it |
 | [Architecture](docs/architecture.md) | Diagrams of the pipeline, the topics, recovery, the export and the dashboard; each component in detail; services and ports |
 | [Schema](docs/schema.md) | Every table and column, and how a message changes them |
 | [API reference](docs/api.md) | Endpoints, parameters, errors, and examples replayed by a test |

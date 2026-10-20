@@ -123,6 +123,7 @@ One requirement per rule in [data-quality-rules.md](data-quality-rules.md).
 | REQ-EXP-008 | By default a run decides uploads and deletions from the manifest without listing the bucket; `make export-r2 VERIFY=1`, and any run without a readable manifest, lists the bucket once after the uploads, deletes objects the manifest does not know and re-uploads rows whose object is missing |
 | REQ-EXP-009 | After a run that succeeded, the export writes `analytics/earthquakes.parquet`: every row it read and every column, with the same values and types (timestamps with time zone, lists as lists), in `id` order; it is rewritten only when the rows changed or the snapshot is missing; dry runs and failed runs never write it |
 | REQ-EXP-010 | `analytics/meta.json` describes the snapshot (run, time, row count, size, SHA-256 of the file, the rows' fingerprint, column types) and is written only after the file; a missing or unreadable `meta.json` makes the next run rewrite both |
+| REQ-EXP-011 | `make r2-ls`, `make r2-count` and `make r2-get` list, count and read the bucket's objects (gunzipping `.gz`, saving binary objects only to a file) and never write to it |
 
 ## Dashboard
 
@@ -177,6 +178,7 @@ The dashboard's SQL lives in `dashboard/queries/`; the page runs it in the brows
 | REQ-DOC-003 | Every query in `docs/sql-examples.md`, the dashboard's reports and the PostgreSQL ones, gives exactly the documented result on its fixed dataset |
 | REQ-DOC-004 | `docs/schema.md` lists every column of every table, in order, with the type and nullability the models define |
 | REQ-DOC-005 | The README's counts of requirements and defects match `docs/requirements.md` and the defect log |
+| REQ-DOC-006 | The cheat sheet (`docs/cheatsheet.md`) lists every Claude Code skill in `.claude/skills/`, and the cheat sheet and the skills name only skills and make targets that exist |
 
 ## End-to-end scenarios
 
