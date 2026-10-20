@@ -1,5 +1,5 @@
-"""The requests in docs/api.md, replayed on the documented dataset: each must return exactly
-the status, headers and body the document shows."""
+"""The requests in docs/technical/api.md, replayed on the documented dataset: each must
+return exactly the status, headers and body the document shows."""
 
 import pytest
 from support.doc_examples import api_examples

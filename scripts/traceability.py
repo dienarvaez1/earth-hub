@@ -1,4 +1,5 @@
-"""Build docs/traceability-matrix.md from docs/requirements.md and the test traces.
+"""Build docs/progress/traceability-matrix.md from docs/progress/requirements.md and the
+test traces.
 
     uv run python scripts/traceability.py      # or: make traceability
 
@@ -18,8 +19,8 @@ from collections import defaultdict
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
-REQUIREMENTS = REPO / "docs" / "requirements.md"
-MATRIX = REPO / "docs" / "traceability-matrix.md"
+REQUIREMENTS = REPO / "docs" / "progress" / "requirements.md"
+MATRIX = REPO / "docs" / "progress" / "traceability-matrix.md"
 TRACES = REPO / "reports"
 
 
@@ -77,7 +78,7 @@ def status(tests: dict[str, str]) -> str:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Build docs/traceability-matrix.md.")
+    parser = argparse.ArgumentParser(description="Build docs/progress/traceability-matrix.md.")
     parser.add_argument("--not-run", action="append", default=[], metavar="DIR")
     not_run_dirs = parser.parse_args(argv).not_run
     requirements = load_requirements()

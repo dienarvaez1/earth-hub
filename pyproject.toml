@@ -38,7 +38,7 @@ markers = [
     "disruptive: stops and starts shared containers; runs only with --run-disruptive",
     "performance: a full year of synthetic data; runs only with --run-performance",
     "dashboard: the dashboard served by wrangler dev in a browser (needs make dashboard-install)",
-    "req(*ids): requirements from docs/requirements.md that this test verifies",
+    "req(*ids): requirements from docs/progress/requirements.md that this test verifies",
 ]
 
 [dependency-groups]

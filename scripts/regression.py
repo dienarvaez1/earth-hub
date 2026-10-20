@@ -169,7 +169,7 @@ def summary(
             "Traceability: every requirement has a passing test."
             if trace_ok
             else "Traceability: **some requirements have no passing test** "
-            "(see docs/traceability-matrix.md)."
+            "(see docs/progress/traceability-matrix.md)."
         )
     failed = [t for r in results for t in r.failed_tests]
     if failed:

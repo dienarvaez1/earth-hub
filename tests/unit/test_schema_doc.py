@@ -1,5 +1,5 @@
-"""docs/schema.md against the models: every table, every column in order, with its type and
-nullability."""
+"""docs/technical/schema.md against the models: every table, every column in order, with its
+type and nullability."""
 
 import re
 from pathlib import Path
@@ -9,7 +9,7 @@ from sqlalchemy.dialects import postgresql
 
 from earth_hub.database.models import Base
 
-DOC = Path(__file__).resolve().parents[2] / "docs" / "schema.md"
+DOC = Path(__file__).resolve().parents[2] / "docs" / "technical" / "schema.md"
 # The names the page uses for PostgreSQL's types.
 TYPES = {"TIMESTAMP WITH TIME ZONE": "timestamptz", "TEXT[]": "text[]"}
 ROW = re.compile(r"^\| `(\w+)` \| ([^|]+) \| (yes|no) \|", re.M)

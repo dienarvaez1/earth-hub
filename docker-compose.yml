@@ -108,7 +108,7 @@ services:
     env_file: .env
     environment:
       <<: *in-network
-      # One message at a time, so every live event's outcome is logged (docs/observability.md;
+      # One message at a time, so every live event's outcome is logged (docs/technical/architecture.md, Observability;
       # DEF-036). Only consumer-backfill takes batches of CONSUMER_BATCH_SIZE.
       CONSUMER_BATCH_SIZE: "1"
     command: ["python", "-m", "earth_hub.consumers"]

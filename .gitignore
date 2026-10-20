@@ -39,3 +39,6 @@ dashboard/.wrangler/
 .wrangler/
 dashboard/public/duckdb-extensions/
 dashboard/wrangler.test-*.jsonc
+
+# Local configuration map (CONFIGURATION.md): kept out of git
+CONFIGURATION.md

@@ -128,7 +128,7 @@ regression: up ## Run every layer in order, stop at the first failure, write rep
 flake-check: up ## Run the end-to-end suite 5 times in a row; fail on any failure
 	@for i in 1 2 3 4 5; do echo "== run $$i/5"; uv run pytest -m e2e -q -p no:randomly || exit 1; done
 
-traceability: ## Rebuild docs/traceability-matrix.md from the last regression run
+traceability: ## Rebuild docs/progress/traceability-matrix.md from the last regression run
 	uv run python scripts/traceability.py
 
 smoke: test-integration ## Smoke-test the running infrastructure
@@ -139,5 +139,5 @@ smoke-restart: ## Restart Kafka and PostgreSQL and check data survives (disrupti
 migrate: ## Apply database migrations
 	uv run alembic upgrade head
 
-coverage: ## Run unit tests with a coverage report
-	uv run pytest -m "not integration" --cov=earth_hub --cov-report=term-missing
+coverage: ## Run unit tests with a coverage report (no Docker or network needed)
+	uv run pytest -m "not integration and not e2e and not disruptive and not performance and not dashboard" --cov=earth_hub --cov-report=term-missing

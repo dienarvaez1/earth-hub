@@ -1,5 +1,6 @@
-"""The Claude Code skills (.claude/skills/) and the cheat sheet (docs/cheatsheet.md): every
-skill is listed, and every skill and make target they name exists."""
+"""The Claude Code skills (.claude/skills/) and the cheat sheet (docs/overview/cheatsheet.md): every
+skill is listed, every skill and make target they name exists, and the docs name only skills,
+with arguments, that exist."""
 
 import re
 from pathlib import Path
@@ -9,8 +10,9 @@ import yaml
 
 REPO = Path(__file__).resolve().parents[2]
 SKILLS = REPO / ".claude" / "skills"
-CHEATSHEET = REPO / "docs" / "cheatsheet.md"
+CHEATSHEET = REPO / "docs" / "overview" / "cheatsheet.md"
 SKILL_FILES = sorted(SKILLS.glob("*/SKILL.md"))
+DOCS = sorted([REPO / "README.md", *(REPO / "docs").rglob("*.md")])
 TARGETS = set(re.findall(r"^([a-z0-9-]+):", (REPO / "Makefile").read_text(), re.M))
 
 pytestmark = pytest.mark.req("REQ-DOC-006")
@@ -54,3 +56,23 @@ def test_the_cheat_sheet_lists_every_skill_and_only_skills_that_exist():
 @pytest.mark.parametrize("path", [CHEATSHEET, *SKILL_FILES], ids=lambda p: p.parent.name)
 def test_every_make_target_named_exists(path):
     assert make_targets(path.read_text()) - TARGETS == set()
+
+
+def skill_calls(text: str) -> set[tuple[str, str]]:
+    """(skill, first argument) for each `/eh-x word ...` written as code."""
+    return set(re.findall(r"`/(eh(?:-[a-z0-9]+)?) ([a-z][a-z0-9-]*)", text))
+
+
+@pytest.mark.parametrize("path", DOCS, ids=lambda p: p.relative_to(REPO).as_posix())
+def test_the_docs_name_only_skills_and_arguments_that_exist(path):
+    skills = {p.parent.name: p.read_text() for p in SKILL_FILES}
+    text = path.read_text()
+    assert skills_named(text) <= set(skills), path
+    # A skill whose argument hint takes free text (e.g. <keyword>, <SQL>) accepts any word.
+    free = {p.parent.name for p in SKILL_FILES if "<" in frontmatter(p).get("argument-hint", "")}
+    unknown = {
+        (name, arg)
+        for name, arg in skill_calls(text)
+        if name not in free and not re.search(rf"`{re.escape(arg)}(?![\w-])", skills[name])
+    }
+    assert unknown == set()

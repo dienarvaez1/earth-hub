@@ -3,10 +3,11 @@
 Delivery is at-least-once: a crash between the database commit and the offset commit
 redelivers the message, which the raw_events offset key then recognizes and skips.
 
-Logging (docs/observability.md): every line about a message has its event_id, stage
-"persist" and Kafka position. Rejections and errors always get a line of their own; other
-outcomes do too one message at a time, but only at debug level in batches (a backfill is
-100k messages). A summary line with counts and lag follows every SUMMARY_INTERVAL_S.
+Logging (docs/technical/architecture.md, Observability): every line about a message has its
+event_id, stage "persist" and Kafka position. Rejections and errors always get a line of their
+own; other outcomes do too one message at a time, but only at debug level in batches (a
+backfill is 100k messages). A summary line with counts and lag follows every
+SUMMARY_INTERVAL_S.
 """
 
 import logging

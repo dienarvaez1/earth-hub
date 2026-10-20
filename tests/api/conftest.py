@@ -31,8 +31,8 @@ def empty_client(module_databases):
 
 @pytest.fixture(scope="module")
 def documented_engine(module_databases, feature_template):
-    """The dataset of the documented examples (docs/api.md, docs/sql-examples.md): the API
-    dataset, then three messages that are not applied. first_seen_at is set by the database
+    """The dataset of the documented examples (docs/technical/api.md and sql-examples.md):
+    the API dataset, then three messages that are not applied. first_seen_at is set by the database
     clock, so it is fixed here to when the dataset was processed, for responses that repeat."""
     engine = module_databases.engine(module_databases.create(migrate=True))
     seed(engine, feature_template)

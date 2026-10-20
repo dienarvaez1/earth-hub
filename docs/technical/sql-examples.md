@@ -24,7 +24,7 @@ The page runs every report unchanged. All filters live in one `filter` table, se
 | `countries.sql`, `regions.sql`, `event_types.sql` | The options of the filter's menus | no (regions: by the chosen country) |
 | `date_range.sql` | The first and last event, the custom calendar's limits | no |
 
-To run them on the real snapshot: after `make export-r2`, start `make dashboard-dev`, then from the repository's root:
+To run them on the real snapshot: after `make export-r2`, start `make dashboard-dev`, then from the repository's root (with Claude Code, `/eh-r2 snapshot` saves the file from the bucket directly, without the local server):
 
 ```bash
 curl -s -o /tmp/earthquakes.parquet http://127.0.0.1:8787/data/earthquakes.parquet
@@ -194,7 +194,7 @@ Per ISO week, from Monday. Weeks without events are listed with 0, so a chart's 
 
 ## Inspecting PostgreSQL
 
-Read-only queries for looking at stored data and its history, against the main database: `docker compose exec postgres psql -U earth_hub_app earth_hub` (the user and database are `POSTGRES_USER` and `POSTGRES_DB` in `.env`). The tables and columns are in [the schema](schema.md).
+Read-only queries for looking at stored data and its history, against the main database: `docker compose exec postgres psql -U earth_hub_app earth_hub` (the user and database are `POSTGRES_USER` and `POSTGRES_DB` in `.env`). The tables and columns are in [the schema](schema.md). With Claude Code, `/eh-db` runs them, or any read-only SQL: `/eh-db outcomes`, `/eh-db rejected`, `/eh-db event <ID>`, `/eh-db merged`, `/eh-db strongest`.
 
 The examples run on the documented dataset of [the API examples](api.md#examples) (20 events, two of them merged), plus three messages added after it: `us02` delivered again under a new offset, an older revision of `us12`, and an event at latitude 95. The session's time zone is UTC (`SET TIME ZONE 'UTC';`).
 

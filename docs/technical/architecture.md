@@ -1,6 +1,6 @@
 # Architecture
 
-How Earth-Hub is put together: what each part does, what it may read and write, and how it recovers. The tables are in [the schema](schema.md), the endpoints in [the API reference](api.md), and the log fields in [observability](observability.md).
+How Earth-Hub is put together: what each part does, what it may read and write, and how it recovers. The tables are in [the schema](schema.md), the endpoints in [the API reference](api.md), and the log fields in [Observability](#observability).
 
 ## Overview
 
@@ -57,7 +57,7 @@ Each arrow is the only way data moves between those two parts:
 
 ## Services
 
-`make up` starts only the infrastructure, so tests never depend on live data. `make ingest` adds the pipeline, and `make api` adds the API.
+`make up` starts only the infrastructure, so tests never depend on live data. `make ingest` adds the pipeline, and `make api` adds the API. With Claude Code: `/eh-start [infra|pipeline|api|ui|dashboard]`, `/eh-stop`, and `/eh-status` for the health of all of them.
 
 | Service | Started by | Does | Health check |
 | --- | --- | --- | --- |
@@ -108,7 +108,7 @@ The poller (`src/earth_hub/ingestion/`) fetches the USGS `all_day` feed and publ
 - **Timing:** the feed is regenerated every minute. The poller sends `If-Modified-Since`, then waits until just after the feed's `Expires` time: 2–5 s of jitter, between 10 s and 5 min. It falls back to `POLL_INTERVAL_SECONDS` without the header. Events reach Kafka 1–2 minutes after USGS publishes them.
 - **Only changes are sent:** an event is published when it is new, or its `updated` time moved forward. It counts as sent only once Kafka confirms delivery, and a failed delivery is retried the next round. The poller never records `Last-Modified` after a failed delivery, so the next request can't come back `304` and lose those events (DEF-005).
 - **Restarts:** at start-up the poller rebuilds what it has sent from the last 26 hours of `earthquakes.raw`, so a restart resends nothing.
-- **Errors:** timeouts, connection errors, `429` and `5xx` are retried up to 3 times with backoff; other `4xx` are not. A failed round sends nothing and is retried at the fallback interval.
+- **Errors:** timeouts, connection errors, `429`, `500`, `502`, `503` and `504` are tried up to 3 times in all, with exponential backoff between attempts; any other status is not retried (DEF-038). A failed round sends nothing and is retried at the fallback interval.
 - **`USGS_CONTACT`** in `.env` adds a contact to the `User-Agent` sent to USGS.
 
 ## Backfill and catch-up
@@ -119,10 +119,12 @@ make backfill START=2026-01-01 END=2026-06-01
 make catchup-once                         # one all_month pass and one deleted-events check
 ```
 
+**With Claude Code:** `/eh-backfill 2026-01-01`, `/eh-backfill catchup`, and `/eh-backfill progress` for the finished windows.
+
 - **Backfill** reads the USGS FDSN event service one calendar week per request, Sunday 00:00:00 UTC to the next Sunday. Each window ends exactly where the next begins, because FDSN ignores milliseconds in query times: a window "ending at 23:59:59.999" would lose events.
 - **Every week is checked** against FDSN's `/count`, with the same `includedeleted`, and is recorded in `backfill_windows` only when complete. A re-run skips finished weeks.
 - **Deleted and other events are queried separately.** Asking for both at once was 20 to 100 times slower, and returned some real events as stubs (DEF-021).
-- **Weeks are split into days** when USGS times out on them, or when they hold more than 20,000 events. A `504` is not retried: the gateway caches it.
+- **Weeks are split into days** when USGS times out on them, or when they hold more than 20,000 events; a day that is still too slow is halved, down to an hour. A `504` is not retried: the gateway caches it.
 - **A final sweep** picks up events that USGS added or revised while the backfill ran.
 - **Requests go one at a time,** with a 1-second pause between them.
 - **The `catchup` service** reads the `all_month` feed hourly, which covers revisions and outages of up to 30 days, and checks FDSN daily for deleted events.
@@ -185,7 +187,7 @@ sequenceDiagram
 - **Uploads only what changed.** A run uploads new or changed rows and skips unchanged ones. It deletes the objects of rows that left the table, which are merged events.
 - **Never duplicates.** Each row is one object named by its primary key, so reruns and interrupted runs can't create duplicates. A failed upload is retried by the next run.
 - **Saves progress every 10 pages** (10,000 rows), so a run carries on after an interruption.
-- **Trusts the manifest by default** to say what the bucket holds, so a run with a few changes takes about 15 s.
+- **Trusts the manifest by default** to say what the bucket holds, so a run with a few changes takes about 35 s, most of it rewriting the Parquet snapshot, and one with none about 8 s.
 - **`VERIFY=1` also lists the bucket** (about 100 s for 115,000 objects), to:
   - delete objects the manifest doesn't know;
   - upload again any removed by hand;
@@ -201,6 +203,8 @@ make export-r2 DRY_RUN=1   # what would change, writing nothing
 make export-r2             # e.g. read 114731  new 0  updated 12  unchanged 114719  deleted 1  failed 0
 make export-r2-runs        # past runs; one that never finished shows as interrupted
 ```
+
+**With Claude Code:** `/eh-export` (the dry run), `/eh-export run`, `/eh-export runs`; `/eh-r2` looks inside the bucket.
 
 ## Dashboard
 
@@ -240,6 +244,8 @@ npx wrangler login       # once, before the first deploy
 make dashboard-deploy    # publish; prints the workers.dev address
 ```
 
+**With Claude Code:** `/eh-dashboard dev`, `/eh-dashboard deploy`, and `/eh-dashboard` to check the live page and the data it serves.
+
 - **Time presets:** Today (the default), This week (from Monday), This month, Last 3 months, This year, Last 3 years, and Custom with From and To calendars. Every period is whole UTC days through today, and each preset picks a chart grouping: per day, week or month.
 - **The map** shows every event as its own point, up to 5,000 events. Above that it clusters them, except events of magnitude 6 or more, which always stay single points on top.
 - **Until the release, the page is a preview.** It's marked "Preview — in development" and asks search engines not to index it: `X-Robots-Tag: noindex` on every response, a `robots` meta tag, and a disallow-all `robots.txt`.
@@ -249,23 +255,99 @@ make dashboard-deploy    # publish; prints the workers.dev address
 | Rows | Snapshot | First map (Today) | All events (Last 3 years) | Filter change |
 | --- | --- | --- | --- | --- |
 | 115,000 | 6.0 MB | about 4 s | about 0.5 s | about 140 ms |
-| 1,000,000 | 36 MB | about 4.5 s | about 3.7 s | about 900 ms |
+| 1,000,000 | 36 MB | about 4 s | about 3.7 s | about 900 ms |
 
 About 3–4 s of the first map is the browser compiling DuckDB's engine. Browsers cache that between visits, which the tests don't measure.
 
 ## Observability
 
-Every service logs JSON lines.
-- **Every pipeline line has a `stage`:** `fetch`, `parse`, `publish` or `persist`.
-- **Every line about one event has its `event_id`,** so one event can be followed from the feed to the database.
-- **The consumer logs a summary every minute,** with its outcome counts and its lag behind Kafka.
+Every service logs one JSON object per line on stdout (`earth_hub/logging_config.py`). This section says what the lines carry and how to answer the usual questions with them, using `docker compose logs` and [`jq`](https://jqlang.org/). The recipes read each line as text and skip any that is not JSON (`-R 'fromjson? | ...'`): the Kafka client library (librdkafka) prints its own messages as plain text, such as `Disconnected` when a broker connection drops; `docker compose logs --no-log-prefix consumer | grep -v '^{'` shows them.
 
-[Observability](observability.md) has the fields and `jq` recipes, plus a controlled failure diagnosed from the logs alone (also an end-to-end test).
+### What every line carries
+
+| Field | On | Meaning |
+| --- | --- | --- |
+| `ts`, `level`, `logger`, `message` | every line | UTC time, level, module, what happened |
+| `stage` | every pipeline line | where in the pipeline (below) |
+| `event_id` | every line about one event | the USGS event ID, the same at every stage |
+| `partition`, `offset` | consumer lines about a message | where the message sits in Kafka |
+| `outcome`, `reason` | consumer results | `applied`, `stale`, `duplicate`, `rejected` or `error`; for a rejection, the rule ID and why |
+
+The stages, in pipeline order (`earth_hub/observability.py`):
+
+| Stage | Service | Lines |
+| --- | --- | --- |
+| `fetch` | poller, backfill, catch-up | reading the USGS feed or FDSN service, and its failures |
+| `parse` | poller | a feature without `id`, `updated` or `time`, rejected before Kafka (`feature rejected`) |
+| `publish` | poller, backfill, catch-up | each event sent to Kafka (`event published`), delivery failures, the round summary |
+| `persist` | consumers | each message stored, rejected or failed, retries while the database is down, the summary |
+
+The poller logs every event it publishes. The consumer logs every rejection (warning) and error (error) on a line of its own. It also logs every routine outcome when it runs one message at a time, as the live consumer does (DEF-036); in batches (the backfill consumer, up to 500 messages), routine outcomes are at debug level and a `batch processed` line counts them.
+
+### The summaries
+
+The consumer logs a `consumer summary` every minute, even when idle:
+
+```json
+{"message": "consumer summary", "stage": "persist", "messages": 2,
+ "outcomes": {"applied": 1, "rejected": 1}, "totals": {"applied": 1, "rejected": 1},
+ "interval_s": 60.0, "lag": 0, "lag_by_partition": {"earthquakes.raw[0]": 0, "...": 0}}
+```
+
+- `messages` and `outcomes`: since the previous summary. `totals`: since the consumer started.
+- `lag`: messages in Kafka that this consumer has not read yet, per partition and in all. `null` before Kafka has assigned it partitions. A lag that keeps growing means the consumer is falling behind or stuck; one that drops back to 0 means it has caught up.
+
+The poller's `round complete` line, once per poll (about a minute), is its summary: what that round published, found unchanged, rejected or failed to deliver, and `totals` since start.
+
+### Questions and how to answer them
 
 ```bash
+# Everything that happened to one event, in order, across services
 docker compose logs --no-log-prefix poller consumer | jq -cR 'fromjson? | select(.event_id == "us7000abcd")'
+
+# Every rejection and the rule behind it
+docker compose logs --no-log-prefix consumer | jq -cR 'fromjson? | select(.message == "message rejected") | {event_id, reason}'
+
+# Is the consumer keeping up? Its lag, minute by minute
 docker compose logs --no-log-prefix consumer | jq -cR 'fromjson? | select(.message == "consumer summary") | {ts, lag, outcomes}'
+
+# Is the database down? The consumer retries the same message, naming it
+docker compose logs --no-log-prefix consumer | jq -cR 'fromjson? | select(.message | startswith("database unavailable"))'
+
+# Is the feed failing?
+docker compose logs --no-log-prefix poller | jq -cR 'fromjson? | select(.stage == "fetch" and .level != "INFO")'
 ```
+
+**With Claude Code:** `/eh-logs <event ID>`, `/eh-logs rejected`, `/eh-logs summary` and `/eh-logs errors` run these.
+
+### A controlled failure, diagnosed from the logs
+
+`tests/e2e/test_diagnosis.py` runs this through the real poller, Kafka, consumer and PostgreSQL, then makes the diagnosis below from the log lines alone; the lines here are from that run (topic name shortened).
+
+**The failure:** the feed lists two events, one of them (`bad01`) with latitude 95, which cannot exist.
+
+**1. Something was rejected.** The consumer's summary counts one rejection, and its lag is 0, so it is not stuck: it read everything and turned one message away.
+
+```json
+{"level": "INFO", "message": "consumer summary", "stage": "persist", "messages": 2, "outcomes": {"applied": 1, "rejected": 1}, "lag": 0}
+```
+
+**2. Which event, and why.** The rejection line names the event, the rule and the reason, and where the message is in Kafka:
+
+```json
+{"ts": "2026-10-19T07:26:24.110046+00:00", "level": "WARNING", "logger": "earth_hub.consumers.earthquake_consumer", "message": "message rejected", "stage": "persist", "event_id": "bad01", "partition": 2, "offset": 0, "outcome": "rejected", "earthquake_id": null, "reason": "GEO-002: latitude 95.0 outside -90..90"}
+```
+
+Rule GEO-002 is in [data-quality-rules.md](data-quality-rules.md): latitude must be within -90..90.
+
+**3. Its path.** Filtering on `bad01` shows the whole journey: the poller published it (it checks only that an event has an ID and times; data quality belongs to the consumer), and the consumer rejected it.
+
+```json
+{"ts": "2026-10-19T07:26:23.893754+00:00", "level": "INFO", "logger": "earth_hub.ingestion.poller", "message": "event published", "stage": "publish", "event_id": "bad01", "source_updated_ms": 1792391213000, "topic": "earthquakes.raw"}
+{"ts": "2026-10-19T07:26:24.110046+00:00", "level": "WARNING", "logger": "earth_hub.consumers.earthquake_consumer", "message": "message rejected", "stage": "persist", "event_id": "bad01", "partition": 2, "offset": 0, "outcome": "rejected", "reason": "GEO-002: latitude 95.0 outside -90..90"}
+```
+
+**Conclusion, from the logs only:** USGS sent an event with an impossible latitude; it was published, rejected by GEO-002 and never stored, as designed; nothing else went wrong and nothing is waiting. The `raw_events` table holds the same verdict for audit (`outcome = 'rejected'`, `rule = 'GEO-002'`), and `make reconcile` counts it, but neither was needed to find it.
 
 ## Configuration
 

@@ -1,4 +1,5 @@
-"""A controlled failure, diagnosed from the logs alone (docs/observability.md).
+"""A controlled failure, diagnosed from the logs alone (docs/technical/architecture.md,
+Observability).
 
 An event with an impossible latitude goes through the real poller, Kafka, consumer and
 PostgreSQL. The test then answers "what happened to it?" from the JSON log lines only, the

@@ -1,6 +1,6 @@
 """The examples in the docs that tests replay, so a document cannot drift from the code:
-API requests with their responses (docs/api.md), and SQL with its results
-(docs/sql-examples.md).
+API requests with their responses (docs/technical/api.md), and SQL with its results
+(docs/technical/sql-examples.md).
 
 An API example is a request block, its status, and the response body:
 
@@ -33,7 +33,7 @@ from datetime import UTC, datetime
 from decimal import Decimal
 from pathlib import Path
 
-DOCS = Path(__file__).resolve().parents[2] / "docs"
+DOCS = Path(__file__).resolve().parents[2] / "docs" / "technical"
 API_DOC = DOCS / "api.md"
 SQL_DOC = DOCS / "sql-examples.md"
 

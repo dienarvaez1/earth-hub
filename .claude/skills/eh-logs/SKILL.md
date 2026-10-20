@@ -6,7 +6,7 @@ argument-hint: "[service | <event ID> | errors | rejected | summary]  [--since 1
 
 # Logs
 
-Read-only. Every line is one JSON object (`docs/observability.md`); non-JSON lines from librdkafka are
+Read-only. Every line is one JSON object (`docs/technical/architecture.md#observability`); non-JSON lines from librdkafka are
 skipped by `fromjson?`. Use `docker compose logs --no-log-prefix` and `--since` (default `1h`; take it from
 the arguments if given). Services: `poller`, `consumer`, `consumer-backfill`, `catchup`, `api`, `kafka`, `postgres`.
 

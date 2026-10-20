@@ -1,16 +1,16 @@
 # Earth Hub
 
-A local-first earthquake data platform, built as a QA engineering portfolio project. The live USGS feed flows through Apache Kafka into validated PostgreSQL tables. A read-only REST API serves them, and a public dashboard shows them from an export to Cloudflare R2. The point is less the pipeline than the evidence that it works: every requirement traces to a passing test, every defect found is logged with its root cause, and CI runs the regression on every pull request.
+A local-first earthquake data platform, built as a QA engineering portfolio project. The live USGS feed flows through Apache Kafka into validated PostgreSQL tables. A read-only REST API serves them, and a public dashboard shows them from an export to Cloudflare R2. The point is less the pipeline than the evidence that it works: every requirement traces to a passing test, every defect found is logged with how it was found and how it was fixed, and CI runs the regression on every pull request.
 
-**Status:** Milestones 1 to 6 are complete, and Milestone 7 (CI and documentation) is in progress; the public release is deferred. The dashboard runs at **https://earth-hub.diego-narvaez.workers.dev**, marked as a preview and kept out of search engines until the release.
+**Status:** Milestones 1 to 6 are complete, and so are Milestone 7's CI and documentation; the public release, the rest of Milestone 7, is deferred ([status](docs/progress/plan.md#status)). The dashboard runs at **https://earth-hub.diego-narvaez.workers.dev**, marked as a preview and kept out of search engines until the release.
 
 ## For reviewers
 
 | If you have | Start with |
 | --- | --- |
-| 2 minutes | [Quality at a glance](#quality-at-a-glance), then the [defect log](docs/defects/README.md) |
-| 10 minutes | The [demo walkthrough](docs/demo.md): start it, run the tests, ingest the live feed, inspect what was stored and why, query the API, break something on purpose |
-| An hour | The [architecture](docs/architecture.md), the [test strategy](docs/test-strategy.md), the [requirements](docs/requirements.md) and their [traceability matrix](docs/traceability-matrix.md), and [how Claude Code was used](#how-claude-code-was-used) |
+| 2 minutes | [Quality at a glance](#quality-at-a-glance), then the [defect log](docs/progress/defects.md) |
+| 10 minutes | The [demo walkthrough](docs/overview/demo.md): start it, run the tests, ingest the live feed, inspect what was stored and why, query the API, break something on purpose |
+| An hour | The [architecture](docs/technical/architecture.md), the [test strategy](docs/progress/test-strategy.md), the [requirements](docs/progress/requirements.md) and their [traceability matrix](docs/progress/traceability-matrix.md), and [how Claude Code was used](#how-claude-code-was-used) |
 
 ```mermaid
 flowchart LR
@@ -22,20 +22,20 @@ flowchart LR
 
 | | |
 | --- | --- |
-| **Requirements** | 139 requirements, each with a stable ID and at least one passing test that names it (`@pytest.mark.req`). A test naming an unknown ID fails at collection, and `make traceability` fails if any requirement has no passing test |
-| **Tests** | About 830, in eight layers: unit, integration, API, contract (Schemathesis), end-to-end, dashboard (in Chromium), disruptive (real outages) and performance. About 91% coverage across all layers |
-| **Defects** | 37 defects found and fixed, each with its milestone, severity, how it was found and the commit that fixed it; [six written up in full](docs/defects/README.md) with root cause and prevention (kept in the git history) |
-| **CI** | On every pull request and push to `main`, lint and unit tests, then the regression of every layer except performance, from the example settings and with no secrets ([docs/ci.md](docs/ci.md)) |
+| **Requirements** | 140 requirements, each with a stable ID and at least one passing test that names it (`@pytest.mark.req`). A test naming an unknown ID fails at collection, and `make traceability` fails if any requirement has no passing test |
+| **Tests** | About 870, in eight layers: unit, integration, API, contract (Schemathesis), end-to-end, dashboard (in Chromium), disruptive (real outages) and performance. About 91% coverage across all layers |
+| **Defects** | 39 defects found and fixed, each with its milestone, severity, how it was found and the commit that fixed it; [six written up in full](docs/progress/defects.md) with root cause and prevention (kept in the git history) |
+| **CI** | On every pull request and push to `main`, lint and unit tests, then the regression of every layer except performance, from the example settings and with no secrets ([docs/technical/ci.md](docs/technical/ci.md)) |
 | **Data integrity** | Kafka offsets committed only after the database; idempotent upserts; newer revisions win; `make reconcile` compares each topic with the database. The guarantee claimed is at-least-once, never exactly-once |
 | **Recovery** | PostgreSQL stopped while events arrive, a Kafka restart, crashes between the two commits, poller and consumer restarts: each tested, and each ending in a reconciliation |
-| **Docs that can't drift** | The [API examples](docs/api.md) and [SQL examples](docs/sql-examples.md) are replayed by tests; the [schema](docs/schema.md) is checked against the models; every relative link in the docs is checked |
+| **Docs that can't drift** | The [API examples](docs/technical/api.md) and [SQL examples](docs/technical/sql-examples.md) are replayed by tests; the [schema](docs/technical/schema.md) is checked against the models; every relative link in the docs is checked |
 
 **Some things the testing found:**
 - **A security leak:** the database password printed in test tracebacks (DEF-001).
 - **A flaky network setup:** `localhost` resolving to IPv6 made Kafka offset lookups fail intermittently (DEF-004).
 - **A false pass:** an outage check reported PASS while leaving a consumer running (DEF-008).
-- **Six crashes from generated requests:** Schemathesis found server errors that hand-written tests missed (DEF-013 to DEF-018).
-- **Missing events in a live backfill:** reconciling a year of real data with USGS, window by window, showed a merged duplicate's deletion hiding a real earthquake (DEF-026).
+- **Six contract defects from generated requests:** Schemathesis found three server errors and three deviations from the documented contract that hand-written tests missed (DEF-013 to DEF-018).
+- **Missing events in a live backfill:** reconciling the 2026 backfill with USGS, window by window, showed a merged duplicate's deletion hiding a real earthquake (DEF-026).
 
 ## Quick start
 
@@ -61,14 +61,14 @@ make reconcile           # every Kafka message reached PostgreSQL
 make api                 # the REST API at http://127.0.0.1:8000/docs
 ```
 
-The [demo walkthrough](docs/demo.md) goes through these with what to look for.
+The [demo walkthrough](docs/overview/demo.md) goes through these with what to look for.
 
 ## Commands
 
 | Command | What it does |
 | --- | --- |
 | `make install` | Install dependencies into `.venv` from `uv.lock` |
-| `make up` / `make down` / `make reset` | Start Kafka and PostgreSQL and wait until healthy / stop them, keeping data / stop them and delete data |
+| `make up` / `make down` / `make reset` | Start Kafka and PostgreSQL and wait until healthy / stop every service, keeping data / stop every service and delete all data |
 | `make migrate` | Apply database migrations with Alembic |
 | `make lint` / `make format` | Check / fix style and formatting with Ruff |
 | `make regression` | **Every test layer in order, with reports in `reports/` and the traceability matrix** |
@@ -76,11 +76,11 @@ The [demo walkthrough](docs/demo.md) goes through these with what to look for.
 | `make test-integration` / `make smoke` | Integration, API and contract tests against the running services |
 | `make test-e2e` / `make test-dashboard` | End-to-end tests, from a mock feed to the API / the dashboard in Chromium against a simulated R2 |
 | `make test-disruptive` | Tests that stop and start the shared Kafka and PostgreSQL containers |
-| `make test-performance` | A full year of synthetic backfill through the pipeline, timed |
-| `make test-all` / `make flake-check` | Every non-disruptive test in one process / the end-to-end suite 5 times in a row |
+| `make test-performance` | A year of synthetic backfill through the pipeline, and the dashboard at 115,000 and 1,000,000 rows, timed |
+| `make test-all` / `make flake-check` | Every test but the disruptive and performance ones, in one process / the end-to-end suite 5 times in a row |
 | `make traceability` | Rebuild the traceability matrix from the last regression run |
 | `make smoke-restart` / `make check-db-outage` | Restart both services and check data survives / stop PostgreSQL mid-stream and check nothing is lost (both disruptive) |
-| `make coverage` | Unit tests with a coverage report |
+| `make coverage` | Unit tests with a coverage report; no Docker or network needed |
 | `make ingest` / `make ingest-logs` / `make ingest-stop` | Start the pipeline containers (migrate, poller, consumers, catch-up) on the live feed / follow / stop them |
 | `make ingest-once` / `make consume` | One poller round / the consumer, on your machine |
 | `make backfill START=... [END=...]` / `make catchup-once` | Backfill from the USGS FDSN service, one week per request / one catch-up pass |
@@ -95,12 +95,12 @@ The [demo walkthrough](docs/demo.md) goes through these with what to look for.
 
 | Part | What it does | More |
 | --- | --- | --- |
-| **Ingestion** | Polls the USGS `all_day` feed every minute, and publishes new and revised events to Kafka in a versioned envelope around the unchanged feature. Catch-up reads `all_month` hourly and checks deletions daily; `make backfill` loads history from the FDSN service, week by week, checked against its counts | [Architecture](docs/architecture.md#ingestion) |
-| **Persistence** | The consumer validates each message against [16 data-quality rules](docs/data-quality-rules.md), merges records USGS turns out to be one event, and stores the newest revision. Every message is kept with its outcome, rejected ones included | [Schema](docs/schema.md) |
-| **REST API** | Read-only, over PostgreSQL: events, lookups by any former ID, statistics, hourly and magnitude summaries, with one error format | [API reference](docs/api.md) |
-| **Export** | `make export-r2` copies the table to R2 on demand, uploading only what changed, then writes a Parquet snapshot | [Architecture](docs/architecture.md#export-to-r2) |
-| **Dashboard** | A Cloudflare Worker serves the page and the snapshot; the browser runs the reports itself with DuckDB-WASM, and draws the map and charts | [Architecture](docs/architecture.md#dashboard), [SQL](docs/sql-examples.md#dashboard-reports) |
-| **Observability** | JSON logs where every pipeline line has a `stage` and every line about an event its `event_id`, plus a consumer summary every minute | [Observability](docs/observability.md) |
+| **Ingestion** | Polls the USGS `all_day` feed every minute, and publishes new and revised events to Kafka in a versioned envelope around the unchanged feature. Catch-up reads `all_month` hourly and checks deletions daily; `make backfill` loads history from the FDSN service, week by week, checked against its counts | [Architecture](docs/technical/architecture.md#ingestion) |
+| **Persistence** | The consumer validates each message against [16 data-quality rules](docs/technical/data-quality-rules.md), merges records USGS turns out to be one event, and stores the newest revision. Every message is kept with its outcome, rejected ones included | [Schema](docs/technical/schema.md) |
+| **REST API** | Read-only, over PostgreSQL: events, lookups by any former ID, statistics, hourly and magnitude summaries, with one error format | [API reference](docs/technical/api.md) |
+| **Export** | `make export-r2` copies the table to R2 on demand, uploading only what changed, then writes a Parquet snapshot | [Architecture](docs/technical/architecture.md#export-to-r2) |
+| **Dashboard** | A Cloudflare Worker serves the page and the snapshot; the browser runs the reports itself with DuckDB-WASM, and draws the map and charts | [Architecture](docs/technical/architecture.md#dashboard), [SQL](docs/technical/sql-examples.md#dashboard-reports) |
+| **Observability** | JSON logs where every pipeline line has a `stage` and every line about an event its `event_id`, plus a consumer summary every minute | [Observability](docs/technical/architecture.md#observability) |
 
 ## Tests and QA
 
@@ -109,7 +109,7 @@ The [demo walkthrough](docs/demo.md) goes through these with what to look for.
 - end-to-end, dashboard, disruptive, performance;
 - then the traceability check.
 
-It writes `reports/regression-summary.md`, JUnit XML for each layer, a coverage report across all layers (`reports/coverage-html/index.html`) and the [traceability matrix](docs/traceability-matrix.md).
+It writes `reports/regression-summary.md`, JUnit XML for each layer, a coverage report across all layers (`reports/coverage-html/index.html`) and the [traceability matrix](docs/progress/traceability-matrix.md).
 
 | Layer | Location | What it covers |
 | --- | --- | --- |
@@ -123,16 +123,16 @@ It writes `reports/regression-summary.md`, JUnit XML for each layer, a coverage 
 | Performance | `tests/performance/` | A full year of synthetic history (139,579 events) through backfill, Kafka, the consumer and the API in about 42 s; the dashboard at 115,000 and 1,000,000 rows. Local only: shared CI runners can't repeat the timings |
 
 **QA documents** in `docs/`:
-- the [test strategy](docs/test-strategy.md) and the [test plan](docs/test-plan.md) for Milestones 1–5;
-- the [requirements](docs/requirements.md), 139 of them, and the [traceability matrix](docs/traceability-matrix.md);
-- the [defect log](docs/defects/README.md): 37 defects found and fixed, 6 with full reports in the git history;
-- the [data-quality rules](docs/data-quality-rules.md) and the [known limitations](docs/limitations.md).
+- the [test strategy](docs/progress/test-strategy.md): risks, levels, techniques, scope, reports and testing by milestone;
+- the [requirements](docs/progress/requirements.md), 140 of them, and the [traceability matrix](docs/progress/traceability-matrix.md);
+- the [defect log](docs/progress/defects.md): 39 defects found and fixed, 6 with full reports in the git history;
+- the [data-quality rules](docs/technical/data-quality-rules.md) and the [known limitations](docs/overview/limitations.md).
 
 ## How Claude Code was used
 
 Earth-Hub was built with [Claude Code](https://claude.com/claude-code), Anthropic's coding agent, as an engineering assistant inside fixed quality gates. Claude Code wrote the code, tests and documents. The author decided what was built and what counts as done.
 
-**The working method**, set out in the [implementation plan](docs/IMPLEMENTATION.md#7-claude-code-development-workflow) and in [`CLAUDE.md`](CLAUDE.md), the project rules Claude Code reads in every session:
+**The working method**, set out in the [implementation plan](docs/progress/plan.md#7-claude-code-development-workflow) and in [`CLAUDE.md`](CLAUDE.md), the project rules Claude Code reads in every session:
 1. **Plan.** Before each milestone, Claude Code proposes the changes, the test strategy and the acceptance criteria, and waits for approval.
 2. **Implement.** It writes the change, with tests that name the requirements they verify.
 3. **Verify.** It runs the real suites, `make regression` before anything is called done, and reports the actual results, failures included.
@@ -149,29 +149,23 @@ Earth-Hub was built with [Claude Code](https://claude.com/claude-code), Anthropi
 - **Risk and exposure.** Keeping everything bound to `127.0.0.1`, the R2 export on demand only, and the dashboard public but marked as a preview until the release.
 - **When to stop.** Each merge, deploy and live operation (`make ingest`, `make export-r2`, `make dashboard-deploy`).
 
-**Not trusting AI-written tests either.** The [test strategy](docs/test-strategy.md#ai-assisted-development) applies the same safeguards to tests as to code:
+**Not trusting AI-written tests either.** The [test strategy](docs/progress/test-strategy.md#ai-assisted-development) applies the same safeguards to tests as to code:
 - mutation spot checks;
 - repeated and combined runs;
 - independent oracles;
 - tests of the test tooling.
 
-Five of the 37 defects were in the test tooling itself (DEF-007, DEF-008, DEF-025, DEF-028, DEF-029), found because results were checked rather than trusted. Four were found after merge (DEF-034 to DEF-037), and are logged as such.
+Five of the 39 defects were in the test tooling itself (DEF-007, DEF-008, DEF-025, DEF-028, DEF-029), found because results were checked rather than trusted. Six were found after merge (DEF-034 to DEF-039), and are logged as such.
 
 ## Documentation
 
-| Page | What it holds |
+In three groups under `docs/`, indexed in [docs/README.md](docs/README.md):
+
+| Group | Pages |
 | --- | --- |
-| [Demo walkthrough](docs/demo.md) | A 10-minute guided tour |
-| [Cheat sheet](docs/cheatsheet.md) | The everyday commands, each next to the Claude Code skill (`/eh-*`) that runs it |
-| [Architecture](docs/architecture.md) | Diagrams of the pipeline, the topics, recovery, the export and the dashboard; each component in detail; services and ports |
-| [Schema](docs/schema.md) | Every table and column, and how a message changes them |
-| [API reference](docs/api.md) | Endpoints, parameters, errors, and examples replayed by a test |
-| [SQL examples](docs/sql-examples.md) | The dashboard's reports and queries for inspecting PostgreSQL, with results replayed by tests |
-| [Observability](docs/observability.md) | Log fields, `jq` recipes, and a failure diagnosed from the logs |
-| [CI](docs/ci.md) | The workflow, reading a run, security |
-| [Known limitations](docs/limitations.md) | What Earth-Hub doesn't do, or does only within limits |
-| [Test strategy](docs/test-strategy.md), [test plan](docs/test-plan.md), [requirements](docs/requirements.md), [traceability](docs/traceability-matrix.md), [defects](docs/defects/README.md), [data-quality rules](docs/data-quality-rules.md) | The QA documents |
-| [Implementation plan](docs/IMPLEMENTATION.md) | The milestones, as planned and as revised |
+| **Overview:** what it is and how to use it | [Demo walkthrough](docs/overview/demo.md), [cheat sheet](docs/overview/cheatsheet.md), [known limitations](docs/overview/limitations.md) |
+| **Technical:** how it works | [Architecture](docs/technical/architecture.md) (including [observability](docs/technical/architecture.md#observability)), [schema](docs/technical/schema.md), [API reference](docs/technical/api.md), [SQL examples](docs/technical/sql-examples.md), [data-quality rules](docs/technical/data-quality-rules.md), [CI](docs/technical/ci.md) |
+| **Progress:** the plan and the QA evidence | [Plan and status](docs/progress/plan.md#status), [requirements](docs/progress/requirements.md), [traceability matrix](docs/progress/traceability-matrix.md), [test strategy](docs/progress/test-strategy.md), [defect log](docs/progress/defects.md) |
 
 ## Troubleshooting
 
