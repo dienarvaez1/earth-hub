@@ -5,15 +5,15 @@ How Earth-Hub is put together: what each part does, what it may read and write, 
 ## Overview
 
 ```mermaid
-flowchart LR
+%%{init: {"flowchart": {"rankSpacing": 20, "nodeSpacing": 90}}}%%
+flowchart TB
     usgs[("USGS<br/>GeoJSON feeds")]
     fdsn[("USGS<br/>FDSN event service")]
 
-    backfill["make backfill<br/>(on the host)"]
-
-    subgraph docker["Docker Compose, on 127.0.0.1"]
+    subgraph docker["full mode: Docker Compose"]
         poller["poller"]
         catchup["catchup<br/>all_month hourly,<br/>deletions daily"]
+        backfill["make backfill<br/>(on the host)"]
         raw[["earthquakes.raw"]]
         bf[["earthquakes.backfill"]]
         consumer["consumer"]
@@ -22,17 +22,23 @@ flowchart LR
         api["api<br/>(FastAPI, read-only)"]
     end
 
+    subgraph gha["direct mode"]
+        direct["GitHub Actions, hourly:<br/>poller + catch-up<br/>+ validation + ledger<br/>over BucketStore"]
+    end
+
     subgraph cloud["Cloudflare"]
-        r2[("R2 bucket")]
+        r2[("R2 bucket<br/>_state/mode.json<br/>says who writes")]
         worker["Worker"]
     end
 
-    browser["Browser<br/>DuckDB-WASM, MapLibre, Plot"]
+    browser["Browser<br/>DuckDB-WASM,<br/>MapLibre, Plot"]
 
     usgs -- "all_day, every minute" --> poller
     usgs --> catchup
     fdsn --> catchup
     fdsn -- "one week per request" --> backfill
+    usgs --> direct
+    fdsn --> direct
     poller --> raw
     catchup --> bf
     backfill --> bf
@@ -41,7 +47,8 @@ flowchart LR
     consumer --> pg
     consumerbf --> pg
     pg --> api
-    api -- "make export-r2" --> r2
+    api -- "full mode:<br/>make export-r2" --> r2
+    direct -- "rows, snapshot,<br/>log, state" --> r2
     r2 --> worker
     worker --> browser
 ```
@@ -53,11 +60,12 @@ Each arrow is the only way data moves between those two parts:
 - **PostgreSQL is written only by the consumers**, apart from backfill's progress table and catch-up's checkpoint.
 - **The API only reads PostgreSQL:** never Kafka or USGS.
 - **The exporter reads only the API** (`GET /api/v1/export/earthquakes`), never PostgreSQL. It runs on demand, never on a schedule.
+- **One mode writes the bucket at a time** ([switching modes](#switching-modes)): in full mode the exporter, in [direct mode](#direct-mode) the direct rounds, run hourly by GitHub Actions or by hand. The only path from the bucket back into Kafka is the handover to full mode, which replays direct mode's log onto `earthquakes.backfill`.
 - **The Worker exposes two files of the bucket** (the Parquet snapshot and its `meta.json`) and nothing else. The browser runs every report itself.
 
 ## Services
 
-`make up` starts only the infrastructure, so tests never depend on live data. `make ingest` adds the pipeline, and `make api` adds the API. With Claude Code: `/eh-start [infra|pipeline|api|ui|dashboard]`, `/eh-stop`, and `/eh-status` for the health of all of them.
+`make up` starts only the infrastructure, so tests never depend on live data. `make ingest` adds the pipeline, and `make api` adds the API. With Claude Code: `/eh-start [infra|pipeline|api|ui|dashboard]`, `/eh-stop`, and `/eh-status` for the health of all of them. These are full mode's services: in direct mode the poller and catch-up stay stopped, and none of them is needed (`/eh-mode`).
 
 | Service | Started by | Does | Health check |
 | --- | --- | --- | --- |
@@ -86,7 +94,8 @@ All ports are bound to `127.0.0.1`. Kafka uses `PLAINTEXT` and JMX has no authen
 ## Topics and consumer groups
 
 ```mermaid
-flowchart LR
+%%{init: {"flowchart": {"rankSpacing": 110, "nodeSpacing": 30}}}%%
+flowchart TB
     poller["poller"] -- "key: USGS ID" --> raw[["earthquakes.raw<br/>3 partitions"]]
     catchup["catchup"] --> bf[["earthquakes.backfill<br/>3 partitions"]]
     backfill["make backfill"] --> bf
@@ -221,6 +230,26 @@ Milestone 8: the same pipeline without Docker, Kafka or PostgreSQL. The real pol
 | `_state/direct-pending.json` | A round's writes, while they are being made |
 | `log/<date>/<first>-<last>.ndjson` | Every message processed, in order: sequence number, processing time, source, outcome, rule, reason, record key and envelope (`raw_events`) |
 
+```mermaid
+flowchart TB
+    subgraph read["read"]
+        direction LR
+        feed[("USGS feeds,<br/>FDSN")] --> runner["poller and catch-up<br/>(direct/runner.py)"]
+    end
+    subgraph decide["decide, in memory"]
+        direction LR
+        validate["decode + validate<br/>(the consumer's rules)"] --> ledger["ledger<br/>(processing/ledger.py)"]
+        snap[("snapshot + ID map<br/>from the bucket")] -- "records it touches" --> ledger
+    end
+    subgraph write["write, each step repeatable"]
+        direction LR
+        redo["redo record<br/>_state/direct-pending.json"] --> writes["rows, deletes, ID map,<br/>manifest, snapshot +<br/>meta.json, log, state"]
+        writes --> bucket[("R2 bucket")]
+    end
+    read -- "envelopes" --> decide
+    decide -- "decisions" --> write
+```
+
 **What a round does:**
 - **Loads the records it touches from the snapshot**, which holds every column of every row and is updated in the same round as the rows, so it costs no request per record. The cache is refreshed with conditional requests: only what another process changed is read again.
 - **Refuses a bucket whose parts disagree** before writing anything: a snapshot that doesn't match the manifest (as after an export that failed), or an ID map and a manifest that list different records.
@@ -232,6 +261,21 @@ Milestone 8: the same pipeline without Docker, Kafka or PostgreSQL. The real pol
 
 One marker in the bucket, `_state/mode.json`, chooses the mode. It is the setting every process checks: the exporter writes only in full mode, a direct round only in direct mode, so they never write at once. It lives in the bucket rather than in `.env`, so two machines can't disagree about it. Changing it is a handover, which checks that the other mode holds everything before switching, and changes the marker with conditional writes.
 
+```mermaid
+stateDiagram-v2
+    direction TB
+    [*] --> full: no marker
+    full --> direct: make mode-direct<br/>(exported, state written, under the lock)
+    direct --> handing_over: make mode-full
+    handing_over --> full: replayed, reconcile<br/>and dry run clean
+    handing_over --> direct: a check failed
+    state "handing-over" as handing_over
+    note left of full: exporter writes,<br/>schedule skips
+    note right of direct: direct rounds write<br/>(hourly on GitHub Actions),<br/>exporter refuses
+```
+
+While the marker says `handing-over`, neither mode writes. The handover to direct mode needs no such state: it holds the bucket's lock, so no export can run, and changes the marker from `full` to `direct` in one conditional write. If anything fails before that write, the marker still says `full`.
+
 ```bash
 make mode          # full (active) since …; log sequence at the last change: …
 make mode-direct   # stop the poller and catch-up, export, write direct mode's state
@@ -239,11 +283,55 @@ make direct-run    # direct mode, until stopped
 make mode-full     # replay direct mode's log into full mode, check, switch back
 ```
 
+**With Claude Code:** `/eh-mode` (the mode and the schedule's last runs), `/eh-mode direct`, `/eh-mode full`, `/eh-mode once`, and `/eh-mode reconcile` for the bucket's state.
+
 **Switching loses nothing.** While a handover runs, neither mode polls, but USGS's day feed lists every event of the last 24 hours, so the first round of the mode taking over picks up what was published or revised meanwhile: the events are late by the handover's length, never lost. `make mode-direct` restarts full mode's poller and catch-up if the handover fails; `make mode-full` restarts them when it succeeds, and a running `make direct-run` stops by itself once the bucket is frozen. `tests/e2e/test_mode_switching.py` switches back and forth twice while the feed changes, during the handovers too, and checks after every switch that every event is served at its latest version.
 
-**Full → direct** (`make mode-direct`) needs full mode idle: the poller and catch-up stopped, every message stored, `make reconcile` clean. It exports, then writes direct mode's state from PostgreSQL and Kafka: the ID map from `earthquake_ids`, with each record's `id` as its creation number; the poller's 26-hour state from `earthquakes.raw`, as a restarted poller rebuilds it; and catch-up's checkpoints. Then the marker says `direct`, with the log's sequence number at that moment.
+**Full → direct** (`make mode-direct`):
+
+```mermaid
+sequenceDiagram
+    participant M as make mode-direct
+    participant D as Docker
+    participant H as handover
+    participant P as PostgreSQL and Kafka
+    participant R as R2 bucket
+    M->>D: stop poller and catch-up
+    M->>H: handover direct
+    H->>R: marker must say full
+    H->>P: idle? (make reconcile clean, no lag)
+    H->>R: export through the API (as make export-r2)
+    H->>P: read earthquake_ids, record order, checkpoints,<br/>the poller's 26 h state from earthquakes.raw
+    H->>R: take the lock
+    H->>R: _state/ids.json.gz, _state/direct.json
+    H->>R: check the ID map against the export
+    H->>R: marker: direct (active), from this sequence number
+    H->>R: release the lock
+    Note over M,R: on any failure: marker still full,<br/>make restarts poller and catch-up
+    Note over R: the hourly schedule (or make direct-run) writes from now on
+```
+
+It needs full mode idle: the poller and catch-up stopped, every message stored, `make reconcile` clean. It exports, then writes direct mode's state from PostgreSQL and Kafka: the ID map from `earthquake_ids`, with each record's `id` as its creation number; the poller's 26-hour state from `earthquakes.raw`, as a restarted poller rebuilds it; and catch-up's checkpoints. Then the marker says `direct`, with the log's sequence number at that moment.
 
 **Direct → full** (`make mode-full`):
+
+```mermaid
+sequenceDiagram
+    participant H as make mode-full
+    participant R as R2 bucket
+    participant K as earthquakes.backfill
+    participant C as consumer-backfill
+    participant P as PostgreSQL
+    H->>R: marker: handing-over (no round writes now)
+    H->>R: read log/ since the last handover
+    H->>K: every entry, in order, on partition 0<br/>(headers: processed-at, seq)
+    K->>C: messages
+    C->>P: one batch per direct round, at its processing time
+    H->>P: make reconcile, export dry run: nothing to change
+    H->>R: marker: full (schedule paused)
+    H->>H: restart poller and catch-up
+```
+
 1. **Freezes the bucket.** The marker says `handing-over`, and no direct round writes any more; a round left unfinished is finished.
 2. **Reads the log since the last handover.** A gap stops the handover: replay is not possible, and the fallback is a backfill of the period from FDSN (`make backfill START=…`).
 3. **Replays every entry, in order,** onto partition 0 of `earthquakes.backfill`, with its processing time and sequence number in Kafka headers. The backfill consumer stores each one with that time, and processes each of direct mode's rounds as a batch, so PostgreSQL gets the same records, IDs, processing times and outcomes.

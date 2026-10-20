@@ -17,7 +17,9 @@ Run from the repository root.
 
 (In the table `\|` is a pipe; run it as `|`.)
 
-If the poller isn't running, say `make ingest` (or `/eh-start pipeline`) starts it.
+If the poller isn't running, check `make -s mode` first. In full mode, `make ingest` (or `/eh-start pipeline`)
+starts it. In direct mode it is stopped on purpose: the direct runner polls instead (`/eh-mode`), so don't start
+it or run `once`; events it stored would make the handover back fail.
 
 How it works, in one line each, if asked: it sends `If-Modified-Since`, waits for the feed's `Expires` plus
 2–5 s of jitter (10 s – 5 min), publishes only new events or newer `updated` times, and counts an event as sent

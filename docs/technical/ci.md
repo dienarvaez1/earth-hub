@@ -4,6 +4,16 @@ GitHub Actions runs `.github/workflows/ci.yml` on every pull request, on every p
 
 A second workflow, `.github/workflows/direct.yml`, is not a check: it runs [direct mode on a schedule](#direct-mode-on-a-schedule).
 
+```mermaid
+%%{init: {"flowchart": {"rankSpacing": 30, "nodeSpacing": 50}}}%%
+flowchart TB
+    pr["pull request,<br/>push to main"] --> ci["ci.yml<br/>lint, unit, regression<br/>(no secrets)"]
+    cron["every hour at :17,<br/>daily at 05:41 UTC,<br/>or by hand"] --> direct["direct.yml<br/>round / reconcile<br/>(R2 secrets)"]
+    direct --> check{"_state/mode.json<br/>direct (active)?"}
+    check -- yes --> r2[("R2 bucket:<br/>rows, snapshot, log")]
+    check -- "no: full or<br/>handing-over" --> skip["skip, succeed"]
+```
+
 ## The jobs
 
 | Job | Runs | Takes about | For |
@@ -56,3 +66,5 @@ Both also run by hand: **Actions → Direct mode → Run workflow**, or `gh work
 - **Freshness.** New events reach the bucket up to about an hour after USGS publishes them (a minute with `make direct-run`); none are lost, as the day feed lists the last 24 hours. GitHub may delay or drop scheduled runs when busy.
 - **Cost.** About 1–1½ minutes a run with uv's cache: some 750–1,100 of the private repository's 2,000 free minutes a month (no limit once public). R2 operations are fewer than with `make direct-run`: 24 feed rounds a day instead of about 437 (`tests/unit/test_direct_budget.py`).
 - **Failures** e-mail whoever last changed the schedule, as GitHub does for scheduled workflows.
+
+**With Claude Code:** `/eh-mode schedule` runs a round now, `/eh-mode runs` lists the recent runs, and `/eh-mode` says whether the schedule writes (direct mode) or skips (full mode).

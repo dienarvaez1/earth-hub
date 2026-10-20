@@ -2,7 +2,7 @@
 
 A local-first earthquake data platform, built as a QA engineering portfolio project. The live USGS feed flows through Apache Kafka into validated PostgreSQL tables. A read-only REST API serves them, and a public dashboard shows them from an export to Cloudflare R2. The point is less the pipeline than the evidence that it works: every requirement traces to a passing test, every defect found is logged with how it was found and how it was fixed, and CI runs the regression on every pull request.
 
-**Status:** Milestones 1 to 6 are complete, and so are Milestone 7's CI and documentation; the public release, the rest of Milestone 7, is deferred. Milestone 8, a second mode that runs without Docker and keeps its state in R2, is in progress ([status](docs/progress/plan.md#status)). The dashboard runs at **https://earth-hub.diego-narvaez.workers.dev**, marked as a preview and kept out of search engines until the release.
+**Status:** Milestones 1 to 6 are complete, and so are Milestone 7's CI and documentation; the public release, the rest of Milestone 7, is deferred. Milestone 8 is complete too: a second mode that runs without Docker, keeps its state in R2, and runs every hour on GitHub Actions ([status](docs/progress/plan.md#status)). The dashboard runs at **https://earth-hub.diego-narvaez.workers.dev**, marked as a preview and kept out of search engines until the release.
 
 ## For reviewers
 
@@ -13,9 +13,37 @@ A local-first earthquake data platform, built as a QA engineering portfolio proj
 | An hour | The [architecture](docs/technical/architecture.md), the [test strategy](docs/progress/test-strategy.md), the [requirements](docs/progress/requirements.md) and their [traceability matrix](docs/progress/traceability-matrix.md), and [how Claude Code was used](#how-claude-code-was-used) |
 
 ```mermaid
+%%{init: {"flowchart": {"rankSpacing": 40, "nodeSpacing": 30}}}%%
 flowchart LR
-    usgs[("USGS feeds")] --> poller --> kafka[["Kafka"]] --> consumer["consumer + validation"] --> pg[("PostgreSQL")] --> api["REST API"]
-    api -- "make export-r2" --> r2[("Cloudflare R2")] --> dash["dashboard<br/>(DuckDB in the browser)"]
+    usgs[("USGS<br/>feeds")]
+    subgraph full["full mode"]
+        direction TB
+        poller --> kafka[["Kafka"]] --> consumer["consumer +<br/>validation"]
+        consumer --> pg[("PostgreSQL")] --> api["REST API"]
+    end
+    subgraph directmode["direct mode"]
+        direction TB
+        direct["poller + validation<br/>(GitHub Actions,<br/>hourly)"]
+    end
+    subgraph cf["Cloudflare"]
+        direction TB
+        r2[("R2 bucket")] --> dash["dashboard<br/>(DuckDB in<br/>the browser)"]
+    end
+    usgs --> full
+    usgs --> directmode
+    full -- "make export-r2" --> cf
+    directmode --> cf
+```
+
+Two modes write the same bucket, one at a time: **full** (the whole pipeline, on a developer machine) and **direct** (no Docker, Kafka or PostgreSQL, run hourly by GitHub Actions so the dashboard stays current with no machine on). A marker in the bucket says which one; the handovers check both agree before switching:
+
+```mermaid
+stateDiagram-v2
+    direction TB
+    full: full mode<br/>(your machine)
+    direct: direct mode<br/>(GitHub Actions, hourly)
+    full --> direct: make mode-direct<br/>export, write direct state
+    direct --> full: make mode-full<br/>replay the log, reconcile
 ```
 
 ## Quality at a glance
@@ -90,6 +118,7 @@ The [demo walkthrough](docs/overview/demo.md) goes through these with what to lo
 | `make export-r2 [DRY_RUN=1] [VERIFY=1]` / `make export-r2-runs` | Copy the `earthquakes` table to Cloudflare R2 through the API, only new and changed rows / list past runs |
 | `make mode` / `make mode-direct` / `make mode-full` | Which mode writes the bucket / hand over to direct mode / back to full mode, checked before switching |
 | `make direct-once` / `make direct-run` / `make reconcile-direct` | Direct mode: one round / run until stopped / check its state in the bucket |
+| `gh workflow run direct.yml -f job=round` / `gh run list --workflow direct.yml` | Direct mode on GitHub Actions' hourly schedule: a round now / the recent runs |
 | `make r2-ls [PREFIX=…]` / `make r2-count` / `make r2-get KEY=…` | List, count or read the bucket's objects, read-only |
 | `make dashboard-install` / `make dashboard-dev` / `make dashboard-deploy` | The dashboard's Node dependencies and test browser / a local server over the real bucket / publish to Cloudflare Workers |
 
@@ -101,7 +130,7 @@ The [demo walkthrough](docs/overview/demo.md) goes through these with what to lo
 | **Persistence** | The consumer validates each message against [16 data-quality rules](docs/technical/data-quality-rules.md), merges records USGS turns out to be one event, and stores the newest revision. Every message is kept with its outcome, rejected ones included | [Schema](docs/technical/schema.md) |
 | **REST API** | Read-only, over PostgreSQL: events, lookups by any former ID, statistics, hourly and magnitude summaries, with one error format | [API reference](docs/technical/api.md) |
 | **Export** | `make export-r2` copies the table to R2 on demand, uploading only what changed, then writes a Parquet snapshot | [Architecture](docs/technical/architecture.md#export-to-r2) |
-| **Direct mode** | The same poller and catch-up straight to R2, with no Docker, Kafka or PostgreSQL: the bucket full mode's export would write, byte for byte, which tests check against full mode. A marker in the bucket says which mode writes it; the handovers replay direct mode's log into Kafka and check both sides agree before switching (Milestone 8) | [Architecture](docs/technical/architecture.md#direct-mode) |
+| **Direct mode** | The same poller and catch-up straight to R2, with no Docker, Kafka or PostgreSQL: the bucket full mode's export would write, byte for byte, which tests check against full mode. A marker in the bucket says which mode writes it; the handovers replay direct mode's log into Kafka and check both sides agree before switching. GitHub Actions runs it every hour, so the dashboard stays current with no machine on (Milestone 8) | [Architecture](docs/technical/architecture.md#direct-mode) |
 | **Dashboard** | A Cloudflare Worker serves the page and the snapshot; the browser runs the reports itself with DuckDB-WASM, and draws the map and charts | [Architecture](docs/technical/architecture.md#dashboard), [SQL](docs/technical/sql-examples.md#dashboard-reports) |
 | **Observability** | JSON logs where every pipeline line has a `stage` and every line about an event its `event_id`, plus a consumer summary every minute | [Observability](docs/technical/architecture.md#observability) |
 
@@ -149,8 +178,10 @@ Earth-Hub was built with [Claude Code](https://claude.com/claude-code), Anthropi
 **Decisions that stayed with the author:**
 - **Scope and order.** The milestone plan and the initial prompt, written before any code. Each milestone's proposal approved, revised or narrowed, and what to defer, such as the public release and the license.
 - **What counts as done.** The exit gates: every layer green, every requirement traced, the end-to-end suite passing 5 runs out of 5, and defects fixed with a regression test.
-- **Risk and exposure.** Keeping everything bound to `127.0.0.1`, the R2 export on demand only, and the dashboard public but marked as a preview until the release.
-- **When to stop.** Each merge, deploy and live operation (`make ingest`, `make export-r2`, `make dashboard-deploy`).
+- **Risk and exposure.** Keeping everything bound to `127.0.0.1`, writing R2 only on demand in full mode or from the one scheduled direct-mode workflow (the only one holding secrets), and the dashboard public but marked as a preview until the release.
+- **When to stop.** Each merge, deploy and live operation (`make ingest`, `make export-r2`, `make dashboard-deploy`, the handovers `make mode-direct` and `make mode-full`).
+
+**Skills for operating it.** The everyday operations are Claude Code skills in `.claude/skills/` (`/eh-status`, `/eh-mode`, `/eh-kafka`, `/eh-db`, …), each next to the command it runs in the [cheat sheet](docs/overview/cheatsheet.md); a unit test checks that every skill, argument and make target named in the docs exists.
 
 **Not trusting AI-written tests either.** The [test strategy](docs/progress/test-strategy.md#ai-assisted-development) applies the same safeguards to tests as to code:
 - mutation spot checks;
