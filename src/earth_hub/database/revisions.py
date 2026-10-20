@@ -8,7 +8,10 @@ aka2026jntkwa). Both IDs point to one stored event, so the duplicate's deletion 
 the survivor. A deletion of the whole event lists the event's current ID, or is that ID.
 """
 
+from collections.abc import Hashable
 from dataclasses import dataclass
+
+from earth_hub.ingestion.events import EventMessage
 
 DUPLICATE_DELETION = "deletion of {event_id}, a duplicate merged into {preferred}; event kept"
 
@@ -42,3 +45,30 @@ def compare(stored: Revision, incoming: Revision) -> tuple[str, str | None]:
     if incoming.source_updated_ms == stored.source_updated_ms:
         return "duplicate", None
     return "stale", None
+
+
+def needed(
+    messages: list[EventMessage],
+    event_of: dict[str, Hashable],
+    stored: dict[Hashable, Revision],
+) -> list[EventMessage]:
+    """Of these messages, those that are new, or that the consumer would apply to a stored
+    event any of their IDs points to; one per event (the newest if listed twice). `event_of`
+    maps known USGS IDs to stored events, `stored` each such event to its revision. Used by
+    backfill and catch-up in both modes (database/progress.py, direct/), so both skip the same
+    messages."""
+    newest: dict[str, EventMessage] = {}
+    for message in messages:
+        incoming = Revision(
+            message.event_id,
+            tuple(dict.fromkeys([message.event_id, *message.ids])),
+            message.source_updated_ms,
+            (message.payload.get("properties") or {}).get("status") == "deleted",
+        )
+        matched = {event_of[i] for i in incoming.ids if i in event_of}
+        if matched and all(compare(stored[e], incoming)[0] != "applied" for e in matched):
+            continue
+        current = newest.get(message.event_id)
+        if current is None or message.source_updated_ms > current.source_updated_ms:
+            newest[message.event_id] = message
+    return list(newest.values())

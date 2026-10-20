@@ -41,8 +41,9 @@ class ProcessResult:
     reason: str | None = None
 
 
-def _decode(value: bytes | None) -> tuple[object | None, str | None]:
-    """(parsed JSON, None) when the value is JSON that jsonb can hold; else (None, raw text)."""
+def decode_value(value: bytes | None) -> tuple[object | None, str | None]:
+    """(parsed JSON, None) when the value is JSON that jsonb can hold; else (None, raw text).
+    Direct mode decodes with this too, so a message gets the same outcome in either mode."""
     text_value = value.decode("utf-8", errors="replace") if value is not None else None
     if text_value is None:
         return None, None
@@ -116,15 +117,15 @@ def _process(
 ) -> list[ProcessResult]:
     if not messages:
         return []
-    decoded = [_decode(m.value) for m in messages]
+    decoded = [decode_value(m.value) for m in messages]
     if not locked:
         # Serialize work on these IDs, in a fixed order to avoid deadlocks, so two consumers
         # can never create two records for one event or merge the same records twice.
-        _lock(conn, {i for envelope, _ in decoded for i in _envelope_ids(envelope)})
+        _lock(conn, {i for envelope, _ in decoded for i in envelope_ids(envelope)})
 
     done = _stored_offsets(conn, messages)
     store = PostgresStore(conn)
-    ledger = store.load(i for envelope, _ in decoded for i in _envelope_ids(envelope))
+    ledger = store.load(i for envelope, _ in decoded for i in envelope_ids(envelope))
     raw_rows: list[tuple[dict, Key | None]] = []
     steps: list[tuple[str, Key | None, str | None] | None] = []
     for message, (envelope, raw_value) in zip(messages, decoded, strict=True):
@@ -309,7 +310,7 @@ def _stored_offsets(conn: Connection, messages) -> set[tuple[str, int, int]]:
     return {tuple(r) for r in rows}
 
 
-def _envelope_ids(envelope) -> set[str]:
+def envelope_ids(envelope) -> set[str]:
     """The IDs a message would lock, read leniently: invalid messages are rejected later."""
     if not isinstance(envelope, dict):
         return set()

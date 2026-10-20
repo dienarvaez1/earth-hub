@@ -15,6 +15,7 @@ Testing effort follows what would hurt most if it failed.
 
 | Risk | Impact | How it is tested |
 | --- | --- | --- |
+| The two modes storing different data | High | The same messages through PostgreSQL and the exporter, and through direct mode, compared object by object (`test_direct_parity.py`), and end to end from the same mock services (`test_direct_end_to_end.py`); mutation checks that a wrong survivor or processing time fails them |
 | Events lost between the feed and the database | Critical | Delivery confirmed before an event counts as sent; database committed before the Kafka offset; reconciliation of topic against database; crash simulations; real outages |
 | Duplicates, or an older revision overwriting a newer one | High | Redelivery and replay tests; newer-only update rules; concurrency test with advisory locks |
 | USGS changing an event's ID, or merging two reports | High | Synthetic ID changes and two- and three-way merges, checked in the repository, the pipeline and through the API |
@@ -128,6 +129,7 @@ The [requirements](requirements.md) list it, grouped by area.
 | R2 export | The exporter on moto; interrupted and resumed runs; the snapshot's values and types |
 | 6 | The dashboard in Chromium against a simulated R2, its reports compared with Python's; log fields and a failure diagnosed from logs alone |
 | 7 | CI and tests of the workflow file; documentation tested: examples replayed, schema and links checked |
+| 8 | The ledger checked alone; parity of the two stores on random streams and every persistence defect scenario (identical buckets, byte for byte), and end to end from the same mock USGS services; a direct round interrupted at each of its writes; the R2 operations budget; `make reconcile-direct` against each broken invariant |
 
 Claude Code writes and runs the tests, and the project owner approves each milestone's proposal and reviews each pull request before merging (see the README, *How Claude Code was used*).
 

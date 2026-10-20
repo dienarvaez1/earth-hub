@@ -1,6 +1,6 @@
 # Defect log
 
-Every defect found while building Earth-Hub, from Milestone 1 to Milestone 7. Each was fixed in the milestone where it was found and covered by a regression test where a test could catch it. All but six were found before their code was merged: DEF-034 and DEF-036 in the live logs, DEF-035 in the public dashboard, DEF-037 in a script already merged, and DEF-038 and DEF-039 in an audit of the documents against the code.
+Every defect found while building Earth-Hub, from Milestone 1 to Milestone 8. Each was fixed in the milestone where it was found and covered by a regression test where a test could catch it. All but six were found before their code was merged: DEF-034 and DEF-036 in the live logs, DEF-035 in the public dashboard, DEF-037 in a script already merged, and DEF-038 and DEF-039 in an audit of the documents against the code.
 
 Six were written up in full, as examples of the [defect report template](#template), because they show the most instructive failure modes. Every defect here is fixed, so the reports were removed from the working tree on 2026-10-20; they remain in the git history, and their IDs in the log link to them as of commit `b9102de`.
 
@@ -13,7 +13,7 @@ Six were written up in full, as examples of the [defect report template](#templa
 | Medium | A function misbehaves in specific conditions; a workaround exists |
 | Low | Cosmetic, a standards deviation, or a minor inconvenience |
 
-Priority is how urgently it had to be fixed: **P1** before anything else, **P2** within the milestone, **P3** when convenient. All 39 were fixed within their milestone, or in a follow-up straight after.
+Priority is how urgently it had to be fixed: **P1** before anything else, **P2** within the milestone, **P3** when convenient. All 41 were fixed within their milestone, or in a follow-up straight after.
 
 ## Log
 
@@ -58,6 +58,8 @@ Priority is how urgently it had to be fixed: **P1** before anything else, **P2**
 | DEF-037 | 7 | Low | Code review while writing the documentation tests | `traceability.py --not-run` found requirement IDs with a two-part pattern, missing three-part ones such as `REQ-DQ-GEO-002`, so such a requirement covered only by a layer left out would have been reported as a gap instead of not run. No run was affected: none is covered only by the performance tests | #18 |
 | DEF-038 | 7 | Low | Auditing the documents against the code | The README, the architecture page and REQ-ING-003 said failed USGS feed requests were "retried up to 3 times" and that every `5xx` was retried. The client makes 3 attempts in all (2 retries), as its test asserts, and retries only `429`, `500`, `502`, `503` and `504`. The documents and the requirement now say what the code does | #21 |
 | DEF-039 | 7 | Low | Auditing the documents against the code | `make coverage`, documented as unit tests with no Docker needed, selected `not integration`: it also ran the 20 end-to-end and 73 dashboard tests, which need the services and a browser. It now uses the unit layer's selection, and a test checks that `make test` and `make coverage` match the regression's unit layer (REQ-QA-003) | #21 |
+| DEF-040 | 8 | Medium | The first parity test run | Updating the snapshot in a direct round that merged no records failed: DuckDB's `executemany` rejects an empty list of rows, so every such round stopped before writing its snapshot. The removed keys are now inserted only when there are some; every round without a merge covers it | #24 |
+| DEF-041 | 8 | Low | The interrupted-round tests, comparing buckets byte for byte | The manifest and the ID map were gzipped with the current time in the gzip header, so the same rows written a second later gave different objects, and a bucket could not be compared byte for byte with another holding the same data. Both are now gzipped with a fixed time; a test checks the header | #24 |
 
 ## By how they were found
 

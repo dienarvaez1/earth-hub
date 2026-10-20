@@ -1,4 +1,4 @@
-.PHONY: help install up down reset ingest ingest-once ingest-logs ingest-stop api api-dev api-stop kafka-ui kafka-ui-stop backfill catchup-once consume reconcile export-r2 export-r2-runs r2-ls r2-count r2-get dashboard-install dashboard-build dashboard-dev dashboard-deploy test-dashboard check-db-outage lint format test test-integration test-e2e test-disruptive test-performance test-all regression flake-check traceability smoke smoke-restart migrate coverage
+.PHONY: help install up down reset ingest ingest-once ingest-logs ingest-stop api api-dev api-stop kafka-ui kafka-ui-stop backfill catchup-once consume reconcile reconcile-direct export-r2 export-r2-runs r2-ls r2-count r2-get dashboard-install dashboard-build dashboard-dev dashboard-deploy test-dashboard check-db-outage lint format test test-integration test-e2e test-disruptive test-performance test-all regression flake-check traceability smoke smoke-restart migrate coverage
 
 help: ## List the available commands
 	@grep -E '^[a-z0-9-]+:.*## ' $(MAKEFILE_LIST) | awk -F ':.*## ' '{printf "  %-17s %s\n", $$1, $$2}'
@@ -89,6 +89,9 @@ dashboard-deploy: dashboard-build ## Publish the dashboard to Cloudflare Workers
 
 reconcile: ## Check every Kafka message has a database row, and the tables' invariants
 	uv run python -m earth_hub.reconcile
+
+reconcile-direct: ## Check direct mode's state in R2 (read-only): make reconcile-direct [DEEP=1]
+	uv run python -m earth_hub.direct.reconcile $(if $(DEEP),--deep)
 
 check-db-outage: ## Stop PostgreSQL mid-stream and check nothing is lost (disruptive)
 	uv run pytest tests/disruptive --run-disruptive -k database_outage
