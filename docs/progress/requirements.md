@@ -183,6 +183,8 @@ The dashboard's SQL lives in `dashboard/queries/`; the page runs it in the brows
 | REQ-DASH-015 | The custom calendar allows only days from the first day with data to today (others greyed out; a typed day outside is moved to the nearest allowed one), and the magnitude filter is two lists of the legend's boundaries: Min (Below 2.5, 2.5, 4.5, 6) and Max, meaning below (2.5, 4.5, 6, 6 and above), the open ends named after the end bands and chosen by default; choices that would select nothing are greyed out |
 | REQ-DASH-016 | The page links to `third-party-licenses.txt`, generated at build time with the license of every package bundled into the page and of the DuckDB extension it serves; the build fails if a package's license text is missing (DEF-035) |
 | REQ-DASH-017 | Until the release, the page is marked "Preview — in development" and kept out of search engines: `X-Robots-Tag: noindex, nofollow` on every response (page, files and `/data/*`), a `robots` meta tag, and a `robots.txt` that disallows everything |
+| REQ-DASH-018 | The significant-events table sorts by any of its Time, Magnitude, Place and Depth columns from a button in the column's header: ascending, then descending, then back to the order the table was chosen in; ties keep that order, events without a place come last, and the header says which sort is on (`aria-sort`). The sort reorders the events shown, stays when the filters change, and is cleared when Latest or Largest picks other events |
+| REQ-DASH-019 | A map point's popup gives the event's time in UTC and, on the next line, at the place it happened: in the time zone its coordinates fall in (a nautical zone at sea), with the zone's summer time and abbreviation, the zone's name on hover |
 
 ## End-to-end scenarios
 

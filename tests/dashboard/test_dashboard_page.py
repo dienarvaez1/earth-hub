@@ -5,6 +5,7 @@ import json
 from datetime import datetime, timedelta
 
 import pytest
+from support.dashboard_data import EVENTS
 
 pytestmark = pytest.mark.req("REQ-DASH-007")
 
@@ -203,6 +204,86 @@ def test_the_table_lists_the_latest_or_the_largest(browser_page, large_server):
     assert shown() != table(large_server.latest)
     browser_page.after_update(lambda: page.check("input[name=order][value=latest]"))
     assert shown() == table(large_server.latest)
+    assert browser_page.errors == [] and browser_page.blocked == []
+
+
+@pytest.mark.req("REQ-DASH-019")
+def test_a_popup_gives_the_time_in_utc_and_where_the_event_happened(browser_page, server):
+    """The fixed events are in Alaska, either side of the change to summer time (10 March 2024,
+    11:00 UTC): AKST is UTC-9, AKDT UTC-8."""
+    browser_page.open(server.url, now="2024-03-10T12:00:00+00:00", period="this_year")
+    page = browser_page.page
+
+    def popup(key: str) -> dict:
+        assert page.evaluate("key => window.__earthHub.openPopup(key)", key)
+        lines = {
+            name: page.inner_text(f".maplibregl-popup [data-testid=popup-{name}]")
+            for name in ("details", "utc", "local")
+        }
+        lines["zone"] = page.get_attribute(".maplibregl-popup [data-testid=popup-local]", "title")
+        page.click(".maplibregl-popup-close-button")
+        return lines
+
+    before = popup(EVENTS[1]["key"])  # 2024-02-29 00:00 UTC
+    assert before["utc"] == "2024-02-29 00:00 UTC"
+    assert before["local"] == "2024-02-28 15:00 AKST"
+    assert before["zone"] == "America/Anchorage"
+    after = popup(EVENTS[5]["key"])  # 2024-03-10 23:00 UTC, after the change
+    assert (after["utc"], after["local"]) == ("2024-03-10 23:00 UTC", "2024-03-10 15:00 AKDT")
+    assert after["details"].startswith("M 5.2 · ")  # magnitude and depth on their own line
+    assert browser_page.errors == [] and browser_page.blocked == []
+
+
+@pytest.mark.req("REQ-DASH-018")
+def test_the_table_sorts_by_each_column_header(browser_page, large_server):
+    browser_page.open(large_server.server.url, now=LARGE_NOW, period="last_3_years")
+    page = browser_page.page
+    latest = large_server.latest
+
+    def shown() -> list[str]:
+        return page.eval_on_selector_all(
+            "#significant tbody tr", "rows => rows.map(r => r.cells[0].textContent)"
+        )
+
+    def times(rows) -> list[str]:
+        return [r["event_ts"].isoformat(sep=" ")[:16] for r in rows]
+
+    def header(key: str) -> str:
+        return page.get_attribute(f"#significant th:has(button[data-sort={key}])", "aria-sort")
+
+    def click(key: str) -> None:
+        page.click(f"#significant button[data-sort={key}]")
+
+    def by(field, reverse=False):
+        return sorted(latest, key=lambda r: r[field], reverse=reverse)
+
+    assert shown() == times(latest) and header("magnitude") == "none"
+    for key in ("event_ts", "magnitude", "place", "depth_km"):
+        click(key)
+        assert shown() == times(by(key)), key
+        assert header(key) == "ascending"
+        click(key)
+        # Descending; ties keep the table's own order, so this is not ascending reversed.
+        expected = sorted(latest, key=lambda r: r[key], reverse=True)
+        assert shown() == times(expected), key
+        assert header(key) == "descending"
+        click(key)
+        assert shown() == times(latest) and header(key) == "none", key
+
+    # Kept when the filters change; cleared when Latest or Largest picks other events.
+    click("magnitude")
+    browser_page.after_update(lambda: page.select_option("select[name=min_magnitude]", "6"))
+    assert header("magnitude") == "ascending"
+    rows = page.eval_on_selector_all(
+        "#significant tbody tr", "rows => rows.map(r => Number(r.cells[1].textContent))"
+    )
+    assert rows == sorted(rows)
+    browser_page.after_update(lambda: page.check("input[name=order][value=largest]"))
+    assert header("magnitude") == "none"
+    # A header is a real button: reachable from the keyboard.
+    page.focus("#significant button[data-sort=depth_km]")
+    page.keyboard.press("Enter")
+    assert header("depth_km") == "ascending"
     assert browser_page.errors == [] and browser_page.blocked == []
 
 
