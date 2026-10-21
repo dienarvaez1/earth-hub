@@ -39,6 +39,7 @@ Run from the repository root. One marker in the bucket, `_state/mode.json`, says
 
 The mode and since when, whether the schedule is active (direct mode) or paused (full mode), and the last
 scheduled run's result. After a handover: the command's last lines and `make -s mode`. After a round: the
-new log file (`make -s r2-ls PREFIX=log/ LIMIT=1000 | tail -1`) and the dashboard's run
+new sequence number and time, `make -s r2-get KEY=_state/direct.json | jq -c '{seq, written_at}'`, today's newest log files,
+`make -s r2-ls PREFIX=log/$(date -u +%F)/ LIMIT=0 | tail -3` (the previous day's folder if empty), and the dashboard's run
 (`/eh-dashboard`). In direct mode, say the computer can be closed; in full mode, that the dashboard updates
 only while this machine runs the pipeline and exports.

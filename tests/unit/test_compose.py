@@ -1,5 +1,6 @@
 """Settings in docker-compose.yml that behaviour depends on."""
 
+import re
 from pathlib import Path
 
 import pytest
@@ -30,3 +31,19 @@ def test_only_the_backfill_consumer_takes_batches(services):
     # Both still reach Kafka and PostgreSQL by their in-network names.
     for name in ("consumer", "consumer-backfill"):
         assert services[name]["environment"]["KAFKA_BOOTSTRAP_SERVERS"] == "kafka:9092"
+
+
+@pytest.mark.req("REQ-MODE-010")
+def test_every_target_that_starts_our_services_builds_their_image_first(services):
+    # DEF-046: `make mode-full` started the consumers from an image built before the replay
+    # headers existed, so the replay was stored at its own time instead of direct mode's.
+    ours = {name for name, s in services.items() if s.get("image") == "earth-hub:dev"} - {"migrate"}
+    recipes = re.findall(r"^([a-z0-9-]+):.*\n((?:\t.*\n?)+)", (REPO / "Makefile").read_text(), re.M)
+    starting = {}
+    for target, recipe in recipes:
+        lines = recipe.splitlines()
+        for i, line in enumerate(lines):
+            if " up " in line and ours & set(line.split()):
+                starting[target] = any(" build" in earlier for earlier in lines[:i])
+    assert {"ingest", "api", "mode-full"} <= set(starting)
+    assert [target for target, built in starting.items() if not built] == []

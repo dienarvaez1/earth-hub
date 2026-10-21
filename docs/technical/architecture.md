@@ -154,7 +154,7 @@ How a message changes the tables, one transaction per message, is in [the schema
 | --- | --- |
 | `earthquakes/<key>.json` | One object per row, every column but the database's `id`; `key` is the USGS ID the record was created with |
 | `_state/earthquakes-manifest.json.gz` | SHA-256 of each row as last uploaded |
-| `_state/lock.json` | Held while a run is in progress (expires after 2 hours if a run crashes) |
+| `_state/lock.json` | Held while a run is in progress: taken for 30 minutes and renewed every 5 while the run lasts, so a second export is refused however long the first takes; a run that crashes frees it within 30 minutes. A run whose lock was taken over stops writing (DEF-048) |
 | `_state/mode.json` | Which mode writes the bucket; an export runs only in full mode ([direct mode](#switching-modes)) |
 | `runs/<run_id>.json` | One record per run: status, counts, timings, errors (also in `reports/exports/`) |
 | `analytics/earthquakes.parquet` | The whole table in one Parquet file for the dashboard, every row and published column with types kept, in `key` order (about 7.5 MB for 115,000 rows) |
@@ -302,7 +302,7 @@ sequenceDiagram
 3. **Replays every entry, in order,** onto partition 0 of `earthquakes.backfill`, with its processing time and sequence number in Kafka headers. The backfill consumer stores each one with that time, and processes each of direct mode's rounds as a batch, so PostgreSQL gets the same records, IDs, processing times and outcomes.
 4. **Checks before switching.** Once the consumers have caught up, `make reconcile` must pass and an export dry run must find nothing to change. Only then does the marker say `full`, with catch-up's checkpoints copied to PostgreSQL.
 
-If a check fails, the bucket goes back to direct mode. A replay interrupted and run again finds what it already sent by sequence number in the topic, and sends only the rest.
+If a check fails, the bucket goes back to direct mode. A replay interrupted and run again, or a handover tried again after a failed check, finds what it already sent by sequence number in the topic, from where the first attempt began (`replay_from` in the marker, cleared when a handover succeeds), and sends only the rest (DEF-047). `make mode-full` rebuilds the image before starting the consumers, so they run the code that reads the replay's headers (DEF-046).
 
 Catch-up's "is this stored?" is answered from the ID map and the snapshot, with the same rule as full mode (`revisions.needed`); its checkpoints are kept in `_state/direct.json`. A full-year backfill stays a full-mode job.
 

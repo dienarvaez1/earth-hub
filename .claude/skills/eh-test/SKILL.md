@@ -15,14 +15,14 @@ Run from the repository root. Report real results; never call something passing 
 | `integration` | `uv run pytest tests/integration -m integration` | `make up` | ~1 min |
 | `api` | `uv run pytest tests/api -m integration --deselect tests/api/test_contract.py` | `make up` | ~5 s |
 | `contract` | `uv run pytest tests/api/test_contract.py -m integration` (`CONTRACT_EXAMPLES=1000` for a deeper run) | `make up` | ~10 s |
-| `e2e` | `make test-e2e` | `make up` | ~40 s |
+| `e2e` | `make test-e2e` | `make up` | ~75 s |
 | `dashboard` | `make test-dashboard` | `make dashboard-install` | 3–6 min |
 | `disruptive` | `make test-disruptive` | `make up`; **stops and starts the shared Kafka and PostgreSQL** | ~1 min |
 | `performance` | `make test-performance` | `make up` | ~6 min |
 | `load` | `make load [USERS=50] [RUN_TIME=60s]`: Locust over 140,000 synthetic events in a temporary database; report `reports/load-report.html` and `reports/load_*.csv` | `make up` | ~2 min |
 | `load-ui` | `make load-ui`: the same in Locust's web UI, http://127.0.0.1:8089, until Ctrl-C | `make up` | |
 | `regression` | `make regression`: every layer in order, reports in `reports/`, the traceability matrix | all of the above | ~15 min |
-| `flake` | `make flake-check`: the end-to-end suite 5 times | `make up` | ~4 min |
+| `flake` | `make flake-check`: the end-to-end suite 5 times | `make up` | ~6 min |
 | `traceability` | `make traceability` (from the last regression's results) | — | < 1 s |
 | `coverage` | `make coverage` | — | ~15 s |
 | `REQ-…` | `grep -rln '"<REQ-ID>"' tests` finds the files whose tests name it (the marker's ID, as in `docs/progress/traceability-matrix.md`); run those files with their layer's options, e.g. `uv run pytest tests/api/test_lookup.py -m integration` | the layer's | |

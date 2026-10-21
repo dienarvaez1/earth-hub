@@ -13,6 +13,10 @@ and if it doesn't answer, start it with `make api` first (say so).
 **Full mode only.** The exporter checks the bucket's mode marker after taking the lock, and refuses in
 direct mode ("the bucket is in direct mode, not full (make mode)"): there, the hourly direct rounds write the
 rows and the snapshot themselves. Check `make -s mode` first; to export again, hand back with `/eh-mode full`.
+A **dry run** is not refused in direct mode (it takes no lock and writes nothing to the bucket), but its counts
+then compare a PostgreSQL that has fallen behind with the bucket: the rows direct mode stored show as
+`deleted` or `updated`. Say so instead of reporting them as changes; after `make mode-full` it should find
+new 0, updated 0, deleted 0.
 
 | Argument | Command | Writes to R2 |
 | --- | --- | --- |
@@ -23,7 +27,8 @@ rows and the snapshot themselves. Check `make -s mode` first; to export again, h
 
 - With no argument, do the dry run and show what a real run would change; run the export only when the user
   said `run` or `verify` (or confirms after the dry run).
-- Only one run at a time: a lock in the bucket (`_state/lock.json`, expiring after 2 h) refuses a second one.
+- Only one run at a time: a lock in the bucket (`_state/lock.json`) refuses a second one. The running export renews
+  it every 5 minutes for as long as it lasts; a run that crashed leaves it to expire within 30 minutes.
   If a run reports the lock is held, don't remove it; say who holds it and when it expires.
 - Run it in the background if it may take long (a first full export of ~115,000 rows takes over an hour).
 - The public dashboard reads the new snapshot within 5 minutes (its browser cache).

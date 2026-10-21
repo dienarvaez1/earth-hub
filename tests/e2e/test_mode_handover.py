@@ -306,6 +306,30 @@ def test_a_replay_repeated_after_a_crash_sends_nothing_twice(trip, monkeypatch):
     assert tables(trip.pipeline.db) == tables(trip.reference)
 
 
+@pytest.mark.req("REQ-MODE-011")
+def test_a_handover_retried_after_a_failed_check_sends_nothing_twice(trip, monkeypatch):
+    """DEF-047: a failed check returns the bucket to direct mode; the next attempt used to take a
+    new replay_from, miss what the first had sent, and send every entry again."""
+    phase_one(trip)
+    trip.to_direct()
+    phase_two(trip, trip.runner())
+    sent = trip.pipeline.messages_in_topic(trip.pipeline.backfill_topic)
+
+    with monkeypatch.context() as patched:
+        patched.setattr(trip, "problems", lambda: ["simulated: a check failed"])
+        with pytest.raises(HandoverFailed, match="simulated: a check failed"):
+            trip.to_full()
+    marker = mode.read(trip.bucket)
+    assert (marker.mode, marker.state) == (mode.DIRECT, mode.ACTIVE)
+    first = trip.pipeline.messages_in_topic(trip.pipeline.backfill_topic) - sent
+
+    trip.direct(trip.runner(), [trip.feature("hv5")])  # direct mode carries on meanwhile
+    result = trip.to_full()
+    assert (result.replayed, result.already_replayed) == (1, first)
+    assert trip.pipeline.messages_in_topic(trip.pipeline.backfill_topic) == sent + first + 1
+    assert tables(trip.pipeline.db) == tables(trip.reference)
+
+
 @pytest.mark.req("REQ-MODE-009")
 def test_a_handover_to_direct_needs_full_mode_idle(trip):
     phase_one(trip)
