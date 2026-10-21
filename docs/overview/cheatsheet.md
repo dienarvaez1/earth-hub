@@ -63,7 +63,7 @@ Always send a User-Agent: `UA="earth-hub (manual check)"`.
 | `/eh-poller health` | `docker compose exec -T poller python -m earth_hub.healthcheck poller` | 0 if a round succeeded within 3 poll intervals |
 | `/eh-backfill 2026-01-01` | `make backfill START=2026-01-01 [END=2026-06-01]` ⚠ | History from FDSN, one week per request; re-runs skip finished weeks |
 | `/eh-backfill catchup` | `make catchup-once` ⚠ | One `all_month` pass and one deleted-events check |
-| `/eh-backfill progress` | `docker compose exec -T postgres psql -U earth_hub_app earth_hub -c "SELECT job, status, count(*), sum(fetched) FROM backfill_windows GROUP BY 1, 2"` | Which weeks are done |
+| `/eh-backfill progress` | `docker compose exec -T postgres psql -U earth_hub_app earth_hub -c "SELECT job, status, count(*), sum(fetched), sum(rejected) FROM backfill_windows GROUP BY 1, 2"` | Which weeks are done, and the features dropped before Kafka |
 | `/eh-status reconcile` | `make reconcile` | Every Kafka message has a database row; 5 invariants hold |
 
 ## 4. Kafka

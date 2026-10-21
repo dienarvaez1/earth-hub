@@ -1,4 +1,5 @@
 import json
+import logging
 from datetime import UTC, datetime, timedelta
 
 import httpx
@@ -117,6 +118,37 @@ def test_deleted_check_asks_only_for_deletions_since_the_last_check(
     assert query["includedeleted"] == "only"
     assert query["updatedafter"] == last_check.strftime("%Y-%m-%dT%H:%M:%S")
     assert progress.points["deleted"] == NOW
+
+
+@pytest.mark.req("REQ-BF-014")
+def test_catch_up_logs_and_counts_the_features_it_drops(
+    make_job, month_feed, fdsn_server, fake_producer, feature_template, caplog
+):
+    caplog.set_level(logging.INFO)
+    month_feed.show(
+        event_at(feature_template, "a", NOW - timedelta(days=2)),
+        event_at(feature_template, "", NOW - timedelta(days=3)),
+    )
+    fdsn_server.put(
+        event_at(
+            feature_template,
+            "",
+            NOW - timedelta(days=5),
+            status="deleted",
+            updated=timedelta(days=4, hours=23),
+        )
+    )
+    job, _ = make_job()
+    assert job.catch_up() == 1
+    assert job.check_deleted() == 0
+    rejected = [r for r in caplog.records if r.getMessage() == "feature rejected"]
+    assert [(r.stage, r.job, r.event_id) for r in rejected] == [
+        ("parse", "catchup", ""),
+        ("parse", "deleted", ""),
+    ]
+    summaries = {r.getMessage(): r.rejected for r in caplog.records if hasattr(r, "rejected")}
+    assert summaries == {"catch-up pass": 1, "deleted-events check": 1}
+    assert [e["event_id"] for _, e in published(fake_producer)] == ["a"]
 
 
 def test_first_deleted_check_looks_back_30_days(make_job, fdsn_server):

@@ -20,7 +20,7 @@ from pathlib import Path
 
 from earth_hub.database.progress import Progress
 from earth_hub.ingestion.backfill import MIN_SPLIT
-from earth_hub.ingestion.events import InvalidFeed, parse_feed
+from earth_hub.ingestion.events import InvalidFeed, log_rejected, parse_feed
 from earth_hub.ingestion.fdsn import MAX_RESULTS, FdsnClient, FdsnTooSlow, FdsnUnavailable
 from earth_hub.ingestion.producer import EventPublisher
 from earth_hub.ingestion.usgs_client import FeedUnavailable, UsgsClient
@@ -66,6 +66,7 @@ class CatchUp:
             self._done("catchup", now)
             return 0
         parsed = parse_feed(response.body or b"", fetched_at=response.fetched_at, source="catchup")
+        log_rejected(logger, parsed.rejected, job="catchup")
         to_send = self._progress.needs_publish(parsed.messages)
         outcome = self._publisher.publish(to_send)
         if not outcome.failed:  # otherwise the next pass gets the full feed again
@@ -79,6 +80,7 @@ class CatchUp:
                 "published": len(outcome.delivered),
                 "failed": len(outcome.failed),
                 "already_stored": len(parsed.messages) - len(to_send),
+                "rejected": len(parsed.rejected),
             },
         )
         return len(outcome.delivered)
@@ -90,21 +92,27 @@ class CatchUp:
         since = floor_to_second(
             self._progress.checkpoint("deleted") or started - FIRST_DELETED_CHECK
         )
-        published = self._deleted(Window(started - DELETED_LOOKBACK, started), since)
+        published, rejected = self._deleted(Window(started - DELETED_LOOKBACK, started), since)
         self._progress.set_checkpoint("deleted", started)
         logger.info(
             "deleted-events check",
-            extra={"stage": "publish", "since": since, "published": published},
+            extra={
+                "stage": "publish",
+                "since": since,
+                "published": published,
+                "rejected": rejected,
+            },
         )
         return published
 
-    def _deleted(self, window: Window, since: datetime) -> int:
+    def _deleted(self, window: Window, since: datetime) -> tuple[int, int]:
+        """(published, rejected) for the deleted events updated in `window` since `since`."""
         try:
             expected = self._fdsn.count(
                 window.start, window.end, include_deleted="only", updated_after=since
             )
             if expected > MAX_RESULTS:
-                return sum(self._deleted(part, since) for part in window.split())
+                return self._deleted_parts(window, since)
             body = self._fdsn.query(
                 window.start, window.end, include_deleted="only", updated_after=since
             )
@@ -112,12 +120,17 @@ class CatchUp:
             # USGS times out on large windows; smaller ones on the same boundaries are fine.
             if window.end - window.start <= MIN_SPLIT:
                 raise
-            return sum(self._deleted(part, since) for part in window.split())
+            return self._deleted_parts(window, since)
         parsed = parse_feed(body, fetched_at=self._clock(), source="deleted")
+        log_rejected(logger, parsed.rejected, job="deleted", start=window.start, end=window.end)
         outcome = self._publisher.publish(self._progress.needs_publish(parsed.messages))
         if outcome.failed:
             raise FdsnUnavailable(f"{len(outcome.failed)} deleted events not delivered")
-        return len(outcome.delivered)
+        return len(outcome.delivered), len(parsed.rejected)
+
+    def _deleted_parts(self, window: Window, since: datetime) -> tuple[int, int]:
+        parts = [self._deleted(part, since) for part in window.split()]
+        return sum(p for p, _ in parts), sum(r for _, r in parts)
 
     def due(self, name: str, interval: timedelta) -> bool:
         last = self._last_catchup if name == "catchup" else self._progress.checkpoint(name)

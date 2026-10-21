@@ -415,7 +415,7 @@ The stages, in pipeline order (`earth_hub/observability.py`):
 | Stage | Service | Lines |
 | --- | --- | --- |
 | `fetch` | poller, backfill, catch-up | reading the USGS feed or FDSN service, and its failures |
-| `parse` | poller | a feature without `id`, `updated` or `time`, rejected before Kafka (`feature rejected`) |
+| `parse` | poller, catch-up, backfill | a feature without `id`, `updated` or `time`, rejected before Kafka (`feature rejected`, with its reason; backfill and catch-up add the job and window) |
 | `publish` | poller, backfill, catch-up | each event sent to Kafka (`event published`), delivery failures, the round summary |
 | `persist` | consumers | each message stored, rejected or failed, retries while the database is down, the summary |
 

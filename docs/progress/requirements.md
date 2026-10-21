@@ -38,6 +38,7 @@ Every table row that starts with `| REQ-` is read by the tooling: keep one requi
 | REQ-BF-011 | A full year of history backfills through the whole pipeline in 3 minutes or less, with exact totals in the API |
 | REQ-BF-012 | Live events keep their normal latency while a backfill is being consumed |
 | REQ-BF-013 | A window USGS times out on (504 or no answer in time) is not retried as is, but split into days, and smaller if needed, on the same boundaries; a resumed week continues with its remaining days |
+| REQ-BF-014 | A feature dropped before Kafka by backfill or catch-up (no usable `id`, `updated` or `time`, as USGS sends some deletions) is logged once with its reason (`feature rejected`) and counted: per window in `backfill_windows.rejected`, and in catch-up's `catch-up pass` and `deleted-events check` lines |
 | REQ-CU-001 | Catch-up reads the `all_month` feed hourly and on startup, recovering revisions and outages up to 30 days old |
 | REQ-CU-002 | A daily check publishes events USGS marked deleted since the previous check |
 | REQ-PER-015 | Processing messages in a batch gives exactly the same stored results as processing them one by one |

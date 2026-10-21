@@ -6,6 +6,7 @@ as-is and leaves an audit trail downstream.
 """
 
 import json
+import logging
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
@@ -58,6 +59,22 @@ class RejectedFeature:
     index: int
     event_id: str | None
     reason: str
+
+
+def log_rejected(logger: logging.Logger, rejected: list[RejectedFeature], **context) -> None:
+    """One `feature rejected` line per feature dropped before Kafka, wherever a feed is read
+    (the poller, catch-up, backfill), so every one can be found: they reach no table."""
+    for feature in rejected:
+        logger.warning(
+            "feature rejected",
+            extra={
+                "stage": "parse",
+                "index": feature.index,
+                "event_id": feature.event_id,
+                "reason": feature.reason,
+                **context,
+            },
+        )
 
 
 @dataclass(frozen=True)

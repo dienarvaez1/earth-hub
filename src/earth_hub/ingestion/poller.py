@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
-from earth_hub.ingestion.events import EventMessage, InvalidFeed, parse_feed
+from earth_hub.ingestion.events import EventMessage, InvalidFeed, log_rejected, parse_feed
 from earth_hub.ingestion.producer import EventPublisher
 from earth_hub.ingestion.state import SentState
 from earth_hub.ingestion.usgs_client import FeedUnavailable, UsgsClient
@@ -87,16 +87,7 @@ class Poller:
             )
             return RoundResult("failed", expires=response.expires)
 
-        for rejected in parsed.rejected:
-            logger.warning(
-                "feature rejected",
-                extra={
-                    "stage": "parse",
-                    "index": rejected.index,
-                    "event_id": rejected.event_id,
-                    "reason": rejected.reason,
-                },
-            )
+        log_rejected(logger, parsed.rejected)
 
         candidates = self._changed(parsed.messages)
         outcome = self._publisher.publish(candidates)

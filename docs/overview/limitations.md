@@ -7,6 +7,7 @@ What Earth-Hub doesn't do, or does only within limits. These are deliberate trad
 - **City, region and country are derived from USGS's `place` text** (`validation/places.py`). Text that doesn't follow "<distance> of <city>, <area>", such as `Fiji region`, gives none, and the dashboard groups those events as `Unknown`. Only the codes seen so far are translated (`MX`, `B.C.`, and the US state codes). `place` itself is always kept unchanged.
 - **Magnitude statistics mix scales** (`ml`, `mb`, `mww`, …), as USGS reports them. `by_magnitude_type` says which ones went into a figure.
 - **FDSN ignores milliseconds** in query times. Backfill windows are whole seconds, and events are fetched by the window they fall in, not by an exact time.
+- **Deletions without an `id` are dropped before Kafka**, logged and counted, but never stored (REQ-BF-014). Almost all name no event; a rare one names it only in `ids`, and would leave that event visible if it had been stored. None so far has been.
 - **USGS deletes duplicates** after merging them. Earth-Hub keeps the event that absorbed a duplicate visible (DEF-026), but the rules for this come from cases seen live, not from a USGS specification.
 
 ## Freshness
