@@ -8,6 +8,8 @@ What Earth-Hub doesn't do, or does only within limits. These are deliberate trad
 - **Magnitude statistics mix scales** (`ml`, `mb`, `mww`, …), as USGS reports them. `by_magnitude_type` says which ones went into a figure.
 - **FDSN ignores milliseconds** in query times. Backfill windows are whole seconds, and events are fetched by the window they fall in, not by an exact time.
 - **Deletions without an `id` are dropped before Kafka**, logged and counted, but never stored (REQ-BF-014). Almost all name no event; a rare one names it only in `ids`, and would leave that event visible if it had been stored. None so far has been.
+- **USGS can split what it once merged; Earth-Hub doesn't.** A record keeps every ID it was ever given, so when USGS later lists them as two events, Earth-Hub still holds one: on 2026-10-20 the M6.6 `us6000u3jl` and `pt26293000`. `make reconcile-usgs` reports it as `split at USGS`, unexplained; nothing undoes the merge.
+- **The same revision can carry different times.** For `uw` events FDSN's `updated` is 5 to 9 s later than the summary feeds'. `make reconcile-usgs` treats times within 60 s as one revision; a backfill over events the live feed stored can apply such a revision again (no data changes, `revision_count` goes up by one).
 - **USGS deletes duplicates** after merging them. Earth-Hub keeps the event that absorbed a duplicate visible (DEF-026), but the rules for this come from cases seen live, not from a USGS specification.
 
 ## Freshness

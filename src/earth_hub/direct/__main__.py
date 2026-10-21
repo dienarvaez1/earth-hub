@@ -5,7 +5,8 @@ PostgreSQL, only R2 credentials. Runs only while the bucket's marker says `direc
 (make mode-direct hands over from full mode).
 
 - `once`: one poller round, then catch-up's month-feed pass and deleted-events check if
-  they are due by their checkpoints in the bucket; then exit. Suited to a schedule.
+  they are due by their checkpoints in the bucket; then exit. Suited to a schedule. With
+  `--all`, both run whether due or not (make catchup-now, and the end of make mode-direct).
 - `run`: the poller, waiting for each new feed version, and catch-up's loop beside it,
   until stopped (Ctrl-C or SIGTERM), or until a handover (make mode-full) freezes the
   bucket: its next round then finds the bucket no longer in direct mode, and it stops.
@@ -43,6 +44,11 @@ def main(argv: list[str] | None = None) -> int:
         "--skip-unless-direct",
         action="store_true",
         help="exit 0 without writing when the bucket is not in direct mode (for a schedule)",
+    )
+    parser.add_argument(
+        "--all",
+        action="store_true",
+        help="once: run catch-up and the deleted-events check even if they are not due",
     )
     args = parser.parse_args(argv)
     configure_logging()
@@ -97,7 +103,7 @@ def main(argv: list[str] | None = None) -> int:
                 ("deleted", settings.deleted_check_interval_seconds, catchup.check_deleted),
             ):
                 last = progress.checkpoint(name)
-                if last is None or now - last >= timedelta(seconds=interval):
+                if args.all or last is None or now - last >= timedelta(seconds=interval):
                     print(f"direct: {name}: {job()} events processed")
             return 0 if result.status != "failed" else 1
 

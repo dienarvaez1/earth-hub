@@ -252,6 +252,8 @@ make mode-full     # replay direct mode's log into full mode, check, switch back
 
 **Switching loses nothing.** While a handover runs, neither mode polls, but USGS's day feed lists every event of the last 24 hours, so the first round of the mode taking over picks up what was published or revised meanwhile: the events are late by the handover's length, never lost. `make mode-direct` restarts full mode's poller and catch-up if the handover fails; `make mode-full` restarts them when it succeeds, and a running `make direct-run` stops by itself once the bucket is frozen. `tests/e2e/test_mode_switching.py` switches back and forth twice while the feed changes, during the handovers too, and checks after every switch that every event is served at its latest version.
 
+**After every switch, the mode taking over catches up at once and is checked against USGS** ([below](#reconciliation-with-usgs)): `make mode-direct` ends with a direct round that runs catch-up and the deleted-events check whether due or not, `make mode-full` with a catch-up pass and a deleted-events check; each then runs `make reconcile-usgs`. A difference it cannot explain makes the command fail after the switch, which stands.
+
 **Full → direct** (`make mode-direct`):
 
 ```mermaid
@@ -309,6 +311,39 @@ Catch-up's "is this stored?" is answered from the ID map and the snapshot, with 
 **`make reconcile-direct [DEEP=1]`** checks the bucket without writing: row objects, manifest, snapshot and ID map list the same records, and the snapshot gives the manifest's fingerprints; every record's key, preferred ID and revision IDs point to it; the log's sequence numbers have no gap; no round is unfinished. `DEEP=1` also reads every row object (one request each). It exits 1 if anything is broken.
 
 **R2 operations:** about 10 writes and 7 reads per live round (lock, redo record, rows, ID map, manifest, snapshot, `meta.json`, log, state). At the measured live load (437 rounds and 24 catch-up passes a day), that is about 16% of R2's 1,000,000 free Class A operations a month, and under half at three times the load (`tests/unit/test_direct_budget.py`). Reads stay near 1% of the 10,000,000 Class B allowance.
+
+## Reconciliation with USGS
+
+The other checks compare Earth-Hub with itself: `make reconcile` Kafka with PostgreSQL, `make reconcile-direct` the bucket's parts, the handovers one mode with the other. **`make reconcile-usgs [DAYS=3]`** compares the mode that writes the bucket with USGS itself, for the last few UTC days (today included), and explains every difference by when Earth-Hub last read the USGS source that brings it (`earth_hub/usgs_reconcile.py`, read-only):
+
+| Difference | Pending (explained) when | Otherwise |
+| --- | --- | --- |
+| USGS has the event, Earth-Hub doesn't (`missing`) | USGS updated it after that source was last read | unexplained |
+| Earth-Hub has it, USGS deleted it (`deleted at USGS`) | USGS deleted it after the last deleted-events check | unexplained |
+| Both have it, USGS's revision is newer (`older revision`) | USGS revised it after that source was last read | unexplained |
+| Earth-Hub has it deleted, USGS lists it (`deleted here`) | USGS revised it after the deletion and after that source was read | unexplained |
+| Earth-Hub has it, USGS has never heard of it (`unknown at USGS`) | never | unexplained |
+| USGS lists apart two events Earth-Hub merged into one record (`split at USGS`) | never: Earth-Hub never splits a record | unexplained |
+
+- **The source that brings an event** is the day feed for events of the 24 hours before it was last read, and catch-up's month feed for older ones; deletions come only from the deleted-events check. When each was last read: in full mode, the live topic's last delivery to PostgreSQL and catch-up's checkpoints in `ingestion_checkpoints`; in direct mode, the last direct round and the checkpoints in `_state/direct.json`.
+- **Events are matched by any of their IDs**, so a merged event counts once. One whose time USGS moved out of the window since is looked up by ID (at most 25 a run).
+- **Revision times within 60 seconds are the same revision.** For `uw` events FDSN reports `updated` 5 to 9 seconds later than the summary feeds the poller and catch-up read (measured 2026-10-21, 19 events in 3 days); without the tolerance each would look like a missed revision.
+- **Requests:** two FDSN queries a day (live and deleted events), with `FDSN_PAUSE_SECONDS` between them, and the lookups. It exits 1 if any difference is unexplained, 2 on missing settings or during a handover.
+
+```text
+Earth-Hub (direct mode, the bucket) against USGS, by UTC day of the event
+  last read: day feed 2026-10-21 03:37:44, month feed 2026-10-21 03:18:38, deletions 2026-10-20 10:50:58
+  2026-10-20: USGS 230, Earth-Hub 230; 7 pending, 0 unexplained
+    pending     2026-10-20 deleted at USGS ci41349567: USGS deleted it at 2026-10-20 13:09:04, after the last deleted-events check
+    pending     2026-10-20 missing         uw714122812: USGS updated it at 2026-10-21 04:04:36, after the day feed was last read
+RESULT: OK
+```
+
+**`make catchup-now`** closes what is pending, in either mode: in direct mode a direct round with catch-up and the deleted-events check whether due or not (`python -m earth_hub.direct once --all`), in full mode `make catchup-once` (the running poller reads the day feed every minute).
+
+**When it runs by itself:** at the end of `make mode-direct` and `make mode-full` (above), and every day in the scheduled reconcile ([CI](ci.md#direct-mode-on-a-schedule)), which also fails if no direct round has written for 2 hours: the alarm for a schedule GitHub stopped running.
+
+**With Claude Code:** `/eh-mode usgs` runs the check, `/eh-mode catchup` the catch-up.
 
 ## Dashboard
 

@@ -29,8 +29,9 @@ As of 2026-10-20. The plan below is the original, with Milestone 7 revised; the 
 | 8.3 The mode switch, handovers with log replay | Done | #25 |
 | Direct mode on GitHub Actions' hourly schedule, after 8.3 | Done | #27; skills and docs for the modes #28 |
 | Load test of the API with Locust, after 8 | Done | #26 |
+| Reconciliation with USGS, catching up after each switch | Done | #32 |
 
-Current numbers: 159 requirements, all covered by a passing test; 48 defects, all fixed; about 985 tests in the full regression.
+Current numbers: 162 requirements, all covered by a passing test; 48 defects, all fixed; about 985 tests in the full regression.
 
 ## 1. Project vision
 

@@ -115,6 +115,12 @@ class FdsnClient:
         params = self._params(start, end, include_deleted, updated_after) | {"orderby": "time-asc"}
         return self._get("query", params) or EMPTY_COLLECTION
 
+    def event(self, event_id: str) -> bytes | None:
+        """One event by any of its IDs, deleted ones included, as USGS has it now (a GeoJSON
+        Feature), or None if USGS has no such event."""
+        params = {"format": "geojson", "eventid": event_id, "includedeleted": "true"}
+        return self._get("query", params, missing_ok=True) or None
+
     @staticmethod
     def _params(start, end, include_deleted, updated_after) -> dict[str, str]:
         if end <= start:
@@ -129,7 +135,7 @@ class FdsnClient:
             params["updatedafter"] = fdsn_time(updated_after)
         return params
 
-    def _get(self, method: str, params: dict[str, str]) -> bytes:
+    def _get(self, method: str, params: dict[str, str], *, missing_ok: bool = False) -> bytes:
         url = f"{self.base_url}/{method}"
         last_error = "no attempts made"
         for attempt in range(1, self._max_attempts + 1):
@@ -142,8 +148,8 @@ class FdsnClient:
             except httpx.TransportError as exc:
                 last_error = f"{type(exc).__name__}: {exc}"
             else:
-                if response.status_code == 204:  # no events match
-                    return b""
+                if response.status_code == 204 or (missing_ok and response.status_code == 404):
+                    return b""  # no events match; an unknown event ID is a 404
                 if response.status_code == 200:
                     return response.content
                 if response.status_code == TOO_SLOW_STATUS:

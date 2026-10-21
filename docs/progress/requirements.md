@@ -150,6 +150,16 @@ Milestone 8: the pipeline without Docker, keeping its state in the bucket ([arch
 | REQ-MODE-013 | Switching modes back and forth while USGS keeps publishing, during the handovers too, loses no event and no revision: after each switch, the first round of the mode taking over picks up what changed meanwhile, and the API (full mode) or the bucket (direct mode) holds every event at its latest version |
 | REQ-MODE-014 | Run on a schedule (`--skip-unless-direct`), `direct once` and `make reconcile-direct` exit 0 without writing or checking while the bucket is not in direct mode, including when a handover freezes it during a round (catch-up then does not run); missing R2 settings still fail |
 
+## Reconciliation with USGS
+
+Earth-Hub against USGS itself, in the mode that writes the bucket ([architecture](../technical/architecture.md#reconciliation-with-usgs)).
+
+| ID | Requirement |
+| --- | --- |
+| REQ-REC-001 | `make reconcile-usgs` compares the last `DAYS` UTC days of the mode writing the bucket (PostgreSQL in full mode, the bucket's snapshot and ID map in direct mode) with USGS's FDSN service, matching events by any of their IDs, and explains each difference by when Earth-Hub last read the source that brings it: an event or revision USGS published after that read, or a deletion after the last deleted-events check, is pending; any other is unexplained and the command exits 1. Revision times within 60 s are the same revision |
+| REQ-REC-002 | After a successful switch, the mode taking over catches up at once and is checked against USGS: `make mode-direct` runs a direct round with catch-up and the deleted-events check whether due or not, `make mode-full` a catch-up pass and a deleted-events check, each then `make reconcile-usgs`; `make catchup-now` does the same catch-up in either mode |
+| REQ-REC-003 | The daily scheduled reconcile also runs the check against USGS, and fails (so GitHub e-mails) if no direct round has written for 2 hours, or a difference is unexplained |
+
 ## Dashboard
 
 The dashboard's SQL lives in `dashboard/queries/`; the page runs it in the browser over the R2 snapshot, and the tests run the same files.
