@@ -1,4 +1,4 @@
-.PHONY: help install up down reset ingest ingest-once ingest-logs ingest-stop api api-dev api-stop kafka-ui kafka-ui-stop backfill catchup-once consume reconcile reconcile-direct mode mode-direct mode-full direct-once direct-run export-r2 export-r2-runs r2-ls r2-count r2-get dashboard-install dashboard-build dashboard-dev dashboard-deploy test-dashboard check-db-outage lint format test test-integration test-e2e test-disruptive test-performance load load-ui test-all regression flake-check traceability smoke smoke-restart migrate coverage
+.PHONY: help install up down reset ingest ingest-once ingest-logs ingest-stop api api-dev api-stop kafka-ui kafka-ui-stop backfill catchup-once catchup-now reconcile-usgs consume reconcile reconcile-direct mode mode-direct mode-full direct-once direct-run export-r2 export-r2-runs r2-ls r2-count r2-get dashboard-install dashboard-build dashboard-dev dashboard-deploy test-dashboard check-db-outage lint format test test-integration test-e2e test-disruptive test-performance load load-ui test-all regression flake-check traceability smoke smoke-restart migrate coverage
 
 help: ## List the available commands
 	@grep -E '^[a-z0-9-]+:.*## ' $(MAKEFILE_LIST) | awk -F ':.*## ' '{printf "  %-17s %s\n", $$1, $$2}'
@@ -96,9 +96,12 @@ reconcile-direct: ## Check direct mode's state in R2 (read-only): make reconcile
 mode: ## Which mode writes the R2 bucket: full or direct
 	uv run python -m earth_hub.direct.handover status
 
-mode-direct: ## Hand over to direct mode: stop the poller and catch-up, export, write direct mode's state
+mode-direct: ## Hand over to direct mode: stop the poller and catch-up, export, write direct mode's state, catch up
 	docker compose stop poller catchup
 	uv run python -m earth_hub.direct.handover direct || { docker compose start poller catchup; echo "Handover failed: full mode resumed"; exit 1; }
+	@echo "Direct mode: catching up with USGS, then checking against it"
+	uv run python -m earth_hub.direct once --all
+	uv run python -m earth_hub.usgs_reconcile || { echo "Direct mode is on; the check against USGS found differences it cannot explain (above)"; exit 1; }
 	@echo "Direct mode: the hourly schedule writes the bucket now (or make direct-run, not both)"
 
 mode-full: ## Hand over to full mode: replay direct mode's log into Kafka, check, then switch
@@ -106,7 +109,20 @@ mode-full: ## Hand over to full mode: replay direct mode's log into Kafka, check
 	docker compose --profile ingest --profile api up -d --wait consumer consumer-backfill api
 	uv run python -m earth_hub.direct.handover full
 	docker compose up -d poller catchup
+	@echo "Full mode: catching up with USGS, then checking against it"
+	uv run python -m earth_hub.ingestion.catchup --once
+	uv run python -m earth_hub.usgs_reconcile --wait 300 || { echo "Full mode is on; the check against USGS found differences it cannot explain (above)"; exit 1; }
 	@echo "Full mode: the poller and catch-up are running again"
+
+catchup-now: ## Catch up with USGS now, in the mode that writes the bucket: day feed, month feed, deletions
+	@if uv run python -m earth_hub.direct.handover status | grep -q '^direct (active)'; then \
+		uv run python -m earth_hub.direct once --all; \
+	else \
+		uv run python -m earth_hub.ingestion.catchup --once; \
+	fi
+
+reconcile-usgs: ## Compare Earth-Hub with USGS for the last days, explaining every difference: [DAYS=3]
+	uv run python -m earth_hub.usgs_reconcile $(if $(DAYS),--days $(DAYS))
 
 direct-once: ## Direct mode: one poller round, and catch-up if due, straight to R2
 	uv run python -m earth_hub.direct once

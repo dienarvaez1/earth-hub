@@ -6,6 +6,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 from support.export import BUCKET, start_direct
+from support.fdsn import FdsnServer
 from support.feed import EventFactory, FeedServer
 
 from earth_hub.consumers.earthquake_consumer import PROCESSED_AT_HEADER, _processed_at
@@ -98,6 +99,7 @@ def direct_main(s3, monkeypatch, feature_template):
     feed = FeedServer()
     feed.show(EventFactory(feature_template)("ak1", minutes_ago=10))
     month = FeedServer()
+    fdsn = FdsnServer()
     monkeypatch.setattr("earth_hub.config.get_settings", lambda: settings)
     monkeypatch.setattr("earth_hub.export.bucket.make_s3_client", lambda settings: s3)
 
@@ -105,7 +107,8 @@ def direct_main(s3, monkeypatch, feature_template):
 
     def client(contact="", timeout_s=15.0, **kwargs):
         def route(request):
-            server = month if "all_month" in str(request.url) else feed
+            url = str(request.url)
+            server = fdsn if "fdsnws" in url else month if "all_month" in url else feed
             return server.transport.handle_request(request)
 
         return httpx.Client(transport=httpx.MockTransport(route))
@@ -143,6 +146,17 @@ def test_direct_once_runs_the_poller_and_catch_up_when_due(direct_main, s3, caps
     assert "catchup: 0 events processed" in out and "deleted" not in out
     row = json.loads(s3.get_object(Bucket=BUCKET, Key="earthquakes/ak1.json")["Body"].read())
     assert row["key"] == "ak1"
+
+
+@pytest.mark.req("REQ-REC-002")
+def test_direct_once_all_runs_catch_up_and_the_deleted_check_even_when_not_due(
+    direct_main, s3, capsys
+):
+    start_direct(s3)
+    deleted_checked_recently(s3)
+    assert direct_main(["once", "--all"]) == 0
+    out = capsys.readouterr().out
+    assert "catchup: 0 events processed" in out and "deleted: 0 events processed" in out
 
 
 @pytest.mark.req("REQ-MODE-012")

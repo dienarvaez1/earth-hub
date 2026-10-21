@@ -2,7 +2,9 @@
 # R2 with no machine of ours running.
 #
 # round      every hour: one poller round, and catch-up if due (make direct-once)
-# reconcile  every day: direct mode's bucket invariants, read-only (make reconcile-direct)
+# reconcile  every day: direct mode's bucket invariants (make reconcile-direct), then the bucket
+#            against USGS (make reconcile-usgs), failing if no round has written for 2 hours:
+#            the alarm for a schedule GitHub stopped running (a failed run e-mails). Read-only.
 #
 # Both skip (exit 0) while the bucket is not in direct mode: `make mode-full` pauses the
 # schedule, `make mode-direct` resumes it. Only one direct process should write: stop any
@@ -95,9 +97,14 @@ jobs:
           R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
           R2_BUCKET: ${{ secrets.R2_BUCKET }}
+          USGS_CONTACT: ${{ vars.USGS_CONTACT }}
         run: |
           set -o pipefail
-          uv run python -m earth_hub.direct.reconcile --skip-unless-direct | tee output.txt
+          status=0
+          uv run python -m earth_hub.direct.reconcile --skip-unless-direct | tee output.txt || status=1
+          uv run python -m earth_hub.usgs_reconcile --skip-unless-direct --max-age-hours 2 \
+            | tee -a output.txt || status=1
+          exit $status
       - name: Summary on the run page
         if: always()
         # The lines that are not JSON log records: the command's own summary.

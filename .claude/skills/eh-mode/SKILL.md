@@ -1,7 +1,7 @@
 ---
 name: eh-mode
 description: Earth-Hub's two modes and who writes the R2 bucket — show the mode, hand over from full mode (Docker, Kafka, PostgreSQL) to direct mode (R2 only) and back, run direct mode locally, check direct mode's bucket state, or run and list the hourly GitHub Actions schedule that keeps the dashboard current with no machine on. Use for /eh-mode, "which mode are we in", "switch to direct mode", "go back to full mode", "can I close my laptop", "is the schedule running", "run a direct round".
-argument-hint: "[status | direct | full | once | run | reconcile [deep] | schedule | runs]  (default: status)"
+argument-hint: "[status | direct | full | usgs [DAYS] | catchup | once | run | reconcile [deep] | schedule | runs]  (default: status)"
 ---
 
 # Modes
@@ -16,13 +16,17 @@ Run from the repository root. One marker in the bucket, `_state/mode.json`, says
 | `status` (default) | `make -s mode`, `gh run list --workflow direct.yml --limit 5` | no |
 | `direct` | `make mode-direct` ⚠ (stops poller and catch-up, exports, hands over; ~1 min) | bucket, stops services |
 | `full` | `make mode-full` ⚠ (replays direct mode's log into Kafka, checks, switches back; pauses the schedule) | bucket, Kafka, PostgreSQL |
+| `usgs [DAYS]` | `make reconcile-usgs [DAYS=3]`: the mode writing the bucket against USGS, every difference pending (explained) or not | no |
+| `catchup` | `make catchup-now` ⚠ (in either mode: day feed, month feed and deletions, whether due or not) | bucket, or Kafka in full mode |
 | `once` | `make direct-once` ⚠ (one poller round, and catch-up if due) | bucket |
 | `run` | `make direct-run` ⚠ (until stopped; run it in the background) | bucket |
 | `reconcile` | `make reconcile-direct` (`deep`: `make reconcile-direct DEEP=1`, one read per row) | no |
 | `schedule` | `gh workflow run direct.yml -f job=round` ⚠, then wait for `gh run list --workflow direct.yml --limit 1` | bucket |
 | `runs` | `gh run list --workflow direct.yml --limit 10` | no |
 
-- **Everything but `status`, `reconcile` and `runs` writes the real bucket or stops services:** run it only
+- **After a switch, `direct` and `full` catch up and run the USGS check by themselves**; a check that finds an
+  unexplained difference fails the command, but the switch stands. Report the check's table.
+- **Everything but `status`, `usgs`, `reconcile` and `runs` writes the real bucket or stops services:** run it only
   when the user asked for that (the argument counts). Never edit `_state/mode.json` by hand.
 - **One direct process.** Before `once`, `run` or `schedule`, check `pgrep -fl 'earth_hub.direct run'`; a local
   `direct-run` and the schedule would take turns writing. Say so rather than stopping one silently.

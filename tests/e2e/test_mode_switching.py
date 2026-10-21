@@ -18,6 +18,7 @@ from fastapi.testclient import TestClient
 from moto import mock_aws
 from support.feed import revised
 
+from earth_hub import usgs_reconcile
 from earth_hub.api.main import create_app
 from earth_hub.direct.handover import ReplayTopic, to_direct, to_full
 from earth_hub.direct.reconcile import reconcile as reconcile_direct
@@ -161,6 +162,19 @@ class Switching:
             if item["review_status"] != "deleted"
         }
 
+    def against_usgs(self) -> usgs_reconcile.Report:
+        """make reconcile-usgs, with the mock feed standing in for USGS: every event it lists
+        must be held at its version, nothing more (REQ-REC-002)."""
+        if mode.read(self.bucket).mode == mode.DIRECT:
+            ours, marks, _ = usgs_reconcile.from_bucket(self.bucket)
+        else:
+            ours, marks = usgs_reconcile.from_postgres(self.pipeline.db, self.pipeline.topic)
+        usgs = [usgs_reconcile.from_feature(f) for f in self.live.feed._features.values()]
+        end = datetime.now(UTC) + usgs_reconcile.DAY
+        return usgs_reconcile.compare(
+            ours, usgs, [], marks, start=end - 3 * usgs_reconcile.DAY, end=end
+        )
+
     def served_by_bucket(self) -> dict[str, tuple]:
         found = {}
         for name in self.bucket.keys("earthquakes/"):
@@ -173,7 +187,7 @@ def _ms(iso: str) -> int:
     return int(datetime.fromisoformat(iso).timestamp() * 1000)
 
 
-@pytest.mark.req("REQ-MODE-013")
+@pytest.mark.req("REQ-MODE-013", "REQ-REC-002")
 def test_switching_modes_back_and_forth_loses_no_event_or_revision(
     pipeline, feed, event, s3, tmp_path
 ):
@@ -197,6 +211,8 @@ def test_switching_modes_back_and_forth_loses_no_event_or_revision(
         assert mode.read(switch.bucket).mode == mode.DIRECT
         switch.direct_round()  # its first round catches up on the handover
         assert switch.served_by_bucket() == live.versions()
+        report = switch.against_usgs()
+        assert report.ok and report.differences == [], report.differences
 
         # Direct mode, live: new events, revisions, a merge, and an unchanged feed.
         live.new(f"{c}c", minutes_ago=20, mag=1.4)
@@ -215,6 +231,8 @@ def test_switching_modes_back_and_forth_loses_no_event_or_revision(
         assert mode.read(switch.bucket).mode == mode.FULL
         switch.full_round()
         assert switch.served_by_api() == live.versions()
+        report = switch.against_usgs()
+        assert report.ok and report.differences == [], report.differences
 
     # At the end: nothing lost anywhere, and everything consistent.
     assert len(live.expected) == 8  # 5 events a cycle, one merged into another

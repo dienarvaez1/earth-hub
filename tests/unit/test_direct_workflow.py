@@ -47,6 +47,14 @@ def test_each_job_runs_on_its_own_schedule_with_the_skip_flag(workflow):
         assert "set -o pipefail" in run_lines(job)  # tee must not hide a failure
 
 
+@pytest.mark.req("REQ-REC-003")
+def test_the_daily_reconcile_also_checks_against_usgs_and_for_a_stopped_schedule(workflow):
+    lines = run_lines(workflow["jobs"]["reconcile"])
+    assert "python -m earth_hub.usgs_reconcile --skip-unless-direct --max-age-hours 2" in lines
+    # Both checks run, and either one failing fails the run (which e-mails).
+    assert lines.count("|| status=1") == 2 and "exit $status" in lines
+
+
 @pytest.mark.req("REQ-CI-005")
 def test_one_run_at_a_time_never_cancelled(workflow):
     assert workflow["concurrency"] == {"group": "direct-mode", "cancel-in-progress": False}

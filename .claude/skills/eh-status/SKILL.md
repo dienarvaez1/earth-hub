@@ -22,13 +22,15 @@ Read-only. Run from the repository root.
 - Mode (same condition): `make -s mode`; in direct mode also the schedule's last runs,
   `gh run list --workflow direct.yml --limit 3` (filter lines with `@`).
 
-With the argument `reconcile`: also run `make reconcile` (read-only; about 10 s).
+With the argument `reconcile`: also run `make reconcile` (read-only; about 10 s) and `make reconcile-usgs`
+(read-only, a few FDSN requests: Earth-Hub against USGS for the last 3 days).
 
 If Kafka or PostgreSQL isn't running, say so and suggest `/eh-start`; skip the checks that need it.
 
 **In direct mode the bucket is written without Docker** (`/eh-mode`): a stopped poller and catch-up are
 expected then, not a fault, and PostgreSQL falls behind until `make mode-full`. Judge freshness from the
-last direct round, `make -s r2-get KEY=_state/direct.json | jq -c '{seq, written_at}'` (its sequence number and time), and the last scheduled run instead.
+last direct round, `make -s r2-get KEY=_state/direct.json | jq -c '{seq, written_at}'` (its sequence number and time), and the last scheduled run instead;
+`make reconcile-usgs` says whether anything USGS published is still missing, and `make catchup-now` closes it.
 
 ## Report
 

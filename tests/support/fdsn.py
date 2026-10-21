@@ -4,7 +4,9 @@ Measured against the real service (2026-10-17):
 - starttime and endtime lose their milliseconds: the service compares at whole seconds;
 - both edges are inclusive at that precision: start_s*1000 <= event_ms <= end_s*1000;
 - a query matching more than 20,000 events is refused with 400;
-- includedeleted is false, true or only, and /count honours it the same way as /query.
+- includedeleted is false, true or only, and /count honours it the same way as /query;
+- query?eventid=X answers one GeoJSON Feature, found by any of its IDs, or 404 (also for a
+  deleted event unless includedeleted is true or only).
 """
 
 import copy
@@ -69,6 +71,8 @@ class FdsnServer:
                 return response
         params = {k: v[-1] for k, v in parse_qs(request.url.query.decode()).items()}
         method = request.url.path.rsplit("/", 1)[-1]
+        if "eventid" in params:
+            return self._event(params)
         matches = self.matching(params)
         if method == "count":
             return httpx.Response(
@@ -88,6 +92,17 @@ class FdsnServer:
             "features": matches,
         }
         return httpx.Response(200, content=json.dumps(body).encode())
+
+    def _event(self, params: dict[str, str]) -> httpx.Response:
+        wanted = params["eventid"]
+        for event in self._events.values():
+            ids = {i for i in (event["properties"].get("ids") or "").split(",") if i}
+            if wanted == event["id"] or wanted in ids:
+                deleted = event["properties"].get("status") == "deleted"
+                if deleted and params.get("includedeleted", "false") == "false":
+                    break
+                return httpx.Response(200, content=json.dumps(event).encode())
+        return httpx.Response(404, text=f"No event found for {wanted}")
 
     def requests_for(self, method: str) -> list[dict[str, str]]:
         return [

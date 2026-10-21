@@ -55,7 +55,7 @@ Until the repository is public, GitHub's free plan cannot require these checks b
 | Job | When | Runs |
 | --- | --- | --- |
 | **Direct round** (`round`) | every hour, at :17 | `python -m earth_hub.direct once --skip-unless-direct`: one poller round, and catch-up if due (`make direct-once`) |
-| **Direct reconcile** (`reconcile`) | every day, at 05:41 UTC | `python -m earth_hub.direct.reconcile --skip-unless-direct` (`make reconcile-direct`) |
+| **Direct reconcile** (`reconcile`) | every day, at 05:41 UTC | `python -m earth_hub.direct.reconcile --skip-unless-direct` (`make reconcile-direct`), then `python -m earth_hub.usgs_reconcile --skip-unless-direct --max-age-hours 2` ([against USGS](architecture.md#reconciliation-with-usgs)); either failing fails the run |
 
 Both also run by hand: **Actions → Direct mode → Run workflow**, or `gh workflow run direct.yml -f job=round` (`job=reconcile`); `gh run list --workflow direct.yml` lists the runs. Each run's page shows the command's summary lines.
 
@@ -66,5 +66,6 @@ Both also run by hand: **Actions → Direct mode → Run workflow**, or `gh work
 - **Freshness.** New events reach the bucket up to about an hour after USGS publishes them (a minute with `make direct-run`); none are lost, as the day feed lists the last 24 hours. GitHub may delay or drop scheduled runs when busy.
 - **Cost.** About 1–1½ minutes a run with uv's cache: some 750–1,100 of the private repository's 2,000 free minutes a month (no limit once public). R2 operations are fewer than with `make direct-run`: 24 feed rounds a day instead of about 437 (`tests/unit/test_direct_budget.py`).
 - **Failures** e-mail whoever last changed the schedule, as GitHub does for scheduled workflows.
+- **A schedule that stops running.** GitHub sometimes drops scheduled runs: after this workflow was added it ran one of its first five hourly slots. Nothing is lost while it misses runs (the day feed covers 24 hours, catch-up 30 days), but the dashboard goes stale, so the daily reconcile fails if no direct round has written for 2 hours. A second hourly slot would close the gap faster, but each run costs at least a billed minute: about 720 more a month, over the private repository's free 2,000 with CI. Worth adding once the repository is public.
 
 **With Claude Code:** `/eh-mode schedule` runs a round now, `/eh-mode runs` lists the recent runs, and `/eh-mode` says whether the schedule writes (direct mode) or skips (full mode).
