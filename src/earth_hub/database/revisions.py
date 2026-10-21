@@ -12,6 +12,7 @@ from collections.abc import Hashable
 from dataclasses import dataclass
 
 from earth_hub.ingestion.events import EventMessage
+from earth_hub.validation.earthquake_rules import review_status
 
 DUPLICATE_DELETION = "deletion of {event_id}, a duplicate merged into {preferred}; event kept"
 
@@ -63,7 +64,7 @@ def needed(
             message.event_id,
             tuple(dict.fromkeys([message.event_id, *message.ids])),
             message.source_updated_ms,
-            (message.payload.get("properties") or {}).get("status") == "deleted",
+            review_status(message.payload.get("properties") or {}) == "deleted",
         )
         matched = {event_of[i] for i in incoming.ids if i in event_of}
         if matched and all(compare(stored[e], incoming)[0] != "applied" for e in matched):

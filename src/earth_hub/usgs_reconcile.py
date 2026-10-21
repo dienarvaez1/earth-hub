@@ -33,6 +33,8 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
+from earth_hub.validation.earthquake_rules import review_status
+
 logger = logging.getLogger(__spec__.name)  # the module name, also under `python -m`
 
 DAY = timedelta(days=1)
@@ -267,7 +269,7 @@ def from_feature(feature: dict) -> Event | None:
         ids,
         props["time"],
         props["updated"],
-        props.get("status") == "deleted",
+        review_status(props) == "deleted",
     )
 
 

@@ -1,8 +1,11 @@
 """The one rule that decides whether a revision replaces the stored one (DEF-026)."""
 
+from datetime import UTC, datetime
+
 import pytest
 
-from earth_hub.database.revisions import Revision, compare
+from earth_hub.database.revisions import Revision, compare, needed
+from earth_hub.ingestion.events import build_message
 
 pytestmark = pytest.mark.req("REQ-DQ-DEL-002")
 
@@ -50,3 +53,16 @@ def test_an_old_revision_does_not_bring_back_a_deleted_event():
     deleted = rev("a", ["a", "b"], updated=2000, deleted=True)
     assert compare(deleted, rev("b", ["b", "a"], updated=1500)) == ("stale", None)
     assert compare(deleted, rev("b", ["b"], updated=1500)) == ("stale", None)
+
+
+@pytest.mark.req("REQ-DQ-PROP-002")
+def test_an_upper_case_deletion_is_a_deletion_when_deciding_what_to_publish(feature_template):
+    """A duplicate's deletion saying `DELETED` must not be published over its survivor (DEF-049)."""
+    feature_template["id"] = "aka2026jntkwa"
+    feature_template["properties"].update(
+        ids=",aka2026jntkwa,", status="DELETED", updated=DUPLICATE_DELETED.source_updated_ms
+    )
+    message = build_message(
+        feature_template, fetched_at=datetime(2026, 9, 5, tzinfo=UTC), feed_generated_ms=None
+    )
+    assert needed([message], {i: "survivor" for i in SURVIVOR.ids}, {"survivor": SURVIVOR}) == []

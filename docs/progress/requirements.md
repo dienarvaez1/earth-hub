@@ -66,7 +66,7 @@ One requirement per rule in [data-quality-rules.md](../technical/data-quality-ru
 | REQ-DQ-TIME-003 | Reject `updated` times earlier than the event time or not representable |
 | REQ-DQ-MAG-001 | Reject magnitudes outside −2 to 10.5 or not numbers; allow missing magnitudes |
 | REQ-DQ-PROP-001 | Reject a missing or empty `type` |
-| REQ-DQ-PROP-002 | Reject a `status` other than `automatic`, `reviewed` or `deleted` |
+| REQ-DQ-PROP-002 | Reject a `status` other than `automatic`, `reviewed` or `deleted`, accepting any letter case and storing it in lower case; an upper-case `DELETED` is a deletion wherever the status is read (DEF-049) |
 | REQ-DQ-PROP-003 | Reject optional fields with the wrong type |
 | REQ-DQ-ACC-001 | Accept values real USGS data contains: negative magnitude and depth, non-earthquake types, `deleted` status, missing optional fields |
 | REQ-DQ-DEL-001 | Accept a deletion whose magnitude or optional fields hold placeholder values, storing those values as unknown (DEF-027) |

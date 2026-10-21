@@ -24,6 +24,14 @@ MAGNITUDE_RANGE = (-2.0, 10.5)
 REVIEW_STATUSES = frozenset({"automatic", "reviewed", "deleted"})
 
 
+def review_status(props: dict) -> Any:
+    """A feature's `status`, in lower case if it is a string. The Pacific Tsunami Warning
+    Center's features say `REVIEWED` (DEF-049), so every check of the status goes through
+    this."""
+    status = props.get("status")
+    return status.lower() if isinstance(status, str) else status
+
+
 @dataclass(frozen=True)
 class Violation:
     rule: str
@@ -168,7 +176,8 @@ def validate(envelope: Any, *, now: datetime) -> ValidEvent:
     # A deletion only has to identify and order the event. USGS fills some deletions with
     # placeholders (magnitude -5 on uw deletions), which must not block the deletion: such
     # values are stored as unknown instead (DEF-027).
-    deletion = props.get("status") == "deleted"
+    status = review_status(props)
+    deletion = status == "deleted"
     cleared: set[str] = set()
 
     magnitude = props.get("mag")
@@ -182,7 +191,7 @@ def validate(envelope: Any, *, now: datetime) -> ValidEvent:
 
     if not isinstance(props.get("type"), str) or not props["type"]:
         violations.append(Violation("PROP-001", "type must be a non-empty string"))
-    if props.get("status") not in REVIEW_STATUSES:
+    if status not in REVIEW_STATUSES:
         violations.append(Violation("PROP-002", f"status {props.get('status')!r} is not allowed"))
 
     # Optional fields still go into typed columns, so their types are checked.
@@ -234,7 +243,7 @@ def validate(envelope: Any, *, now: datetime) -> ValidEvent:
             "latitude": latitude,
             "depth_km": depth,
             "event_type": props["type"],
-            "review_status": props["status"],
+            "review_status": status,
             "tsunami": bool(props.get("tsunami") or 0),
             "felt": props.get("felt"),
             "cdi": float(props["cdi"]) if props.get("cdi") is not None else None,
