@@ -171,7 +171,7 @@ def test_late_message_under_old_id_is_stale(db, deliver, make_envelope, make_fea
 
 
 @pytest.mark.req("REQ-PER-006")
-def test_two_records_merge_into_the_oldest(db, deliver, make_envelope, make_feature):
+def test_two_records_merge_into_the_smallest_key(db, deliver, make_envelope, make_feature):
     deliver(make_envelope(make_feature("ak0001", ["ak0001"], updated=1792137700000)))
     deliver(make_envelope(make_feature("us0001", ["us0001"], updated=1792137710000)))
     first_id, second_id = (e["id"] for e in rows(db, Earthquake, order_by=Earthquake.id))
@@ -187,6 +187,28 @@ def test_two_records_merge_into_the_oldest(db, deliver, make_envelope, make_feat
     assert alias_map(db) == {"ak0001": first_id, "us0001": first_id}
     assert {r["earthquake_id"] for r in rows(db, RawEvent)} == {first_id}
     assert second_id not in {e["id"] for e in rows(db, Earthquake)}
+    assert_invariants(db)
+
+
+@pytest.mark.req("REQ-PER-006")
+def test_two_records_merge_into_the_smallest_key_even_if_it_is_newer(
+    db, deliver, make_envelope, make_feature
+):
+    """DEF-050: the survivor's database id can be the larger one; its rows and IDs move to it."""
+    deliver(make_envelope(make_feature("us0002", ["us0002"], updated=1792137700000)))
+    deliver(make_envelope(make_feature("ak0002", ["ak0002"], updated=1792137710000)))
+    first_id, second_id = (e["id"] for e in rows(db, Earthquake, order_by=Earthquake.id))
+
+    merged = make_feature("us0002", ["us0002", "ak0002"], updated=1792137800000, mag=4.2)
+    result = deliver(make_envelope(merged))
+
+    assert result.outcome == "applied" and result.earthquake_id == second_id
+    [event] = rows(db, Earthquake)
+    assert event["id"] == second_id and event["key"] == "ak0002"
+    assert event["preferred_event_id"] == "us0002" and event["revision_count"] == 3
+    assert alias_map(db) == {"ak0002": second_id, "us0002": second_id}
+    assert {r["earthquake_id"] for r in rows(db, RawEvent)} == {second_id}
+    assert first_id not in {e["id"] for e in rows(db, Earthquake)}
     assert_invariants(db)
 
 

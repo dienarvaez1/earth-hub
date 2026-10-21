@@ -50,7 +50,7 @@ The consumer handles each message, or each batch of the backfill consumer, in on
 
 1. **Locks and redeliveries.** Advisory locks on the messages' IDs; an offset that already has a `raw_events` row is a redelivery, and nothing else happens.
 2. **Validation.** A message that breaks a [data-quality rule](data-quality-rules.md) is recorded in `raw_events` as `rejected`, with the rule's ID, and goes no further.
-3. **Finding the event** through any of the message's IDs in `earthquake_ids`. If its IDs point to two stored events, those are merged: IDs and `raw_events` rows move to the oldest record, which takes the newest record's data, the sum of their revision counts and the earliest `first_seen_at`; the others are deleted.
+3. **Finding the event** through any of the message's IDs in `earthquake_ids`. If its IDs point to two stored events, those are merged: IDs and `raw_events` rows move to the record with the smallest `key`, whichever was created first (DEF-050), which takes the newest record's data, the sum of their revision counts and the earliest `first_seen_at`; the others are deleted.
 4. **The revision rule** (`database/revisions.py`): a newer `updated` replaces the stored revision (`applied`); the same one is a `duplicate`, an older one `stale`. A duplicate's deletion never hides the event that absorbed it (DEF-026). The message's IDs are recorded either way.
 5. **Writing**, in the order one message at a time would: new records, merges, updated records, new IDs, then each message's `raw_events` row with its outcome. Times are the processing time passed in (REQ-PER-018).
 6. **Commit**, and only then the Kafka offset.

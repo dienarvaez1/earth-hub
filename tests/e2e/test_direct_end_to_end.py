@@ -122,7 +122,9 @@ def test_the_same_usgs_input_gives_the_same_bucket_in_both_modes(
     b = event("eb", minutes_ago=40)
     c = event("ec", minutes_ago=30, lat=95.0)  # rejected (GEO-002)
     d = event("ed", minutes_ago=20)
-    feed.show(a, b, c, d)
+    # ed before ea: full mode may create them in either order, Kafka's partitions having none
+    # between them, and the merge below must not depend on it (DEF-050).
+    feed.show(d, c, b, a)
     round_of_both()
     # A revision, and a change of preferred ID.
     b2 = revised(b, by_s=60)
@@ -158,7 +160,7 @@ def test_the_same_usgs_input_gives_the_same_bucket_in_both_modes(
 
     full = rows(s3, "full-mode")
     assert sorted(full) == [
-        "earthquakes/ea.json",  # ed merged into ea, the older record
+        "earthquakes/ea.json",  # ed merged into ea, the smaller key
         "earthquakes/eb.json",  # created as eb, now eb2, deleted
         "earthquakes/eold.json",
     ]

@@ -1,6 +1,7 @@
 """The decisions of persistence (processing/ledger.py), in memory: no database. The same rules
 are checked against PostgreSQL in tests/integration/test_repository.py and test_batch.py."""
 
+import itertools
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -117,6 +118,52 @@ def test_records_created_and_merged_within_one_batch():
     assert book.initial[NewKey(1)].preferred_event_id == "us9"
     assert book.records[NewKey(0)].revision_count == 3
     assert book.records[NewKey(0)].key == "ak9"
+
+
+@pytest.mark.req("REQ-PER-006")
+@pytest.mark.parametrize("first", ["ea", "ed"])
+def test_the_survivor_is_the_smallest_key_whatever_was_created_first(first):
+    """Full mode reads Kafka's partitions in no fixed order between them, so ed can be created
+    before ea; the merge must not depend on it (DEF-050)."""
+    book = Ledger({}, {})
+    second = "ed" if first == "ea" else "ea"
+    book.apply(event(first, updated=1000 if first == "ea" else 2000), at(0))
+    book.apply(event(second, updated=1000 if second == "ea" else 2000), at(1))
+    step = book.apply(event("ed", ["ed", "ea"], updated=3000, mag=4.0), at(2))
+    [(key, survivor)] = book.records.items()
+    assert step.key == key and survivor.key == "ea"
+    assert survivor.preferred_event_id == "ed" and survivor.columns["magnitude"] == 4.0
+    assert survivor.revision_count == 3 and survivor.first_seen_at == at(0)
+    assert book.event_of == {"ea": key, "ed": key}
+
+
+@pytest.mark.req("REQ-PER-006")
+def test_equal_updated_times_keep_the_data_of_the_smallest_key():
+    book = ledger(
+        (1, stored("zz1", ["zz1"], 1000)),
+        (2, stored("aa1", ["aa1"], 1000)),
+    )
+    book.records[1].columns["magnitude"] = 9.0
+    step = book.apply(event("zz1", ["zz1", "aa1"], updated=500), at(1))
+    assert step.key == 2 and set(book.records) == {2}
+    survivor = book.records[2]
+    assert survivor.key == "aa1" and survivor.preferred_event_id == "aa1"
+    assert survivor.columns["magnitude"] == 1.0  # aa1's, not zz1's 9.0
+
+
+@pytest.mark.req("REQ-PER-006")
+@pytest.mark.parametrize("order", list(itertools.permutations(["c1", "a1", "b1"])))
+def test_a_three_way_merge_is_the_same_in_every_creation_order(order):
+    book = Ledger({}, {})
+    updated = {"a1": 1000, "b1": 3000, "c1": 2000}
+    for minute, event_id in enumerate(order):
+        book.apply(event(event_id, updated=updated[event_id]), at(minute))
+    book.apply(event("c1", ["c1", "b1"], updated=2500), at(5))  # stale: b1 is newer
+    book.apply(event("a1", ["a1", "c1"], updated=4000, mag=5.0), at(6))
+    [survivor] = book.records.values()
+    assert survivor.key == "a1" and survivor.preferred_event_id == "a1"
+    assert survivor.revision_count == 4 and survivor.columns["magnitude"] == 5.0
+    assert survivor.first_seen_at == at(0)
 
 
 @pytest.mark.req("REQ-DQ-DEL-002")

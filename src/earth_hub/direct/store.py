@@ -10,8 +10,8 @@ mode wrote it:
                                            every round that changes rows
     _state/ids.json.gz                     the ID map: every USGS ID ever seen -> its record's
                                            key and when the ID was first seen; and each
-                                           record's creation number (full mode's id order,
-                                           which decides the survivor of a merge)
+                                           record's creation number (its identity in the
+                                           store, as full mode's id is)
     _state/direct.json                     the last sequence number, the poller's 26-hour
                                            state and the catch-up checkpoints
     _state/direct-pending.json             a round's writes, while they are being made
@@ -345,7 +345,7 @@ class BucketState:
 
 class BucketStore:
     """The EventStore of direct mode, over a BucketState. Store identities are records'
-    creation numbers, so records sort in creation order as full mode's ids do."""
+    creation numbers, as full mode's are its ids."""
 
     def __init__(self, state: BucketState):
         self.state = state
