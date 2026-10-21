@@ -4,7 +4,7 @@ import "./style.css";
 import * as charts from "./charts";
 import { DEFAULT_FILTER, Db, type Filter, type Row } from "./db";
 import { EventMap, legend } from "./map";
-import { BUCKET, DEFAULT_PERIOD, type Period, day, firstDay } from "./periods";
+import { BUCKET, DEFAULT_PERIOD, type Period, day, firstDay, lastDay } from "./periods";
 
 interface Meta {
   run_id: string;
@@ -115,9 +115,6 @@ async function start(): Promise<void> {
       select("period").value = "custom"; // picking a day is a custom period
       clampDay(target);
     }
-    if (target.name === "min_magnitude" || target.name === "max_magnitude") {
-      greyMagnitudes();
-    }
     if (target.name === "period") {
       periodChanged();
     }
@@ -127,7 +124,6 @@ async function start(): Promise<void> {
   form.addEventListener("reset", () =>
     window.setTimeout(() => {
       periodChanged();
-      greyMagnitudes();
       update();
     }, 0),
   );
@@ -191,7 +187,7 @@ function periodChanged(): void {
   const end = form.elements.namedItem("end") as HTMLInputElement;
   if (custom && !start.value && !end.value) {
     start.value = firstDay(lastPreset, new Date()) ?? "";
-    end.value = day(new Date());
+    end.value = lastDay(lastPreset, new Date()) ?? "";
     clampDay(start);
     clampDay(end);
   }
@@ -209,46 +205,35 @@ function clampDay(input: HTMLInputElement): void {
   if (input.max && input.value > input.max) input.value = input.max;
 }
 
-/** Greys out the magnitude choices that would select nothing: Max at or below Min. */
-function greyMagnitudes(): void {
-  const min = select("min_magnitude");
-  const max = select("max_magnitude");
-  for (const option of max.options) {
-    option.disabled = option.value !== "" && min.value !== "" && Number(option.value) <= Number(min.value);
-  }
-  for (const option of min.options) {
-    option.disabled = option.value !== "" && max.value !== "" && Number(option.value) >= Number(max.value);
-  }
+/** The magnitude band's bounds, from its "min:max" value (an empty side: no limit). */
+function magnitudeBounds(value: string | null): [number | null, number | null] {
+  const bound = (s: string | undefined) => (s ? Number(s) : null);
+  const [min, max] = (value ?? "").split(":");
+  return [bound(min), bound(max)];
 }
 
 /** The filter's time bounds: a preset as of now, or the custom days (either may be empty). */
 function timeBounds(data: FormData): [string | null, string | null] {
   const period = ((data.get("period") as string | null) || DEFAULT_PERIOD) as Period;
   const midnight = (d: string | null) => (d ? `${d} 00:00:00` : null);
-  const today = day(new Date());
-  if (period !== "custom") {
-    return [midnight(firstDay(period, new Date())), midnight(nextDay(today))];
-  }
-  const start = (data.get("start") as string | null) || null;
-  const end = (data.get("end") as string | null) || null;
-  // The "To" day is included: the filter's end is the next midnight, exclusive.
+  const custom = period === "custom";
+  const start = custom ? (data.get("start") as string | null) || null : firstDay(period, new Date());
+  const end = custom ? (data.get("end") as string | null) || null : lastDay(period, new Date());
+  // The last day is included: the filter's end is the next midnight, exclusive.
   return [midnight(start), midnight(end && nextDay(end))];
 }
 
 function readFilter(): Filter {
   const data = new FormData(form);
   const text = (name: string) => (data.get(name) as string | null)?.trim() || null;
-  const number = (name: string) => {
-    const value = text(name);
-    return value === null || Number.isNaN(Number(value)) ? null : Number(value);
-  };
   const [start_time, end_time] = timeBounds(data);
+  const [min_magnitude, max_magnitude] = magnitudeBounds(text("magnitude"));
   return {
     ...DEFAULT_FILTER,
     start_time,
     end_time,
-    min_magnitude: number("min_magnitude"),
-    max_magnitude: number("max_magnitude"),
+    min_magnitude,
+    max_magnitude,
     country: text("country"),
     region: text("region"),
     event_type: text("event_type"),
