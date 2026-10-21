@@ -21,18 +21,15 @@ flowchart LR
         poller --> kafka[["Kafka"]] --> consumer["consumer +<br/>validation"]
         consumer --> pg[("PostgreSQL")] --> api["REST API"]
     end
-    subgraph directmode["direct mode"]
-        direction TB
-        direct["poller + validation<br/>(GitHub Actions,<br/>hourly)"]
-    end
+    direct["<b>direct mode</b><br/>poller + validation<br/>(GitHub Actions,<br/>hourly)"]
     subgraph cf["Cloudflare"]
         direction TB
         r2[("R2 bucket")] --> dash["dashboard<br/>(DuckDB in<br/>the browser)"]
     end
     usgs --> full
-    usgs --> directmode
+    usgs --> direct
     full -- "make export-r2" --> cf
-    directmode --> cf
+    direct --> cf
 ```
 
 Two modes write the same bucket, one at a time: **full** (the whole pipeline, on a developer machine) and **direct** (no Docker, Kafka or PostgreSQL, run hourly by GitHub Actions so the dashboard stays current with no machine on). A marker in the bucket says which one; the handovers check both agree before switching:
@@ -98,8 +95,19 @@ The [demo walkthrough](docs/overview/demo.md) goes through these with what to lo
 | `make install` | Install dependencies into `.venv` from `uv.lock` |
 | `make up` / `make down` / `make reset` | Start Kafka and PostgreSQL and wait until healthy / stop every service, keeping data / stop every service and delete all data |
 | `make migrate` | Apply database migrations with Alembic |
+| `make ingest` / `make ingest-logs` / `make ingest-stop` | Start the pipeline containers (migrate, poller, consumers, catch-up) on the live feed / follow / stop them |
+| `make ingest-once` / `make consume` | One poller round / the consumer, on your machine |
+| `make backfill START=... [END=...]` / `make catchup-once` | Backfill from the USGS FDSN service, one week per request / one catch-up pass |
+| `make kafka-ui` / `make kafka-ui-stop` | A read-only web viewer for the topics at `http://127.0.0.1:8080` |
+| `make reconcile` | Check every Kafka message has a database row, and the tables' invariants |
+| `make api` / `make api-stop` / `make api-dev` | Start / stop the API container, or run it on your machine with reload |
+| `make export-r2 [DRY_RUN=1] [VERIFY=1]` / `make export-r2-runs` | Copy the `earthquakes` table to Cloudflare R2 through the API, only new and changed rows / list past runs |
+| `make r2-ls [PREFIX=…]` / `make r2-count` / `make r2-get KEY=…` | List, count or read the bucket's objects, read-only |
+| `make mode` / `make mode-direct` / `make mode-full` | Which mode writes the bucket / hand over to direct mode / back to full mode, checked before switching |
+| `make direct-once` / `make direct-run` / `make reconcile-direct` | Direct mode: one round / run until stopped / check its state in the bucket |
+| `gh workflow run direct.yml -f job=round` / `gh run list --workflow direct.yml` | Direct mode on GitHub Actions' hourly schedule: a round now / the recent runs |
+| `make dashboard-install` / `make dashboard-dev` / `make dashboard-deploy` | The dashboard's Node dependencies and test browser / a local server over the real bucket / publish to Cloudflare Workers |
 | `make lint` / `make format` | Check / fix style and formatting with Ruff |
-| `make regression` | **Every test layer in order, with reports in `reports/` and the traceability matrix** |
 | `make test` | Unit tests; no Docker or network needed |
 | `make test-integration` / `make smoke` | Integration, API and contract tests against the running services |
 | `make test-e2e` / `make test-dashboard` | End-to-end tests, from a mock feed to the API / the dashboard in Chromium against a simulated R2 |
@@ -107,21 +115,10 @@ The [demo walkthrough](docs/overview/demo.md) goes through these with what to lo
 | `make test-performance` | A year of synthetic backfill through the pipeline, the dashboard at 115,000 and 1,000,000 rows, and the API under load, timed |
 | `make load` / `make load-ui` | Load-test the API with Locust over 140,000 synthetic events: an HTML report in `reports/` / Locust's web UI |
 | `make test-all` / `make flake-check` | Every test but the disruptive and performance ones, in one process / the end-to-end suite 5 times in a row |
-| `make traceability` | Rebuild the traceability matrix from the last regression run |
 | `make smoke-restart` / `make check-db-outage` | Restart both services and check data survives / stop PostgreSQL mid-stream and check nothing is lost (both disruptive) |
 | `make coverage` | Unit tests with a coverage report; no Docker or network needed |
-| `make ingest` / `make ingest-logs` / `make ingest-stop` | Start the pipeline containers (migrate, poller, consumers, catch-up) on the live feed / follow / stop them |
-| `make ingest-once` / `make consume` | One poller round / the consumer, on your machine |
-| `make backfill START=... [END=...]` / `make catchup-once` | Backfill from the USGS FDSN service, one week per request / one catch-up pass |
-| `make reconcile` | Check every Kafka message has a database row, and the tables' invariants |
-| `make api` / `make api-stop` / `make api-dev` | Start / stop the API container, or run it on your machine with reload |
-| `make kafka-ui` / `make kafka-ui-stop` | A read-only web viewer for the topics at `http://127.0.0.1:8080` |
-| `make export-r2 [DRY_RUN=1] [VERIFY=1]` / `make export-r2-runs` | Copy the `earthquakes` table to Cloudflare R2 through the API, only new and changed rows / list past runs |
-| `make mode` / `make mode-direct` / `make mode-full` | Which mode writes the bucket / hand over to direct mode / back to full mode, checked before switching |
-| `make direct-once` / `make direct-run` / `make reconcile-direct` | Direct mode: one round / run until stopped / check its state in the bucket |
-| `gh workflow run direct.yml -f job=round` / `gh run list --workflow direct.yml` | Direct mode on GitHub Actions' hourly schedule: a round now / the recent runs |
-| `make r2-ls [PREFIX=…]` / `make r2-count` / `make r2-get KEY=…` | List, count or read the bucket's objects, read-only |
-| `make dashboard-install` / `make dashboard-dev` / `make dashboard-deploy` | The dashboard's Node dependencies and test browser / a local server over the real bucket / publish to Cloudflare Workers |
+| `make regression` | **Every test layer in order, with reports in `reports/` and the traceability matrix** |
+| `make traceability` | Rebuild the traceability matrix from the last regression run |
 
 ## What is in it
 

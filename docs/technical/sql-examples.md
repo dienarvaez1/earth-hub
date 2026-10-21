@@ -2,10 +2,178 @@
 
 Two sets of queries, each run by a test on a fixed dataset and compared with the results shown here, so this page cannot drift from the code:
 
-- [**The dashboard's reports**](#dashboard-reports) (`dashboard/queries/*.sql`), which the page runs in the browser with DuckDB-WASM over the Parquet snapshot. Replayed by `tests/unit/test_report_examples.py`.
 - [**Inspecting PostgreSQL**](#inspecting-postgresql): queries for looking at what the pipeline stored, and why. Replayed by `tests/api/test_sql_examples.py`.
+- [**The dashboard's reports**](#dashboard-reports) (`dashboard/queries/*.sql`), which the page runs in the browser with DuckDB-WASM over the Parquet snapshot. Replayed by `tests/unit/test_report_examples.py`.
 
 In the tables, `NULL` is a missing value, and times are UTC (`+00` when the column has a time zone).
+
+## Inspecting PostgreSQL
+
+Read-only queries for looking at stored data and its history, against the main database: `docker compose exec postgres psql -U earth_hub_app earth_hub` (the user and database are `POSTGRES_USER` and `POSTGRES_DB` in `.env`). The tables and columns are in [the schema](schema.md). With Claude Code, `/eh-db` runs them, or any read-only SQL: `/eh-db outcomes`, `/eh-db rejected`, `/eh-db event <ID>`, `/eh-db merged`, `/eh-db strongest`.
+
+The examples run on the documented dataset of [the API examples](api.md#examples) (20 events, two of them merged), plus three messages added after it: `us02` delivered again under a new offset, an older revision of `us12`, and an event at latitude 95. The session's time zone is UTC (`SET TIME ZONE 'UTC';`).
+
+### Every message and what happened to it
+
+Each Kafka message gets one `raw_events` row with its outcome. Here: the 22 messages of the dataset were applied, and the three added for these examples were not.
+
+<!-- replay: postgres -->
+
+```sql
+SELECT outcome, count(*) AS messages
+FROM raw_events
+GROUP BY outcome
+ORDER BY messages DESC, outcome;
+```
+
+| outcome | messages |
+| --- | --- |
+| applied | 22 |
+| duplicate | 1 |
+| rejected | 1 |
+| stale | 1 |
+
+### Rejected messages and the rule they broke
+
+The rule IDs are those of [the data-quality rules](data-quality-rules.md). A rejected message is kept whole in `envelope`, so it can be read back and replayed once fixed.
+
+<!-- replay: postgres -->
+
+```sql
+SELECT kafka_topic, kafka_partition, kafka_offset, event_id, rule, reason
+FROM raw_events
+WHERE outcome IN ('rejected', 'error')
+ORDER BY received_at DESC
+LIMIT 20;
+```
+
+| kafka_topic | kafka_partition | kafka_offset | event_id | rule | reason |
+| --- | --- | --- | --- | --- | --- |
+| earthquakes.raw | 0 | 24 | us99 | GEO-002 | GEO-002: latitude 95.0 outside -90..90 |
+
+### Events that have had more than one ID
+
+When USGS finds that two reports are one quake, the revision lists both IDs, and the two records are merged. Every ID stays in `earthquake_ids`.
+
+<!-- replay: postgres -->
+
+```sql
+SELECT e.preferred_event_id, array_agg(i.event_id ORDER BY i.event_id) AS ids,
+       e.revision_count
+FROM earthquakes AS e
+JOIN earthquake_ids AS i ON i.earthquake_id = e.id
+GROUP BY e.id
+HAVING count(*) > 1
+ORDER BY e.preferred_event_id;
+```
+
+| preferred_event_id | ids | revision_count |
+| --- | --- | --- |
+| us20 | {ak20,us20} | 3 |
+
+### The history of one event
+
+Every message that touched an event, found through any of its IDs. `ak20` and `us20` arrived as two events, and the third message, listing both IDs, merged them.
+
+<!-- replay: postgres -->
+
+```sql
+SELECT r.kafka_offset, r.event_id, to_timestamp(r.source_updated_ms / 1000.0) AS source_updated,
+       r.outcome
+FROM raw_events AS r
+JOIN earthquake_ids AS i ON i.earthquake_id = r.earthquake_id
+WHERE i.event_id = 'ak20'
+ORDER BY r.kafka_topic, r.kafka_partition, r.kafka_offset;
+```
+
+| kafka_offset | event_id | source_updated | outcome |
+| --- | --- | --- | --- |
+| 19 | ak20 | 2026-10-11 02:01:00+00 | applied |
+| 20 | us20 | 2026-10-11 02:01:00+00 | applied |
+| 21 | us20 | 2026-10-11 02:10:00+00 | applied |
+
+### Messages that changed nothing
+
+A redelivered revision (same `updated` time) is a `duplicate`; an older one is `stale`. Neither touches the stored event, as `revision_count` shows.
+
+<!-- replay: postgres -->
+
+```sql
+SELECT r.kafka_offset, r.event_id, r.outcome, e.revision_count
+FROM raw_events AS r
+JOIN earthquakes AS e ON e.id = r.earthquake_id
+WHERE r.outcome IN ('duplicate', 'stale')
+ORDER BY r.kafka_topic, r.kafka_partition, r.kafka_offset;
+```
+
+| kafka_offset | event_id | outcome | revision_count |
+| --- | --- | --- | --- |
+| 22 | us02 | duplicate | 1 |
+| 23 | us12 | stale | 1 |
+
+### The strongest events
+
+Deleted events are kept with `review_status = 'deleted'`; leave them out as the API does.
+
+<!-- replay: postgres -->
+
+```sql
+SELECT preferred_event_id, event_time, magnitude, mag_type, place, depth_km
+FROM earthquakes
+WHERE review_status <> 'deleted'
+ORDER BY magnitude DESC NULLS LAST, event_time DESC
+LIMIT 5;
+```
+
+| preferred_event_id | event_time | magnitude | mag_type | place | depth_km |
+| --- | --- | --- | --- | --- | --- |
+| us15 | 2026-10-10 20:00:00+00 | 8.2 | mww | Peru | 100.0 |
+| us14 | 2026-10-10 15:00:00+00 | 7.0 | mww | Papua New Guinea | 60.0 |
+| us13 | 2026-10-10 14:00:00+00 | 6.99 | mww | Kamchatka | 40.0 |
+| us02 | 2026-10-10 01:30:00+00 | 6.1 | mww | Tonga Islands | 120.0 |
+| us12 | 2026-10-10 12:00:00+00 | 5.0 | mb | Chile | 33.0 |
+
+### Events per hour
+
+Unlike the API's hourly summary, a plain `GROUP BY` lists only the hours that have events (here, not 02:00 and 04:00).
+
+<!-- replay: postgres -->
+
+```sql
+SELECT date_trunc('hour', event_time) AS hour, count(*) AS events,
+       max(magnitude) AS max_magnitude
+FROM earthquakes
+WHERE review_status <> 'deleted'
+  AND event_time >= '2026-10-10 00:00:00+00' AND event_time < '2026-10-10 06:00:00+00'
+GROUP BY hour
+ORDER BY hour;
+```
+
+| hour | events | max_magnitude |
+| --- | --- | --- |
+| 2026-10-10 00:00:00+00 | 2 | 4.4 |
+| 2026-10-10 01:00:00+00 | 2 | 6.1 |
+| 2026-10-10 03:00:00+00 | 2 | 2.0 |
+| 2026-10-10 05:00:00+00 | 2 | 0.9 |
+
+### Where an event is
+
+`city`, `region` and `country` are derived from USGS's `place` text when the consumer stores the event (`validation/places.py`). Only text of the form "<distance> of <city>, <area>" names them, so `Central California` or `Peru` alone, as in most of this dataset, leaves them empty; `place` itself is always kept unchanged.
+
+<!-- replay: postgres -->
+
+```sql
+SELECT place, city, region, country
+FROM earthquakes
+WHERE country IS NOT NULL
+ORDER BY preferred_event_id;
+```
+
+| place | city | region | country |
+| --- | --- | --- | --- |
+| 10 km N of Anchorage, Alaska | Anchorage | Alaska | United States |
+| 50 km W of Anchorage, Alaska | Anchorage | Alaska | United States |
+| 100 km S of Tokyo, Japan | Tokyo | NULL | Japan |
 
 ## Dashboard reports
 
@@ -191,171 +359,3 @@ Per ISO week, from Monday. Weeks without events are listed with 0, so a chart's 
 | first_event | last_event |
 | --- | --- |
 | 2024-02-28 23:59:59.999 | 2024-04-02 10:00:00 |
-
-## Inspecting PostgreSQL
-
-Read-only queries for looking at stored data and its history, against the main database: `docker compose exec postgres psql -U earth_hub_app earth_hub` (the user and database are `POSTGRES_USER` and `POSTGRES_DB` in `.env`). The tables and columns are in [the schema](schema.md). With Claude Code, `/eh-db` runs them, or any read-only SQL: `/eh-db outcomes`, `/eh-db rejected`, `/eh-db event <ID>`, `/eh-db merged`, `/eh-db strongest`.
-
-The examples run on the documented dataset of [the API examples](api.md#examples) (20 events, two of them merged), plus three messages added after it: `us02` delivered again under a new offset, an older revision of `us12`, and an event at latitude 95. The session's time zone is UTC (`SET TIME ZONE 'UTC';`).
-
-### Every message and what happened to it
-
-Each Kafka message gets one `raw_events` row with its outcome. Here: the 22 messages of the dataset were applied, and the three added for these examples were not.
-
-<!-- replay: postgres -->
-
-```sql
-SELECT outcome, count(*) AS messages
-FROM raw_events
-GROUP BY outcome
-ORDER BY messages DESC, outcome;
-```
-
-| outcome | messages |
-| --- | --- |
-| applied | 22 |
-| duplicate | 1 |
-| rejected | 1 |
-| stale | 1 |
-
-### Rejected messages and the rule they broke
-
-The rule IDs are those of [the data-quality rules](data-quality-rules.md). A rejected message is kept whole in `envelope`, so it can be read back and replayed once fixed.
-
-<!-- replay: postgres -->
-
-```sql
-SELECT kafka_topic, kafka_partition, kafka_offset, event_id, rule, reason
-FROM raw_events
-WHERE outcome IN ('rejected', 'error')
-ORDER BY received_at DESC
-LIMIT 20;
-```
-
-| kafka_topic | kafka_partition | kafka_offset | event_id | rule | reason |
-| --- | --- | --- | --- | --- | --- |
-| earthquakes.raw | 0 | 24 | us99 | GEO-002 | GEO-002: latitude 95.0 outside -90..90 |
-
-### Events that have had more than one ID
-
-When USGS finds that two reports are one quake, the revision lists both IDs, and the two records are merged. Every ID stays in `earthquake_ids`.
-
-<!-- replay: postgres -->
-
-```sql
-SELECT e.preferred_event_id, array_agg(i.event_id ORDER BY i.event_id) AS ids,
-       e.revision_count
-FROM earthquakes AS e
-JOIN earthquake_ids AS i ON i.earthquake_id = e.id
-GROUP BY e.id
-HAVING count(*) > 1
-ORDER BY e.preferred_event_id;
-```
-
-| preferred_event_id | ids | revision_count |
-| --- | --- | --- |
-| us20 | {ak20,us20} | 3 |
-
-### The history of one event
-
-Every message that touched an event, found through any of its IDs. `ak20` and `us20` arrived as two events, and the third message, listing both IDs, merged them.
-
-<!-- replay: postgres -->
-
-```sql
-SELECT r.kafka_offset, r.event_id, to_timestamp(r.source_updated_ms / 1000.0) AS source_updated,
-       r.outcome
-FROM raw_events AS r
-JOIN earthquake_ids AS i ON i.earthquake_id = r.earthquake_id
-WHERE i.event_id = 'ak20'
-ORDER BY r.kafka_topic, r.kafka_partition, r.kafka_offset;
-```
-
-| kafka_offset | event_id | source_updated | outcome |
-| --- | --- | --- | --- |
-| 19 | ak20 | 2026-10-11 02:01:00+00 | applied |
-| 20 | us20 | 2026-10-11 02:01:00+00 | applied |
-| 21 | us20 | 2026-10-11 02:10:00+00 | applied |
-
-### Messages that changed nothing
-
-A redelivered revision (same `updated` time) is a `duplicate`; an older one is `stale`. Neither touches the stored event, as `revision_count` shows.
-
-<!-- replay: postgres -->
-
-```sql
-SELECT r.kafka_offset, r.event_id, r.outcome, e.revision_count
-FROM raw_events AS r
-JOIN earthquakes AS e ON e.id = r.earthquake_id
-WHERE r.outcome IN ('duplicate', 'stale')
-ORDER BY r.kafka_topic, r.kafka_partition, r.kafka_offset;
-```
-
-| kafka_offset | event_id | outcome | revision_count |
-| --- | --- | --- | --- |
-| 22 | us02 | duplicate | 1 |
-| 23 | us12 | stale | 1 |
-
-### The strongest events
-
-Deleted events are kept with `review_status = 'deleted'`; leave them out as the API does.
-
-<!-- replay: postgres -->
-
-```sql
-SELECT preferred_event_id, event_time, magnitude, mag_type, place, depth_km
-FROM earthquakes
-WHERE review_status <> 'deleted'
-ORDER BY magnitude DESC NULLS LAST, event_time DESC
-LIMIT 5;
-```
-
-| preferred_event_id | event_time | magnitude | mag_type | place | depth_km |
-| --- | --- | --- | --- | --- | --- |
-| us15 | 2026-10-10 20:00:00+00 | 8.2 | mww | Peru | 100.0 |
-| us14 | 2026-10-10 15:00:00+00 | 7.0 | mww | Papua New Guinea | 60.0 |
-| us13 | 2026-10-10 14:00:00+00 | 6.99 | mww | Kamchatka | 40.0 |
-| us02 | 2026-10-10 01:30:00+00 | 6.1 | mww | Tonga Islands | 120.0 |
-| us12 | 2026-10-10 12:00:00+00 | 5.0 | mb | Chile | 33.0 |
-
-### Events per hour
-
-Unlike the API's hourly summary, a plain `GROUP BY` lists only the hours that have events (here, not 02:00 and 04:00).
-
-<!-- replay: postgres -->
-
-```sql
-SELECT date_trunc('hour', event_time) AS hour, count(*) AS events,
-       max(magnitude) AS max_magnitude
-FROM earthquakes
-WHERE review_status <> 'deleted'
-  AND event_time >= '2026-10-10 00:00:00+00' AND event_time < '2026-10-10 06:00:00+00'
-GROUP BY hour
-ORDER BY hour;
-```
-
-| hour | events | max_magnitude |
-| --- | --- | --- |
-| 2026-10-10 00:00:00+00 | 2 | 4.4 |
-| 2026-10-10 01:00:00+00 | 2 | 6.1 |
-| 2026-10-10 03:00:00+00 | 2 | 2.0 |
-| 2026-10-10 05:00:00+00 | 2 | 0.9 |
-
-### Where an event is
-
-`city`, `region` and `country` are derived from USGS's `place` text when the consumer stores the event (`validation/places.py`). Only text of the form "<distance> of <city>, <area>" names them, so `Central California` or `Peru` alone, as in most of this dataset, leaves them empty; `place` itself is always kept unchanged.
-
-<!-- replay: postgres -->
-
-```sql
-SELECT place, city, region, country
-FROM earthquakes
-WHERE country IS NOT NULL
-ORDER BY preferred_event_id;
-```
-
-| place | city | region | country |
-| --- | --- | --- | --- |
-| 10 km N of Anchorage, Alaska | Anchorage | Alaska | United States |
-| 50 km W of Anchorage, Alaska | Anchorage | Alaska | United States |
-| 100 km S of Tokyo, Japan | Tokyo | NULL | Japan |

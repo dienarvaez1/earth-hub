@@ -38,11 +38,11 @@ erDiagram
 
 | Table | Holds | Written by |
 | --- | --- | --- |
-| [`earthquakes`](#earthquakes) | One row per physical event, as of its newest applied revision | the consumers |
-| [`earthquake_ids`](#earthquake_ids) | Every USGS ID ever seen, mapped to its event | the consumers |
-| [`raw_events`](#raw_events) | Every Kafka message received, with what happened to it | the consumers |
 | [`backfill_windows`](#backfill_windows) | Each finished time window of a backfill, so a re-run resumes | backfill |
 | [`ingestion_checkpoints`](#ingestion_checkpoints) | Named points in time; today, how far the deleted-events check has looked | catch-up |
+| [`raw_events`](#raw_events) | Every Kafka message received, with what happened to it | the consumers |
+| [`earthquake_ids`](#earthquake_ids) | Every USGS ID ever seen, mapped to its event | the consumers |
+| [`earthquakes`](#earthquakes) | One row per physical event, as of its newest applied revision | the consumers |
 
 ## How a message changes the tables
 
@@ -58,6 +58,68 @@ The consumer handles each message, or each batch of the backfill consumer, in on
 Advisory locks on each USGS ID, taken in sorted order, keep two consumers from creating or merging the same event at once. [The SQL examples](sql-examples.md#inspecting-postgresql) show queries over these tables and their results.
 
 ## Tables
+
+### backfill_windows
+
+One row per finished window of `make backfill` (job `backfill`) and of its final sweep (job `sweep`). A re-run skips windows marked `done`.
+
+| Column | Type | Null | Meaning |
+| --- | --- | --- | --- |
+| `id` | bigint | no | Primary key (identity) |
+| `job` | text | no | `backfill` or `sweep` |
+| `window_start` | timestamptz | no | Inclusive. Unique with `job` |
+| `window_end` | timestamptz | no | Exclusive: exactly where the next window starts |
+| `status` | text | no | `done`, or `open` when the window ended at "now" and is fetched again next run |
+| `expected` | integer | no | What FDSN's `/count` reported |
+| `fetched` | integer | no | Events fetched; never fewer than `expected` |
+| `published` | integer | no | Published to `earthquakes.backfill`: new, or newer than stored |
+| `skipped` | integer | no | Already stored at this revision or a newer one |
+| `rejected` | integer | no | Without a usable ID or time |
+| `finished_at` | timestamptz | no | Default `now()` |
+
+### ingestion_checkpoints
+
+| Column | Type | Null | Meaning |
+| --- | --- | --- | --- |
+| `name` | text | no | Primary key: `deleted`, the daily deleted-events check of catch-up |
+| `value` | timestamptz | no | When that check last started; the next one asks FDSN for deletions since then |
+| `updated_at` | timestamptz | no | Default `now()` |
+
+### raw_events
+
+Every Kafka message received, rejected ones included, so any stored value can be traced to the message it came from and `make reconcile` can compare the topic with the database.
+
+| Column | Type | Null | Meaning |
+| --- | --- | --- | --- |
+| `id` | bigint | no | Primary key (identity), in order of arrival |
+| `kafka_topic` | text | no | `earthquakes.raw` or `earthquakes.backfill` |
+| `kafka_partition` | integer | no | |
+| `kafka_offset` | bigint | no | Unique with topic and partition: a redelivered message is recognized |
+| `kafka_timestamp` | timestamptz | yes | The message's Kafka timestamp |
+| `message_key` | text | yes | The USGS ID the poller keyed it by |
+| `envelope` | jsonb | yes | The whole message, the unchanged USGS feature inside |
+| `raw_value` | text | yes | Only when the value could not be stored as JSON |
+| `event_id` | text | yes | The envelope's event ID, when it has one |
+| `source_updated_ms` | bigint | yes | The envelope's `updated` time |
+| `outcome` | text | no | `applied`, `duplicate`, `stale`, `rejected` or `error` |
+| `rule` | text | yes | The data-quality rule a rejected message broke, e.g. `GEO-002` |
+| `reason` | text | yes | Why, for `rejected`, `error`, and outcomes the times alone would not explain |
+| `earthquake_id` | bigint | yes | The event it touched, if any: `earthquakes.id` |
+| `received_at` | timestamptz | no | When the consumer stored it (default `now()`) |
+
+**Indexes:** `outcome`, `earthquake_id`, `event_id`.
+
+### earthquake_ids
+
+Every USGS ID ever seen. When USGS changes an event's preferred ID, or finds that two reports are one quake, the old IDs stay here, so a lookup by any of them finds the event.
+
+| Column | Type | Null | Meaning |
+| --- | --- | --- | --- |
+| `event_id` | text | no | A USGS ID. Primary key |
+| `earthquake_id` | bigint | no | The event: `earthquakes.id` |
+| `first_seen_at` | timestamptz | no | When the ID was first seen (default `now()`) |
+
+The foreign key has no `ON DELETE CASCADE`: a merge must move the IDs explicitly, so a bug fails loudly instead of losing them. **Index:** `earthquake_id`.
 
 ### earthquakes
 
@@ -98,65 +160,3 @@ One row per physical event, whatever USGS IDs it has had. Deleted events stay, w
 | `last_applied_at` | timestamptz | no | When Earth-Hub last changed it (default `now()`) |
 
 **Constraints:** the ranges above as `CHECK`s, the same limits as the validation rules, enforced a second time by the database; `review_status` in its three values; `source_updated_ms >= event_time_ms`; `revision_count >= 1`. **Indexes:** `event_time`, `magnitude`.
-
-### earthquake_ids
-
-Every USGS ID ever seen. When USGS changes an event's preferred ID, or finds that two reports are one quake, the old IDs stay here, so a lookup by any of them finds the event.
-
-| Column | Type | Null | Meaning |
-| --- | --- | --- | --- |
-| `event_id` | text | no | A USGS ID. Primary key |
-| `earthquake_id` | bigint | no | The event: `earthquakes.id` |
-| `first_seen_at` | timestamptz | no | When the ID was first seen (default `now()`) |
-
-The foreign key has no `ON DELETE CASCADE`: a merge must move the IDs explicitly, so a bug fails loudly instead of losing them. **Index:** `earthquake_id`.
-
-### raw_events
-
-Every Kafka message received, rejected ones included, so any stored value can be traced to the message it came from and `make reconcile` can compare the topic with the database.
-
-| Column | Type | Null | Meaning |
-| --- | --- | --- | --- |
-| `id` | bigint | no | Primary key (identity), in order of arrival |
-| `kafka_topic` | text | no | `earthquakes.raw` or `earthquakes.backfill` |
-| `kafka_partition` | integer | no | |
-| `kafka_offset` | bigint | no | Unique with topic and partition: a redelivered message is recognized |
-| `kafka_timestamp` | timestamptz | yes | The message's Kafka timestamp |
-| `message_key` | text | yes | The USGS ID the poller keyed it by |
-| `envelope` | jsonb | yes | The whole message, the unchanged USGS feature inside |
-| `raw_value` | text | yes | Only when the value could not be stored as JSON |
-| `event_id` | text | yes | The envelope's event ID, when it has one |
-| `source_updated_ms` | bigint | yes | The envelope's `updated` time |
-| `outcome` | text | no | `applied`, `duplicate`, `stale`, `rejected` or `error` |
-| `rule` | text | yes | The data-quality rule a rejected message broke, e.g. `GEO-002` |
-| `reason` | text | yes | Why, for `rejected`, `error`, and outcomes the times alone would not explain |
-| `earthquake_id` | bigint | yes | The event it touched, if any: `earthquakes.id` |
-| `received_at` | timestamptz | no | When the consumer stored it (default `now()`) |
-
-**Indexes:** `outcome`, `earthquake_id`, `event_id`.
-
-### backfill_windows
-
-One row per finished window of `make backfill` (job `backfill`) and of its final sweep (job `sweep`). A re-run skips windows marked `done`.
-
-| Column | Type | Null | Meaning |
-| --- | --- | --- | --- |
-| `id` | bigint | no | Primary key (identity) |
-| `job` | text | no | `backfill` or `sweep` |
-| `window_start` | timestamptz | no | Inclusive. Unique with `job` |
-| `window_end` | timestamptz | no | Exclusive: exactly where the next window starts |
-| `status` | text | no | `done`, or `open` when the window ended at "now" and is fetched again next run |
-| `expected` | integer | no | What FDSN's `/count` reported |
-| `fetched` | integer | no | Events fetched; never fewer than `expected` |
-| `published` | integer | no | Published to `earthquakes.backfill`: new, or newer than stored |
-| `skipped` | integer | no | Already stored at this revision or a newer one |
-| `rejected` | integer | no | Without a usable ID or time |
-| `finished_at` | timestamptz | no | Default `now()` |
-
-### ingestion_checkpoints
-
-| Column | Type | Null | Meaning |
-| --- | --- | --- | --- |
-| `name` | text | no | Primary key: `deleted`, the daily deleted-events check of catch-up |
-| `value` | timestamptz | no | When that check last started; the next one asks FDSN for deletions since then |
-| `updated_at` | timestamptz | no | Default `now()` |
