@@ -68,7 +68,7 @@ Always send a User-Agent: `UA="earth-hub (manual check)"`.
 
 ## 4. Kafka
 
-Run the broker's own tools inside its container. With `k() { docker compose exec -T kafka /opt/kafka/bin/$1 --bootstrap-server localhost:9092 "${@:2}"; }`:
+Run the broker's own tools inside its container. With `k() { local tool; for tool; do break; done; shift; docker compose exec -T kafka "/opt/kafka/bin/$tool" --bootstrap-server localhost:9092 "$@"; }`:
 
 | Skill | Command | What it shows |
 | --- | --- | --- |
@@ -134,7 +134,7 @@ Full mode only: in direct mode the exporter refuses, and direct rounds write the
 | `/eh-r2 get analytics/meta.json` | `make r2-get KEY=analytics/meta.json` | One object; `.gz` objects are printed gunzipped |
 | `/eh-r2 get earthquakes/us7000abcd.json` | `make r2-get KEY=earthquakes/us7000abcd.json` | One exported row, named by its record's key |
 | `/eh-r2 snapshot` | `make r2-get KEY=analytics/earthquakes.parquet OUT=/tmp/earthquakes.parquet` | Saves the dashboard's Parquet snapshot |
-| `/eh-r2 ls log/` | `make r2-ls PREFIX=log/ LIMIT=1000 \| tail -3` | Direct mode's newest log files: every message it processed |
+| `/eh-r2 ls log/` | `make r2-ls PREFIX=log/$(date -u +%F)/ LIMIT=0 \| tail -3` | Direct mode's newest log files, today's (UTC): every message it processed |
 | `/eh-r2 get _state/mode.json` | `make r2-get KEY=_state/mode.json` | The mode marker itself (`make mode` says it in one line) |
 
 ## 9. Modes: full and direct

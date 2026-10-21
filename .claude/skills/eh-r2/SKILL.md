@@ -25,7 +25,9 @@ What's in the bucket (`docs/technical/architecture.md`, Export to R2): `earthqua
 Direct mode's state (architecture, Direct mode): `_state/mode.json` (which mode writes the bucket; `make mode`),
 `_state/ids.json.gz` (the ID map), `_state/direct.json` (last sequence number, poller and catch-up state),
 `_state/direct-pending.json` (only while a round writes), and `log/<date>/<first>-<last>.ndjson` (every
-message processed, in order: e.g. `ls log/` with `LIMIT=1000 | tail` for the newest).
+message processed, in order, one folder per UTC day: today's newest with `make -s r2-ls PREFIX=log/$(date -u +%F)/ LIMIT=0 | tail -3`
+(empty until the day's first round: then the previous day's folder); listings are in key
+order, oldest first, so never take the newest from a `LIMIT`ed listing of `log/`).
 
 The public dashboard serves only the two `analytics/` files, at `/data/earthquakes.parquet` and
 `/data/meta.json` (see `/eh-dashboard check`).

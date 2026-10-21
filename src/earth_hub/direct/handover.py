@@ -283,10 +283,11 @@ def to_full(
         try:
             current = mode.read(bucket)
             if current.state == mode.ACTIVE:
-                # Frozen: from here no direct round writes (each checks the marker).
-                current = mode.write(
-                    bucket, current, state=mode.HANDING_OVER, replay_from=topic.end_offset()
-                )
+                # Frozen: from here no direct round writes (each checks the marker). An attempt
+                # whose checks failed left its replay_from: what it sent is found from there, not
+                # sent twice (DEF-047). A handover that succeeds clears it.
+                start = topic.end_offset() if current.replay_from is None else current.replay_from
+                current = mode.write(bucket, current, state=mode.HANDING_OVER, replay_from=start)
             runner._prepare(in_direct_mode=False)  # finishes a round left pending
         finally:
             lock.release(bucket, run_id, LOCK_TTL)

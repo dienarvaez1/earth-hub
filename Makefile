@@ -102,7 +102,8 @@ mode-direct: ## Hand over to direct mode: stop the poller and catch-up, export, 
 	@echo "Direct mode: the hourly schedule writes the bucket now (or make direct-run, not both)"
 
 mode-full: ## Hand over to full mode: replay direct mode's log into Kafka, check, then switch
-	docker compose up -d --wait consumer consumer-backfill api
+	docker compose --profile ingest build migrate
+	docker compose --profile ingest --profile api up -d --wait consumer consumer-backfill api
 	uv run python -m earth_hub.direct.handover full
 	docker compose up -d poller catchup
 	@echo "Full mode: the poller and catch-up are running again"

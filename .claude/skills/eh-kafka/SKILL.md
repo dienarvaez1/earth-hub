@@ -7,8 +7,9 @@ argument-hint: "[topics | offsets [TOPIC] | lag | read TOPIC PARTITION OFFSET | 
 # Kafka
 
 Read-only: never produce, delete, or reset offsets. Run from the repository root; the tools run inside the
-broker container. Define `k() { docker compose exec -T kafka /opt/kafka/bin/$1 --bootstrap-server localhost:9092 "${@:2}"; }`
-in the same shell command. Topics: `earthquakes.raw` (live, group `earth-hub-consumer`) and
+broker container. Define `k() { local tool; for tool; do break; done; shift; docker compose exec -T kafka "/opt/kafka/bin/$tool" --bootstrap-server localhost:9092 "$@"; }`
+in the same shell command. Copy it exactly: it works in bash and zsh, and it avoids positional parameters, which
+Claude Code would replace with the skill's arguments. Topics: `earthquakes.raw` (live, group `earth-hub-consumer`) and
 `earthquakes.backfill` (backfill and catch-up, group `earth-hub-consumer-backfill`), 3 partitions each, keyed by
 USGS event ID.
 

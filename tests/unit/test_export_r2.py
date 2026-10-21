@@ -335,6 +335,59 @@ def test_an_expired_lock_is_taken_over(export, s3):
     assert s3.list_objects_v2(Bucket=BUCKET, Prefix=LOCK_KEY)["KeyCount"] == 0
 
 
+def advancing_pages(monkeypatch, minutes: int, at_page=None):
+    """Each page the exporter fetches moves the clock `minutes` on; `at_page(n, now)` runs as
+    page n is fetched, as if from another process."""
+    state = {"now": NOW, "page": 0}
+    real_page = Exporter._page
+
+    def page(self, after_id, *, limit):
+        state["page"] += 1
+        state["now"] += timedelta(minutes=minutes)
+        if at_page is not None:
+            at_page(state["page"], state["now"])
+        return real_page(self, after_id, limit=limit)
+
+    monkeypatch.setattr(Exporter, "_page", page)
+    return lambda: state["now"]
+
+
+@pytest.mark.req("REQ-EXP-006")
+def test_a_long_run_renews_its_lock_so_a_second_run_is_refused(export, s3, monkeypatch):
+    """DEF-048: the lock was taken once and never renewed, so a run longer than its time left the
+    bucket to the next export. Pages 25 minutes apart: by page 6 the run has lasted 2½ hours,
+    past any lock time, and a second export must still be refused."""
+    refused = []
+
+    def second_export(n, now):
+        if n == 6:
+            with pytest.raises(LockHeld, match="has been in progress"):
+                export(clock=lambda: now)
+            refused.append(now)
+
+    clock = advancing_pages(monkeypatch, 25, second_export)
+    record = export(clock=clock, page_size=1)
+    assert record.status == "succeeded" and refused == [NOW + timedelta(minutes=150)]
+    assert s3.list_objects_v2(Bucket=BUCKET, Prefix=LOCK_KEY)["KeyCount"] == 0  # released
+
+
+@pytest.mark.req("REQ-EXP-006")
+def test_a_run_whose_lock_was_taken_over_stops_writing(export, s3, monkeypatch):
+    other = {"run_id": "other", "started_at": "", "expires_at": "2026-10-19T00:00:00Z"}
+
+    def take_over(n, now):
+        if n == 3:
+            s3.put_object(Bucket=BUCKET, Key=LOCK_KEY, Body=json.dumps(other))
+
+    clock = advancing_pages(monkeypatch, 10, take_over)
+    record = export(clock=clock, page_size=1)
+    assert record.status == "failed"
+    assert any("LockLost" in e and "no longer holds" in e for e in record.errors)
+    assert s3.list_objects_v2(Bucket=BUCKET, Prefix="earthquakes/")["KeyCount"] == 2  # pages 1, 2
+    assert s3.list_objects_v2(Bucket=BUCKET, Prefix="analytics/")["KeyCount"] == 0
+    assert json.loads(s3.get_object(Bucket=BUCKET, Key=LOCK_KEY)["Body"].read()) == other
+
+
 @pytest.mark.req("REQ-EXP-006")
 def test_the_lock_is_atomic(s3):
     """Two runs racing for the lock: the conditional write lets exactly one win."""

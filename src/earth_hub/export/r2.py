@@ -73,7 +73,8 @@ PAGE_SIZE = 1000
 # progress: the next run skips everything already confirmed uploaded.
 CHECKPOINT_PAGES = 10
 # A lock older than this belongs to a run that crashed; a full first export takes minutes.
-LOCK_TTL = timedelta(hours=2)
+LOCK_TTL = timedelta(minutes=30)  # renewed while a run lasts: a crashed run frees it soon
+LOCK_RENEW = timedelta(minutes=5)
 MAX_ERRORS = 20
 LOCAL_RUNS_DIR = Path("reports/exports")
 _ROW_KEY = re.compile(rf"^{TABLE_PREFIX}([^/]+)\.json$")
@@ -205,6 +206,8 @@ class Exporter:
         self.local_dir = local_dir
         self._saved: dict[str, str] = {}
         self._ids: dict[str, int] = {}  # each row read: key -> the API's id, for paging
+        self._lock_etag: str | None = None  # held by this run (None on a dry run)
+        self._lock_renewed: datetime | None = None
 
     def run(self, *, dry_run: bool = False, verify: bool = False) -> RunRecord:
         started = self.clock()
@@ -266,10 +269,13 @@ class Exporter:
         dry_run = snapshot is None
         try:
             self._upload_changes(record, manifest, known, read, failed_keys, snapshot)
+        except lock.LockLost:
+            raise  # another run writes the bucket now: not even a checkpoint
         except BaseException:
             if not dry_run and known != self._saved:
                 self._checkpoint(known, record)
             raise
+        self._keep_lock(record)
 
         # What the bucket holds: listed, or as the manifest and this run's uploads say.
         stored = self._stored_keys() if verify else set(known)
@@ -295,6 +301,7 @@ class Exporter:
         if not record.verification["match"]:
             record.error("the bucket does not hold exactly the rows read; see verification")
         if not record.errors:  # only a bucket that holds exactly the rows read
+            self._keep_lock(record)
             self._write_snapshot(record, rows, snapshot)
 
     def _write_snapshot(self, record: RunRecord, rows: dict[str, str], snapshot) -> None:
@@ -359,6 +366,7 @@ class Exporter:
         unsaved = 0  # uploads confirmed since the manifest was last saved
         with ThreadPoolExecutor(self.workers) as pool:
             for number, page in enumerate(self._pages(), start=1):
+                self._keep_lock(record)
                 pending = []
                 for row in page:
                     key = row["key"]
@@ -483,7 +491,10 @@ class Exporter:
 
     def _acquire_lock(self, record: RunRecord, now: datetime) -> None:
         """The lock, and only in full mode: in direct mode the bucket is direct mode's."""
-        lock.acquire(self.bucket, record.run_id, record.started_at, now, self.lock_ttl)
+        self._lock_etag = lock.acquire(
+            self.bucket, record.run_id, record.started_at, now, self.lock_ttl
+        )
+        self._lock_renewed = now
         try:
             mode.require(self.bucket, mode.FULL)
         except BaseException:
@@ -492,6 +503,27 @@ class Exporter:
 
     def _release_lock(self, record: RunRecord) -> None:
         lock.release(self.bucket, record.run_id, self.lock_ttl)
+        self._lock_etag = None
+
+    def _keep_lock(self, record: RunRecord) -> None:
+        """Renew the lock every LOCK_RENEW, so no other run takes it while this one lasts
+        (DEF-048). A lock taken over stops the run (LockLost); a failed request is tried again
+        at the next call, long before the lock expires."""
+        if self._lock_etag is None:
+            return
+        now = self.clock()
+        if now - self._lock_renewed < LOCK_RENEW:
+            return
+        try:
+            self._lock_etag = lock.renew(
+                self.bucket, record.run_id, record.started_at, self._lock_etag, now, self.lock_ttl
+            )
+            self._lock_renewed = now
+        except lock.LockLost:
+            self._lock_etag = None  # not ours any more: never released by this run
+            raise
+        except Exception:
+            logger.warning("could not renew the lock; trying again", exc_info=True)
 
 
 def list_runs(bucket: Bucket, *, limit: int = 20, now: datetime | None = None) -> list[dict]:

@@ -60,20 +60,27 @@ Priority is how urgently it had to be fixed: **P1** before anything else, **P2**
 | DEF-039 | 7 | Low | Auditing the documents against the code | `make coverage`, documented as unit tests with no Docker needed, selected `not integration`: it also ran the 20 end-to-end and 73 dashboard tests, which need the services and a browser. It now uses the unit layer's selection, and a test checks that `make test` and `make coverage` match the regression's unit layer (REQ-QA-003) | #21 |
 | DEF-040 | 8 | Medium | The first parity test run | Updating the snapshot in a direct round that merged no records failed: DuckDB's `executemany` rejects an empty list of rows, so every such round stopped before writing its snapshot. The removed keys are now inserted only when there are some; every round without a merge covers it | #24 |
 | DEF-041 | 8 | Low | The interrupted-round tests, comparing buckets byte for byte | The manifest and the ID map were gzipped with the current time in the gzip header, so the same rows written a second later gave different objects, and a bucket could not be compared byte for byte with another holding the same data. Both are now gzipped with a fixed time; a test checks the header | #24 |
+| DEF-042 | 8 | Low | Running `/eh-kafka tail earthquakes.raw` | The `/eh-kafka` skill defined its helper as `k() { … /opt/kafka/bin/$1 … }`. Claude Code replaces `$1` in a skill's text with the skill's first argument, so with any argument the function ran `/opt/kafka/bin/earthquakes.raw` instead of the tool named. The helper now takes its first argument without a positional parameter (and works in bash and zsh), and a test checks that no skill uses `$0`–`$9` (REQ-DOC-006) | #30 |
+| DEF-043 | 8 | Low | Running every skill's commands | `/eh-status` reported the last export from the first line of `make export-r2-runs`, which lists runs oldest first: it showed the run of 2026-10-18 as the latest. It now takes the last line, and a test checks no skill reads that list from the top | #30 |
+| DEF-044 | 8 | Low | Running every skill's commands | `/eh-export` said the exporter refuses in direct mode, but only real runs are refused: a dry run takes no lock, runs, and compares a PostgreSQL that has fallen behind with the bucket (it reported 84 updated and 108 deleted, the rows direct mode stored). The skill now says so and how to read it; a test checks the wording | #30 |
+| DEF-045 | 8 | Low | Code and design review, checking every skill | `/eh-status`, `/eh-mode`, `/eh-r2` and the cheat sheet found the newest direct-mode log file with `r2-ls PREFIX=log/ LIMIT=1000 \| tail -1`. Listings are in key order, oldest first, so past 1,000 files (about 2 days of `make direct-run`) it would show the 1,000th. They now read `_state/direct.json` (the last sequence number and time) or list one day's folder whole; a test checks no listing of `log/` is cut by a limit | #30 |
+| DEF-046 | 8 | High | The first live handover to full mode | `make mode-full` started the consumers with `docker compose up`, which reuses the built image: they ran code from before the handovers existed, ignored the replay's `earth-hub-processed-at` header, and stored all 202 replayed messages at the replay's own time. The check after the replay caught it (192 rows differed) and returned the bucket to direct mode. `make mode-full` now rebuilds the image first, and a test checks that every target that starts our services builds it; the 192 rows' times were set back to direct mode's from the bucket | #30 |
+| DEF-047 | 8 | Medium | Reading the handover while recovering from DEF-046 | After a failed check, the next `make mode-full` took a new `replay_from` (the topic's end), so it did not see the entries the failed attempt had sent and would have sent all of them again, adding a duplicate `raw_events` row for each. An attempt now keeps a `replay_from` left by an earlier one; an end-to-end test retries after a failed check and finds nothing sent twice | #30 |
+| DEF-048 | 8 | Medium | Watching the first export of the 2025 backfill (about 2 hours) | The exporter took the bucket's lock for 2 hours and never renewed it, so an export lasting longer left the lock to expire mid-run: a second export could then take it and both would write the bucket at once. The lock is now taken for 30 minutes and renewed every 5 while the run lasts, and a run that finds its lock taken over stops before writing more; tests run an export past any lock time and take its lock over midway | #30 |
 
 ## By how they were found
 
 | Technique | Defects |
 | --- | --- |
 | Property-based contract testing (Schemathesis) | 6: DEF-013 to DEF-018 |
-| Code and design review | 8: DEF-003, DEF-005, DEF-009, DEF-010, DEF-035, DEF-037, DEF-038, DEF-039 |
-| Running against the live service | 7: DEF-021, DEF-023, DEF-026, DEF-027, DEF-030, DEF-034, DEF-036 |
-| Ordinary test runs | 10: DEF-002, DEF-011, DEF-012, DEF-022, DEF-024, DEF-028, DEF-029, DEF-031, DEF-032, DEF-033 |
+| Code and design review | 10: DEF-003, DEF-005, DEF-009, DEF-010, DEF-035, DEF-037, DEF-038, DEF-039, DEF-045, DEF-047 |
+| Running against the live service | 12: DEF-021, DEF-023, DEF-026, DEF-027, DEF-030, DEF-034, DEF-036, DEF-042, DEF-043, DEF-044, DEF-046, DEF-048 |
+| Ordinary test runs | 12: DEF-002, DEF-011, DEF-012, DEF-022, DEF-024, DEF-028, DEF-029, DEF-031, DEF-032, DEF-033, DEF-040, DEF-041 |
 | Running tests repeatedly, or all together | 3: DEF-004, DEF-006, DEF-019 |
 | Fault injection (stopping services) | 2: DEF-001, DEF-020 |
 | Checking the test tooling itself | 3: DEF-007, DEF-008, DEF-025 |
 
-Three of the 39 only ever showed up **intermittently** (DEF-004, DEF-017, DEF-019), and five were **defects in test tooling** that made results untrustworthy (DEF-007, DEF-008, DEF-025, DEF-028, DEF-029). Both groups are why the regression suite includes `make flake-check` and why test scripts are themselves checked.
+Three of the 48 only ever showed up **intermittently** (DEF-004, DEF-017, DEF-019), and five were **defects in test tooling** that made results untrustworthy (DEF-007, DEF-008, DEF-025, DEF-028, DEF-029). Both groups are why the regression suite includes `make flake-check` and why test scripts are themselves checked.
 
 ## Template
 
