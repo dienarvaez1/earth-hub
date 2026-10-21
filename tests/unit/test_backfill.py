@@ -154,6 +154,34 @@ def test_a_window_that_comes_back_short_once_is_fetched_again(server, make_job, 
     assert report.windows_done == 5 and report.fetched == 1
 
 
+@pytest.mark.req("REQ-BF-014")
+def test_a_feature_without_an_id_is_logged_once_and_counted_with_its_window(
+    server, make_job, fake_producer, feature_template, caplog
+):
+    """USGS sends some deletions with an empty ID; the backfill drops them, but says so, even when
+    the window is fetched a second time."""
+    anonymous = event_at(feature_template, "", SUN_4 + timedelta(days=2), status="deleted")
+    server.put(event_at(feature_template, "e1", SUN_4 + timedelta(days=1)), anonymous)
+    calls = [0]
+
+    def overcount_first_time(request):
+        if "/count" in request.url.path and calls[0] == 0:
+            calls[0] += 1
+            return httpx.Response(200, json={"count": 2, "maxAllowed": 20000})
+        return None
+
+    server.interceptors.append(overcount_first_time)
+    job, progress = make_job()
+    report = job.run(SUN_4, SUN_11, sweep=False)
+    assert (report.published, report.rejected) == (1, 1)
+    [(_, counts)] = progress.windows.values()
+    assert (counts.fetched, counts.published, counts.rejected) == (2, 1, 1)
+    [line] = [r for r in caplog.records if r.getMessage() == "feature rejected"]
+    assert (line.stage, line.job, line.start, line.event_id) == ("parse", "backfill", SUN_4, "")
+    assert "id must be a non-empty string" in line.reason
+    assert published_ids(fake_producer) == ["e1"]
+
+
 @pytest.mark.req("REQ-BF-004")
 def test_week_over_the_cap_is_split_into_days(
     server, make_job, fake_producer, feature_template, monkeypatch

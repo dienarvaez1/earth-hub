@@ -47,6 +47,8 @@ These values occur in real USGS data and are valid:
 | Missing magnitude, place, felt reports, intensity or alert level | Optional in the USGS format |
 | Different magnitude types (`ml`, `md`, `mb`, `mww`, …) | Kept in `mag_type`. Statistics that mix them should say so |
 
+**Dropped before Kafka, deliberately.** The publishers (poller, catch-up, backfill) drop only features they cannot route: without a usable `id`, `updated` or `time`. In real data these are USGS deletions with an empty `id`, nearly all with no `ids`, `code` or `net` either: notices that name no event (607 of 146,891 features in the 2025 backfill; in the busiest week, 9–16 November, all 50 came from the deleted-events query). Each is logged as `feature rejected` with its reason, and counted in `backfill_windows.rejected` and catch-up's summaries (REQ-BF-014). A rare one lists its event in `ids` (`,tx2025wbgwbq,`) and is dropped too; it changes nothing unless that event was stored ([limitations](../overview/limitations.md#data)).
+
 ## Range choices
 
 | Limit | Value | Reasoning |

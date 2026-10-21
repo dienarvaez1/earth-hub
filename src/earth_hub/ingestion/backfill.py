@@ -27,7 +27,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 
 from earth_hub.database.progress import Progress, WindowCounts
-from earth_hub.ingestion.events import parse_feed
+from earth_hub.ingestion.events import log_rejected, parse_feed
 from earth_hub.ingestion.fdsn import MAX_RESULTS, FdsnClient, FdsnTooSlow, FdsnUnavailable
 from earth_hub.ingestion.producer import EventPublisher
 from earth_hub.ingestion.windows import Window, floor_to_second, weekly_windows
@@ -150,6 +150,8 @@ class Backfill:
             rejected += kind_rejected
             expected += kind_expected
         fetched = len(messages) + len(rejected)
+        # Logged once the window is whole: a kind fetched again, or a window split, logs nothing.
+        log_rejected(logger, rejected, job=job, start=window.start, end=window.end)
         to_send = self._progress.needs_publish(messages)
         outcome = self._publisher.publish(to_send)
         if outcome.failed:
