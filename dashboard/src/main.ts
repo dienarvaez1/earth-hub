@@ -28,6 +28,8 @@ interface Status {
   queryAll?: (filter: Partial<Filter>) => Promise<Record<string, Row[]>>;
   // Resolves once the map has drawn what it was last given (its clustering runs in a worker).
   mapIdle?: () => Promise<void>;
+  // Opens an event's popup, as a click on its point does; false if the map does not show it.
+  openPopup?: (key: string) => boolean;
 }
 declare global {
   interface Window {
@@ -99,6 +101,7 @@ async function start(): Promise<void> {
     });
 
   status.mapIdle = () => map.idle();
+  status.openPopup = (key) => map.openPopup(key);
 
   let pending: number | undefined;
   // On the document: the time bucket select sits outside the form (form="filters").
@@ -270,7 +273,10 @@ async function render(db: Db, map: EventMap): Promise<void> {
   const bins = await db.query("magnitude_bins");
   const countries = await db.query("top_countries");
   const regions = await db.query("top_regions");
-  const significant = await db.query(new FormData(form).get("order") === "largest" ? "largest" : "significant");
+  const order = new FormData(form).get("order") === "largest" ? "largest" : "significant";
+  if (order !== shownOrder) tableSort = null; // other events: back to their own order
+  shownOrder = order;
+  const significant = await db.query(order);
   const regionOptions = await db.query("regions");
   status.timings.last_query_ms = performance.now() - t0;
 
@@ -321,21 +327,82 @@ function showSummary(s: Row): void {
   );
 }
 
+// The table's columns that sort, and how. The query picks the events (latest or largest);
+// a header only reorders those shown: ascending, then descending, then the query's order.
+type SortKey = "event_ts" | "magnitude" | "place" | "depth_km";
+type TableSort = { key: SortKey; direction: "ascending" | "descending" };
+const COLUMNS: [string, SortKey | null, string][] = [
+  ["Time (UTC)", "event_ts", ""],
+  ["Magnitude", "magnitude", "num"],
+  ["Place", "place", ""],
+  ["Depth (km)", "depth_km", "num"],
+  ["", null, ""],
+];
+let tableSort: TableSort | null = null;
+let shownOrder = "significant";
+let shownRows: Row[] = [];
+
+function sorted(rows: Row[], sort: TableSort | null): Row[] {
+  if (sort === null) return rows;
+  const sign = sort.direction === "ascending" ? 1 : -1;
+  const compare = (a: Row, b: Row): number => {
+    const x = a[sort.key];
+    const y = b[sort.key];
+    if (sort.key === "place") {
+      const p = String(x ?? "");
+      const q = String(y ?? "");
+      if (!p || !q) return p ? -1 : q ? 1 : 0; // no place: last either way
+      return sign * p.localeCompare(q);
+    }
+    if (x === null || y === null) return x === null ? (y === null ? 0 : 1) : -1;
+    return sign * ((x as number) - (y as number));
+  };
+  return rows.map((row, i) => ({ row, i })).sort((a, b) => compare(a.row, b.row) || a.i - b.i).map((e) => e.row);
+}
+
+function nextSort(key: SortKey): TableSort | null {
+  if (tableSort?.key !== key) return { key, direction: "ascending" };
+  return tableSort.direction === "ascending" ? { key, direction: "descending" } : null;
+}
+
 function showSignificant(rows: Row[]): void {
+  shownRows = rows;
   const table = $<HTMLTableElement>("#significant");
   table.replaceChildren();
   table.createCaption().textContent = rows.length ? "" : "No significant events match the filters.";
   if (rows.length === 0) return;
   const head = table.createTHead().insertRow();
-  for (const [text, cls] of [["Time (UTC)", ""], ["Magnitude", "num"], ["Place", ""], ["Depth (km)", "num"], ["", ""]]) {
+  for (const [text, key, cls] of COLUMNS) {
     const th = document.createElement("th");
-    th.textContent = text;
     th.className = cls;
     th.scope = "col";
+    if (key === null) {
+      th.textContent = text;
+    } else {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "sort";
+      button.dataset.sort = key;
+      const active = tableSort?.key === key ? tableSort.direction : null;
+      th.setAttribute("aria-sort", active ?? "none");
+      button.textContent = text;
+      const arrow = document.createElement("span");
+      arrow.className = "arrow";
+      arrow.setAttribute("aria-hidden", "true");
+      arrow.textContent = active === "ascending" ? "▲" : active === "descending" ? "▼" : "↕";
+      button.append(arrow);
+      button.title = `Sort by ${text.toLowerCase()}`;
+      button.addEventListener("click", () => {
+        tableSort = nextSort(key);
+        showSignificant(shownRows);
+        table.querySelector<HTMLButtonElement>(`button[data-sort="${key}"]`)?.focus();
+      });
+      th.append(button);
+    }
     head.append(th);
   }
   const body = table.createTBody();
-  for (const r of rows) {
+  for (const r of sorted(rows, tableSort)) {
     const row = body.insertRow();
     const cell = (text: string, cls = "") => {
       const td = row.insertCell();

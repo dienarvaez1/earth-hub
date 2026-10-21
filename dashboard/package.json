@@ -10,6 +10,7 @@
   "dependencies": {
     "@duckdb/duckdb-wasm": "1.33.1-dev65.0",
     "@observablehq/plot": "0.6.17",
+    "@photostructure/tz-lookup": "11.7.0",
     "maplibre-gl": "6.15.0"
   },
   "devDependencies": {

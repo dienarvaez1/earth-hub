@@ -7,6 +7,7 @@ import "maplibre-gl/dist/maplibre-gl.css";
 import workerUrl from "maplibre-gl/dist/maplibre-gl-worker.mjs?url";
 import { MAGNITUDE_STOPS } from "./colors";
 import type { Row } from "./db";
+import { localTime, utcTime } from "./times";
 
 // MapLibre 6 runs its tile work in a separate worker file, served with the page.
 maplibregl.setWorkerUrl(workerUrl);
@@ -70,6 +71,7 @@ export class EventMap {
   featureCount = 0;
   clustered = false; // whether the last result set was clustered
   singleCount = 0; // events drawn as single points whatever the zoom
+  private shown: { properties: Record<string, unknown>; geometry: { coordinates: number[] } }[] = [];
 
   constructor(container: HTMLElement) {
     this.map = new maplibregl.Map({
@@ -169,6 +171,7 @@ export class EventMap {
     (this.map.getSource("clustered") as GeoJSONSource).setData({ type: "FeatureCollection", features: rest });
     this.featureCount = features.length;
     this.singleCount = single.length;
+    this.shown = features;
   }
 
   /** Resolves once the map has drawn what it was last given. */
@@ -191,6 +194,14 @@ export class EventMap {
     this.map.easeTo({ center: [lon, lat], zoom });
   }
 
+  /** The popup of the event with `key`, as a click on its point opens it (for the tests). */
+  openPopup(key: string): boolean {
+    const feature = this.shown.find((f) => f.properties.key === key);
+    if (feature === undefined) return false;
+    this.showPopup(feature as unknown as MapGeoJSONFeature);
+    return true;
+  }
+
   private showPopup(feature: MapGeoJSONFeature | undefined): void {
     if (feature === undefined) return;
     const p = feature.properties;
@@ -198,12 +209,20 @@ export class EventMap {
     const body = document.createElement("div");
     const title = document.createElement("strong");
     title.textContent = String(p.title ?? p.place ?? `Event ${p.key}`);
-    const details = document.createElement("div");
+    const line = (text: string, testid: string) => {
+      const div = document.createElement("div");
+      div.textContent = text;
+      div.dataset.testid = testid;
+      body.append(div);
+      return div;
+    };
     const magnitude = p.magnitude === null || p.magnitude === undefined ? "no magnitude" : `M ${p.magnitude}`;
-    details.textContent =
-      `${magnitude} · ${p.depth_km} km deep · ${new Date(p.time as number).toISOString().slice(0, 16).replace("T", " ")} UTC` +
-      (p.deleted ? " · deleted by USGS" : "");
-    body.append(title, details);
+    body.append(title);
+    line(`${magnitude} · ${p.depth_km} km deep` + (p.deleted ? " · deleted by USGS" : ""), "popup-details");
+    // The time in UTC, then where it happened (the zone's name on hover).
+    line(utcTime(p.time as number), "popup-utc");
+    const local = localTime(p.time as number, lat, lon);
+    if (local !== null) line(local.text, "popup-local").title = local.zone;
     if (typeof p.url === "string" && p.url.startsWith("https://")) {
       const link = document.createElement("a");
       link.href = p.url;

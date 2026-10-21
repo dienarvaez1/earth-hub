@@ -322,6 +322,31 @@ th.num {
   font-variant-numeric: tabular-nums;
 }
 
+/* Sortable headers: the whole header is the button, styled as the header text. */
+button.sort {
+  all: unset;
+  cursor: pointer;
+  font-weight: 600;
+  display: inline-flex;
+  gap: 4px;
+  align-items: baseline;
+}
+
+button.sort:focus-visible {
+  outline: 2px solid var(--accent, currentColor);
+  outline-offset: 2px;
+}
+
+button.sort .arrow {
+  color: var(--muted);
+  font-size: 0.75em;
+}
+
+th[aria-sort="ascending"] .arrow,
+th[aria-sort="descending"] .arrow {
+  color: inherit;
+}
+
 footer {
   color: var(--muted);
   font-size: 0.8rem;
