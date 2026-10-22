@@ -279,8 +279,13 @@ async function render(db: Db, map: EventMap): Promise<void> {
   shownOrder = order;
   const significant = await db.query(order);
   const regionOptions = await db.query("regions");
+  const countryOptions = await db.query("countries");
+  const typeOptions = await db.query("event_types");
   status.timings.last_query_ms = performance.now() - t0;
 
+  // The menus' counts follow the other choices.
+  fillCountries(countryOptions);
+  fill("event_type", typeOptions, (r) => String(r.event_type), DEFAULT_EVENT_TYPE);
   fillRegions(regionOptions);
   showSummary(summary);
   await map.show(points);

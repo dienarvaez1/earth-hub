@@ -308,7 +308,7 @@ def test_filter_options_list_every_value(dash):
     assert dash.query("countries") == [
         {"country": "Japan", "events": 1},
         {"country": "Mexico", "events": 1},
-        {"country": "United States", "events": 5},  # the deleted event too: options, not counts
+        {"country": "United States", "events": 4},  # not the deleted event, left out
         {"country": "Unknown", "events": 1},
     ]
     assert [r["region"] for r in dash.query("regions")] == [
@@ -319,10 +319,46 @@ def test_filter_options_list_every_value(dash):
     ]
     dash.set_filter(country="United States")
     assert [r["region"] for r in dash.query("regions")] == ["Alaska", "California"]
+    # Under the chosen country: the United States' 3 earthquakes and its quarry blast.
     assert dash.query("event_types") == [
-        {"event_type": "earthquake", "events": 7},
+        {"event_type": "earthquake", "events": 3},
         {"event_type": "quarry blast", "events": 1},
     ]
+
+
+@pytest.mark.req("REQ-DASH-024")
+def test_each_menu_counts_under_the_rest_of_the_filter(dash):
+    def counts(name, key, **filters):
+        dash.set_filter(**filters)
+        return {r[key]: r["events"] for r in dash.query(name)}
+
+    # 29 February: events 2 (Alaska, 2.5) and 3 (Baja California, Mexico, 4.5). Every option
+    # stays listed, at 0 when nothing matches.
+    leap = {"start_time": at("2024-02-29"), "end_time": at("2024-03-01")}
+    assert counts("countries", "country", **leap) == {
+        "Japan": 0, "Mexico": 1, "United States": 1, "Unknown": 0,
+    }  # fmt: skip
+    assert counts("event_types", "event_type", **leap) == {"earthquake": 2, "quarry blast": 0}
+    # A menu's own choice leaves its counts alone; the others' choices apply.
+    assert counts("countries", "country", country="Mexico", **leap) == {
+        "Japan": 0, "Mexico": 1, "United States": 1, "Unknown": 0,
+    }  # fmt: skip
+    assert counts("event_types", "event_type", country="Mexico") == {
+        "earthquake": 1, "quarry blast": 0,
+    }  # fmt: skip
+    assert counts("event_types", "event_type", event_type="quarry blast") == {
+        "earthquake": 6, "quarry blast": 1,
+    }  # fmt: skip
+    # The regions of the chosen country, counted under the magnitude band and deletions.
+    assert counts("regions", "region", country="United States", min_magnitude=2.5) == {
+        "Alaska": 1, "California": 0,
+    }  # fmt: skip
+    assert counts("regions", "region", country="United States", include_deleted=True) == {
+        "Alaska": 4, "California": 1,
+    }  # fmt: skip
+    # The type menu keeps its order (most common over all events) whatever the counts.
+    dash.set_filter(event_type="quarry blast", start_time=at("2024-04-01"))
+    assert [r["event_type"] for r in dash.query("event_types")] == ["earthquake", "quarry blast"]
 
 
 @pytest.mark.req("REQ-DASH-015")

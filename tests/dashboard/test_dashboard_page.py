@@ -580,20 +580,20 @@ def test_the_rankings_say_what_drives_their_counts(dash):
 @pytest.mark.req("REQ-DASH-021")
 def test_the_place_menus_list_unknown_first_and_us_places_with_a_prefix(dash):
     page = dash.page
-    # Options count every event, the deleted one too; values stay as stored. The states
+    # Earthquakes, deleted ones left out (REQ-DASH-024); values stay as stored. The states
     # come after the other regions.
     assert options(page, "country") == [
         ["", "All"],
         ["Unknown", "Unknown (1)"],
         ["Japan", "Japan (1)"],
         ["Mexico", "Mexico (1)"],
-        ["United States", "United States (5)"],
+        ["United States", "United States (3)"],
     ]
     assert options(page, "region") == [
         ["", "All"],
         ["Unknown", "Unknown (2)"],
         ["Baja California", "Baja California (1)"],
-        ["Alaska", "US-Alaska (4)"],
+        ["Alaska", "US-Alaska (2)"],
         ["California", "US-California (1)"],
     ]
     dash.after_update(lambda: page.select_option("select[name=region]", "Alaska"))
@@ -602,7 +602,7 @@ def test_the_place_menus_list_unknown_first_and_us_places_with_a_prefix(dash):
     dash.after_update(lambda: page.select_option("select[name=country]", "United States"))
     assert [label for _, label in options(page, "region")] == [
         "All",
-        "US-Alaska (4)",
+        "US-Alaska (2)",
         "US-California (1)",
     ]
 
@@ -754,3 +754,33 @@ def test_the_top_bars_are_shares_split_by_magnitude_level(dash):
         "els => els.map(e => e.textContent.trim())",
     )
     assert [label for _, label, _ in LEVELS] == [s for s in swatches if s]
+
+
+@pytest.mark.req("REQ-DASH-024")
+def test_the_menu_counts_follow_the_other_choices(browser_page, server):
+    # Sunday 10 March: this week (the default) holds 5 (California, Monday 4 March), 6 (Japan)
+    # and the deleted 7; today only 6.
+    browser_page.open(server.url, now="2024-03-10T23:30:00+00:00")
+    page = browser_page.page
+
+    def counts(name):
+        return [label for _, label in options(page, name)]
+
+    assert counts("country") == [
+        "All", "Unknown (0)", "Japan (1)", "Mexico (0)", "United States (1)",
+    ]  # fmt: skip
+    assert counts("event_type") == ["All", "earthquake (2)", "quarry blast (0)"]
+    browser_page.after_update(lambda: page.select_option("select[name=period]", "today"))
+    assert counts("country") == [
+        "All", "Unknown (0)", "Japan (1)", "Mexico (0)", "United States (0)",
+    ]  # fmt: skip
+    assert counts("event_type") == ["All", "earthquake (1)", "quarry blast (0)"]
+    assert counts("region")[:2] == ["All", "Unknown (1)"]
+    # Deleted events count once included; a menu's own choice leaves its counts alone.
+    browser_page.after_update(lambda: page.select_option("select[name=period]", "this_week"))
+    browser_page.after_update(lambda: page.check("input[name=include_deleted]"))
+    assert "United States (2)" in counts("country")
+    browser_page.after_update(lambda: page.select_option("select[name=country]", "Japan"))
+    assert "United States (2)" in counts("country")
+    assert counts("event_type") == ["All", "earthquake (1)", "quarry blast (0)"]
+    assert browser_page.errors == [] and browser_page.blocked == []
