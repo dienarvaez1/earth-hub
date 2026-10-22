@@ -8,7 +8,7 @@ The project is designed to showcase your experience in software quality assuranc
 
 ## Status
 
-As of 2026-10-20. The plan below is the original, with Milestone 7 revised; the work as built is described in the [architecture](../technical/architecture.md), and what each step found in the [defect log](defects.md).
+As of 2026-10-22. The plan below is the original, with Milestone 7 revised; the work as built is described in the [architecture](../technical/architecture.md), and what each step found in the [defect log](defects.md).
 
 | Milestone | Status | Merged in |
 | --- | --- | --- |
@@ -23,15 +23,19 @@ As of 2026-10-20. The plan below is the original, with Milestone 7 revised; the 
 | 6. Analytics dashboard from R2, observability, performance | Done | #12, #13, #14, #15 |
 | 7.1 CI, third-party licenses, preview marking | Done | #16 |
 | 7.2 Documentation and demo | Done | #18; skills and cheat sheet #19; defect reports to history #20; docs reorganized #21 |
-| 7.3 Release: audit, license, public repository, branch protection, `USGS_CONTACT`, preview label removed | Done | #37, #38 (`make release`) |
+| 7.3 Release, prepared: audit, MIT license, `USGS_CONTACT` setting, preview label removed, the release script | Done | #37, #38 |
+| 7.3 Release, the rest: public repository, branch protection on `main`, R2 secrets into the `r2` environment, rounds every 15 minutes | Not run yet (`make release`, run by the author) | |
 | 8.1 Persistence decisions in memory (`processing/ledger.py`), `EventStore`, `PostgresStore`; the record key | Done | #22, #23 |
 | 8.2 `BucketStore`, the direct runner, parity tests | Done | #24 |
 | 8.3 The mode switch, handovers with log replay | Done | #25 |
 | Direct mode on GitHub Actions' hourly schedule, after 8.3 | Done | #27; skills and docs for the modes #28 |
+| Rounds started by the dashboard Worker's Cloudflare cron trigger (GitHub's schedule skipped runs, DEF-052); `make trigger-token`; an e-mailed reminder before the token expires | Done | #40, #41 |
+| Direct mode's audit trail: a record per execution in the bucket, `make direct-runs` | Done | #42 |
+| Dashboard: opens on This week per hour; menus that recount; top countries and regions as shares by magnitude, with a note on network density; US- places; events over time as columns, areas, lines or trends | Done | #39 |
 | Load test of the API with Locust, after 8 | Done | #26 |
 | Reconciliation with USGS, catching up after each switch | Done | #32 |
 
-Current numbers: 173 requirements, all covered by a passing test; 52 defects, all fixed; about 985 tests in the full regression.
+Current numbers: 173 requirements, all covered by a passing test; 52 defects, all fixed; about 1,100 tests in the full regression.
 
 ## 1. Project vision
 

@@ -46,9 +46,10 @@ flowchart TB
     consumerbf --> pg
     pg --> api
     api --> r2
-    direct -- "rows, snapshot,<br/>log, state" --> r2
+    direct -- "rows, snapshot, log,<br/>state, audit" --> r2
     r2 --> worker
     worker --> browser
+    worker -. "cron :17 hourly:<br/>run direct.yml" .-> direct
 ```
 
 Each arrow is the only way data moves between those two parts:
@@ -58,8 +59,8 @@ Each arrow is the only way data moves between those two parts:
 - **PostgreSQL is written only by the consumers**, apart from backfill's progress table and catch-up's checkpoint.
 - **The API only reads PostgreSQL:** never Kafka or USGS.
 - **The exporter reads only the API** (`GET /api/v1/export/earthquakes`), never PostgreSQL. It runs on demand, never on a schedule.
-- **One mode writes the bucket at a time** ([switching modes](#switching-modes)): in full mode the exporter, in [direct mode](#direct-mode) the direct rounds, run hourly by GitHub Actions or by hand. The only path from the bucket back into Kafka is the handover to full mode, which replays direct mode's log onto `earthquakes.backfill`.
-- **The Worker exposes two files of the bucket** (the Parquet snapshot and its `meta.json`) and nothing else. The browser runs every report itself.
+- **One mode writes the bucket at a time** ([switching modes](#switching-modes)): in full mode the exporter, in [direct mode](#direct-mode) the direct rounds, run hourly on GitHub Actions (started by the dashboard Worker's cron trigger) or by hand. The only path from the bucket back into Kafka is the handover to full mode, which replays direct mode's log onto `earthquakes.backfill`.
+- **The Worker exposes two files of the bucket** (the Parquet snapshot and its `meta.json`) and nothing else. The browser runs every report itself. The Worker's other job, its cron trigger, only asks GitHub to run a round: it holds a GitHub token, never R2 credentials.
 
 ## Services
 
@@ -222,6 +223,7 @@ flowchart TB
 - **Holds the bucket's lock**, the exporter's, so a round and an export never write at once. A round that finds it held fails, and the poller retries its messages next round.
 - **Writes behind a redo record.** The round's writes are first saved whole to `_state/direct-pending.json`, only if no other is there. Then come the rows (and deletes of merged records), the ID map, the manifest, the snapshot and its `meta.json`, the log and the state, and then the record is removed. Each step gives the same result when repeated, so a round interrupted anywhere is finished by the next one before it does anything else.
 - **Logs what it processed** as the consumer does, with each message's sequence number and record key; a record's key is one of its USGS IDs, so the ID map says where a merged record is now.
+- **Is counted in its execution's audit record** (`direct/audit.py`, `audit/direct/<date>/<run_id>.json`, in the table above): the runner tells it of each round (`on_round`), and the entry point writes it when the execution starts and ends, with who started it, the mode, the status, the times, the messages by part and outcome, and the errors and rejected messages. Saving it can fail without failing the round, and it sits outside what full and direct mode must write identically. `make direct-runs` lists the latest; `/eh-mode runs`.
 
 ### Switching modes
 
@@ -370,11 +372,13 @@ sequenceDiagram
 
 | Part | What it does |
 | --- | --- |
-| `dashboard/src/worker.ts` | Serves `/data/earthquakes.parquet` and `/data/meta.json` from the bucket through an R2 binding, with `ETag`, `304`, byte ranges and a 5-minute browser cache. Nothing else in the bucket is reachable, and the page holds no credentials |
+| `dashboard/src/worker.ts` | Serves `/data/earthquakes.parquet` and `/data/meta.json` from the bucket through an R2 binding, with `ETag`, `304`, byte ranges and a 5-minute browser cache. Nothing else in the bucket is reachable, and the page holds no credentials. Its scheduled handler (cron `17 * * * *`, not reachable over HTTP) starts direct mode's hourly round on GitHub Actions with the `GITHUB_TOKEN` secret, and once a day passes the token's days left ([the trigger](ci.md#the-trigger)) |
+| `dashboard/src/places.ts` | How the place menus show their options, without changing their values or the SQL: US states (region menu) and the territories USGS names as the country (country menu) as `US-<name>`, grouped, and Unknown right after All |
 | `dashboard/index.html`, `dashboard/src/` | The page. DuckDB-WASM runs `dashboard/queries/*.sql` over the snapshot in the browser; MapLibre GL draws the map on OpenFreeMap tiles; Observable Plot draws the charts |
 | `dashboard/queries/` | The reports, as SQL files; see [the SQL examples](sql-examples.md#dashboard-reports) |
 | `scripts/fetch_duckdb_extensions.py` | Downloads DuckDB's Parquet extension (pinned by SHA-256), so the page serves it itself |
-| `scripts/dashboard_config.py` | Writes `dashboard/wrangler.jsonc` with the bucket from `R2_BUCKET` (generated, never committed) |
+| `scripts/dashboard_config.py` | Writes `dashboard/wrangler.jsonc` with the bucket from `R2_BUCKET` (generated, never committed), the cron trigger and its GitHub settings |
+| `scripts/trigger_token.py` | `make trigger-token`: the trigger's GitHub token, created in GitHub's form, checked and stored on the Worker without being shown |
 | `vite.config.ts` | Builds the page, and writes `third-party-licenses.txt` from the bundled packages (DEF-035) |
 
 ```bash
@@ -387,6 +391,10 @@ make dashboard-deploy    # publish; prints the workers.dev address
 **With Claude Code:** `/eh-dashboard dev`, `/eh-dashboard deploy`, and `/eh-dashboard` to check the live page and the data it serves.
 
 - **Time presets:** Today, Yesterday, This week (from Monday; the default), Last week (Monday to Sunday), This month, Last month, Last 3 months, This year, Last year, Last 3 years, and Custom with From and To calendars. Every period is whole UTC days through today, or through the end of the previous day, week, month or year, and each preset picks a chart grouping: per hour (Today, Yesterday, This week), day, week or month.
+- **Opens on** This week, grouped per hour, all magnitudes, earthquakes only, deleted events left out, with the chart in stacked columns. The magnitude filter is one list: All, then the legend's bands.
+- **The country, region and type menus count** each option under the rest of the filter (time, magnitude, the other choices, deletions), leaving out their own choice, and recount on every change; every option stays listed, at 0 when nothing matches. `setup.sql`'s `matched` view says which parts of the filter each event passes, defined once for the reports and the menus.
+- **Events over time** has a Style menu: Stacked columns (the default), Stacked areas, Lines (one per magnitude level, with a crosshair) and Trendlines (each level's periods as dots with its least-squares trend), per hour, day, week or month; the stacks run from 6 and above at the baseline to Below 2.5, then No magnitude, in the legend's colors.
+- **The top countries and regions** are shares of the events in the bars shown (the 10 bars add up to 100%), each bar split by magnitude level in the legend's colors, with its number of events at its end; a note under each says the counts follow how dense the seismic networks are (the United States records earthquakes too small to feel).
 - **The map** shows every event as its own point, up to 5,000 events. Above that it clusters them, except events of magnitude 6 or more, which always stay single points on top.
 - **A point's popup** (a click) gives the event's time in UTC and, on the next line, where it happened: in the time zone its coordinates fall in, found by `@photostructure/tz-lookup` (the world's time-zone boundaries, nautical zones at sea), with the browser's summer time and abbreviation (`AKDT`, `CET`, else `GMT+9`); the zone's name shows on hover.
 - **The significant-events table** sorts by Time, Magnitude, Place or Depth from its column headers: ascending, descending, then the order Latest or Largest chose. It reorders the 10 events shown; Latest or Largest still picks them.
