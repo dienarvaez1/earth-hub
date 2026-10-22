@@ -3,6 +3,7 @@ A local stand-in plays GitHub's API, so nothing leaves the machine."""
 
 import json
 import threading
+from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import httpx
@@ -11,22 +12,41 @@ from support.dashboard import LocalDashboard
 
 pytestmark = pytest.mark.req("REQ-CI-006")
 
-DISPATCHES = "/repos/dienarvaez1/earth-hub/actions/workflows/direct.yml/dispatches"
+WORKFLOW = "/repos/dienarvaez1/earth-hub/actions/workflows/direct.yml"
+DISPATCHES = WORKFLOW + "/dispatches"
 
 
 class FakeGitHub:
-    """Records every request; answers `status` (204: GitHub's answer to a dispatch)."""
+    """Records every request; answers a dispatch with `status` (204: GitHub's answer), and the
+    workflow with the token's `expiry` header, as GitHub states it on every reply."""
 
     def __init__(self):
         self.requests: list[dict] = []
         self.status = 204
+        self.expiry: str | None = None
         fake = self
 
         class Handler(BaseHTTPRequestHandler):
+            def do_GET(self):  # noqa: N802 (http.server's name)
+                fake.requests.append(
+                    {"method": "GET", "path": self.path, "headers": dict(self.headers)}
+                )
+                self.send_response(200)
+                if fake.expiry is not None:
+                    self.send_header("GitHub-Authentication-Token-Expiration", fake.expiry)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(b"{}")
+
             def do_POST(self):  # noqa: N802 (http.server's name)
                 body = self.rfile.read(int(self.headers.get("Content-Length", 0)))
                 fake.requests.append(
-                    {"path": self.path, "headers": dict(self.headers), "body": json.loads(body)}
+                    {
+                        "method": "POST",
+                        "path": self.path,
+                        "headers": dict(self.headers),
+                        "body": json.loads(body),
+                    }
                 )
                 self.send_response(fake.status)
                 self.end_headers()
@@ -57,9 +77,12 @@ def worker(state, github, *token: str) -> LocalDashboard:
     return local
 
 
-def fire(local: LocalDashboard) -> httpx.Response:
-    """What Cloudflare does every hour: run the scheduled handler."""
-    return httpx.get(f"{local.url}/__scheduled", params={"cron": "17 * * * *"}, timeout=30)
+def fire(local: LocalDashboard, at: str = "2026-10-22T09:17:00+00:00") -> httpx.Response:
+    """What Cloudflare does every hour: run the scheduled handler, as at `at`."""
+    time = int(datetime.fromisoformat(at).timestamp() * 1000)
+    params = {"cron": "17 * * * *", "time": str(time)}
+    # The runtime's own endpoint (`--test-scheduled`); it takes the event's time in ms.
+    return httpx.get(f"{local.url}/cdn-cgi/local/scheduled", params=params, timeout=30)
 
 
 @pytest.fixture(scope="module")
@@ -81,6 +104,44 @@ def test_each_trigger_asks_github_for_one_round_on_main(with_token, github):
     assert headers["accept"] == "application/vnd.github+json"
     assert headers["x-github-api-version"] == "2022-11-28"
     assert headers["user-agent"] == "earth-hub-trigger"
+
+
+@pytest.mark.req("REQ-CI-007")
+@pytest.mark.parametrize(
+    ("expiry", "days"),
+    [
+        ("2026-11-05 07:00:00 UTC", "13"),  # 13 days and 22 h 43 min after 08:17
+        ("2026-11-05 00:00:00 -0700", "13"),  # the same moment, in another zone
+        ("2027-10-22 08:17:00 UTC", "365"),
+        (None, None),  # a token that never expires: nothing passed
+    ],
+)
+def test_once_a_day_the_trigger_passes_the_days_the_token_has_left(
+    with_token, github, expiry, days
+):
+    github.requests.clear()
+    github.expiry = expiry
+    try:
+        assert fire(with_token, at="2026-10-22T08:17:00+00:00").status_code == 200
+    finally:
+        github.expiry = None
+    check, dispatch = github.requests
+    assert check["method"] == "GET" and check["path"] == WORKFLOW  # starts nothing
+    assert check["headers"]["Authorization"] == "Bearer t0ken"
+    inputs = {"job": "round"} | ({"token_days_left": days} if days else {})
+    assert dispatch["path"] == DISPATCHES and dispatch["body"]["inputs"] == inputs
+
+
+@pytest.mark.req("REQ-CI-007")
+def test_the_other_hours_only_start_the_round(with_token, github):
+    github.requests.clear()
+    github.expiry = "2026-11-05 07:00:00 UTC"
+    try:
+        assert fire(with_token, at="2026-10-22T09:17:00+00:00").status_code == 200
+    finally:
+        github.expiry = None
+    (dispatch,) = github.requests
+    assert dispatch["method"] == "POST" and dispatch["body"]["inputs"] == {"job": "round"}
 
 
 def test_a_refusal_fails_the_trigger(with_token, github):

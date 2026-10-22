@@ -1,7 +1,9 @@
 """Direct mode on a schedule (.github/workflows/direct.yml, docs/technical/ci.md)."""
 
 import json
+import os
 import re
+import subprocess
 import sys
 from pathlib import Path
 
@@ -44,7 +46,7 @@ def test_it_runs_only_on_its_schedule_or_by_hand(workflow):
 @pytest.mark.req("REQ-CI-005")
 def test_each_job_runs_when_asked_with_the_skip_flag(workflow):
     jobs = workflow["jobs"]
-    assert set(jobs) == {"round", "reconcile"}
+    assert set(jobs) == {"round", "reconcile", "token"}
     assert jobs["round"]["if"] == "inputs.job == 'round'"  # the trigger's dispatch, or by hand
     assert jobs["reconcile"]["if"] == (
         f"github.event.schedule == '{RECONCILE_CRON}' || inputs.job == 'reconcile'"
@@ -69,8 +71,8 @@ def test_the_worker_triggers_a_round_every_hour():
     }
     assert "GITHUB_TOKEN" not in json.dumps(config)  # a secret, never in the configuration
     source = (REPO / "dashboard" / "src" / "worker.ts").read_text()
-    assert 'const WORKFLOW = "direct.yml";' in source
-    assert 'const DISPATCH = { ref: "main", inputs: { job: "round" } };' in source
+    for constant in ('WORKFLOW = "direct.yml"', 'REF = "main"', 'JOB = "round"'):
+        assert f"const {constant};" in source
 
 
 @pytest.mark.req("REQ-REC-003")
@@ -112,7 +114,11 @@ def test_catch_up_intervals_are_shorter_than_the_schedule_and_valid_settings(wor
 @pytest.mark.req("REQ-CI-005")
 def test_r2_credentials_reach_only_the_step_that_uses_them(workflow):
     assert "secrets" not in str(workflow.get("env", {}))
+    token = workflow["jobs"]["token"]  # reads one number: no environment, no secrets
+    assert "environment" not in token and "secrets." not in str(token)
     for name, job in workflow["jobs"].items():
+        if name == "token":
+            continue
         assert job["environment"] == "r2", name  # the environment only main can use
         assert "secrets" not in str(job.get("env", {})), name
         with_secrets = [s for s in job["steps"] if "secrets." in str(s.get("env", {}))]
@@ -134,3 +140,44 @@ def test_actions_are_pinned_and_the_token_is_read_only(workflow):
     # The same versions as CI, so one update covers both.
     ci = (WORKFLOWS / "ci.yml").read_text()
     assert all(u in ci for u in used)
+
+
+def token_check(workflow: dict, days: str) -> subprocess.CompletedProcess:
+    """The token job's script, run as GitHub runs it (bash -e) with the trigger's input."""
+    (step,) = workflow["jobs"]["token"]["steps"]
+    assert step["env"] == {"DAYS_LEFT": "${{ inputs.token_days_left }}"}  # never in the script
+    return subprocess.run(
+        ["bash", "-e", "-c", step["run"]],
+        env={"PATH": os.environ["PATH"], "DAYS_LEFT": days},
+        capture_output=True,
+        text=True,
+    )
+
+
+@pytest.mark.req("REQ-CI-007")
+def test_the_token_job_fails_within_14_days_of_the_expiry(workflow):
+    job = workflow["jobs"]["token"]
+    assert job["if"] == "inputs.token_days_left != ''"  # only when the trigger passes it
+    triggers = workflow[True]["workflow_dispatch"]["inputs"]
+    days_left = triggers["token_days_left"]
+    assert days_left["type"] == "string" and days_left["default"] == ""
+    assert token_check(workflow, "15").returncode == 0
+    for days in ("14", "3", "0", "-2"):
+        result = token_check(workflow, days)
+        assert result.returncode == 1, days
+        assert f"expires in {days} days: run make trigger-token" in result.stdout
+    for junk in ("", "abc", "1-2", "3; echo hi", "$(id)", "1\n::warning::injected"):
+        result = token_check(workflow, junk)
+        assert result.returncode == 1 and "not a number of days" in result.stdout, junk
+        assert result.stdout.splitlines() == [
+            "::error::token_days_left is not a number of days"
+        ]  # nothing of the input echoed, nothing run
+
+
+@pytest.mark.req("REQ-CI-007")
+def test_the_worker_and_the_workflow_agree_on_the_reminder():
+    source = (REPO / "dashboard" / "src" / "worker.ts").read_text()
+    assert "const REMIND_DAYS = 14;" in source and "const CHECK_HOUR_UTC = 8;" in source
+    assert "inputs.token_days_left = String(days);" in source
+    run = yaml.safe_load(WORKFLOW.read_text())["jobs"]["token"]["steps"][0]["run"]
+    assert '[ "$DAYS_LEFT" -le 14 ]' in run

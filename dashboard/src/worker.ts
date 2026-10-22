@@ -13,9 +13,16 @@ interface Env {
   GITHUB_TOKEN?: string; // a secret: fine-grained, Actions read and write on this repository
 }
 
-// The workflow and the job a trigger runs (.github/workflows/direct.yml).
+// The workflow, the branch and the job a trigger runs (.github/workflows/direct.yml).
 const WORKFLOW = "direct.yml";
-const DISPATCH = { ref: "main", inputs: { job: "round" } };
+const REF = "main";
+const JOB = "round";
+
+// Once a day, the trigger at this UTC hour also passes how many days the token has left;
+// within REMIND_DAYS the workflow's token job fails, and GitHub e-mails its owner.
+const CHECK_HOUR_UTC = 8;
+const REMIND_DAYS = 14;
+const DAY_MS = 86_400_000;
 
 // Public paths and the only objects they can reach: nothing else in the bucket is exposed.
 const OBJECTS: Record<string, string> = {
@@ -37,21 +44,64 @@ export default {
     return response;
   },
 
-  async scheduled(_controller: ScheduledController, env: Env): Promise<void> {
-    await startRound(env);
+  async scheduled(controller: ScheduledController, env: Env): Promise<void> {
+    await startRound(env, new Date(controller.scheduledTime));
   },
 } satisfies ExportedHandler<Env>;
 
-/** Asks GitHub to run one direct round. Without a token it only says so; a refusal throws,
- * so Cloudflare records the trigger as failed. */
-async function startRound(env: Env): Promise<void> {
+/** Asks GitHub to run one direct round, once a day with the days the token has left.
+ * Without a token it only says so; a refusal throws, so Cloudflare records the trigger as
+ * failed. */
+async function startRound(env: Env, now: Date): Promise<void> {
   if (!env.GITHUB_TOKEN) {
     console.warn("trigger: GITHUB_TOKEN is not set, no direct round started");
     return;
   }
-  const url = `${env.GITHUB_API}/repos/${env.GITHUB_REPO}/actions/workflows/${WORKFLOW}/dispatches`;
-  const response = await fetch(url, {
-    method: "POST",
+  const inputs: Record<string, string> = { job: JOB };
+  if (now.getUTCHours() === CHECK_HOUR_UTC) {
+    const days = await tokenDaysLeft(env, now);
+    if (days !== null) {
+      inputs.token_days_left = String(days);
+      if (days <= REMIND_DAYS) {
+        console.warn(`trigger: the GitHub token expires in ${days} days: run make trigger-token`);
+      }
+    }
+  }
+  const response = await github(env, "POST", "/dispatches", { ref: REF, inputs });
+  if (!response.ok) {
+    const detail = (await response.text()).slice(0, 300);
+    throw new Error(`trigger: GitHub answered ${response.status}: ${detail}`);
+  }
+  console.log("trigger: direct round started");
+}
+
+/** The days until the token expires, from the date GitHub states on every reply to a token
+ * that expires; null for one that never does. Reading the workflow starts nothing. */
+async function tokenDaysLeft(env: Env, now: Date): Promise<number | null> {
+  const response = await github(env, "GET", "");
+  await response.body?.cancel();
+  const expiry = parseExpiry(response.headers.get("GitHub-Authentication-Token-Expiration"));
+  return expiry === null ? null : Math.floor((expiry - now.getTime()) / DAY_MS);
+}
+
+const EXPIRY = /^(\d{4})-(\d{2})-(\d{2}) (\d{2}):(\d{2}):(\d{2}) (UTC|[+-]\d{4})$/;
+
+/** GitHub's "2027-10-15 07:00:00 UTC" or "2027-10-15 00:00:00 -0700", in epoch ms. */
+function parseExpiry(text: string | null): number | null {
+  const parts = EXPIRY.exec(text?.trim() ?? "");
+  if (parts === null) return null;
+  const [, year, month, day, hour, minute, second, zone] = parts;
+  const sign = zone.startsWith("-") ? -1 : 1;
+  const offsetMinutes =
+    zone === "UTC" ? 0 : sign * (Number(zone.slice(1, 3)) * 60 + Number(zone.slice(3)));
+  const local = Date.UTC(+year, +month - 1, +day, +hour, +minute, +second);
+  return local - offsetMinutes * 60_000;
+}
+
+function github(env: Env, method: string, path: string, body?: object): Promise<Response> {
+  const url = `${env.GITHUB_API}/repos/${env.GITHUB_REPO}/actions/workflows/${WORKFLOW}${path}`;
+  return fetch(url, {
+    method,
     headers: {
       Authorization: `Bearer ${env.GITHUB_TOKEN}`,
       Accept: "application/vnd.github+json",
@@ -59,13 +109,8 @@ async function startRound(env: Env): Promise<void> {
       "User-Agent": "earth-hub-trigger",
       "X-GitHub-Api-Version": "2022-11-28",
     },
-    body: JSON.stringify(DISPATCH),
+    body: body === undefined ? undefined : JSON.stringify(body),
   });
-  if (!response.ok) {
-    const detail = (await response.text()).slice(0, 300);
-    throw new Error(`trigger: GitHub answered ${response.status}: ${detail}`);
-  }
-  console.log("trigger: direct round started");
 }
 
 async function serve(request: Request, env: Env): Promise<Response> {

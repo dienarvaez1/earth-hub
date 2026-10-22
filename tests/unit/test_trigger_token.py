@@ -18,11 +18,15 @@ TOKEN = "github_pat_0123456789abcdef"
 WORKFLOW = "/repos/dienarvaez1/earth-hub/actions/workflows/direct.yml"
 
 
-def github(status: int, seen: list | None = None) -> httpx.Client:
+EXPIRY = "2027-10-15 07:00:00 UTC"
+
+
+def github(status: int, seen: list | None = None, expiry: str | None = EXPIRY) -> httpx.Client:
     def answer(request: httpx.Request) -> httpx.Response:
         if seen is not None:
             seen.append(request)
-        return httpx.Response(status, json={})
+        headers = {"GitHub-Authentication-Token-Expiration": expiry} if expiry else {}
+        return httpx.Response(status, json={}, headers=headers)
 
     return httpx.Client(transport=httpx.MockTransport(answer))
 
@@ -37,17 +41,18 @@ class Wrangler:
         return subprocess.CompletedProcess(args, self.returncode, "", self.stderr)
 
 
-def run(capsys, *, token=TOKEN, status=200, wrangler=None, seen=None):
+def run(capsys, *, token=TOKEN, status=200, wrangler=None, seen=None, expiry=EXPIRY):
     opened: list[str] = []
     wrangler = wrangler or Wrangler()
     code = trigger_token.main(
         ask=lambda prompt: token,
         open_url=opened.append,
-        client=github(status, seen),
+        client=github(status, seen, expiry),
         run=wrangler,
     )
     out = capsys.readouterr()
     assert TOKEN not in out.out + out.err  # never shown
+    run.out = out.out
     return code, opened, wrangler
 
 
@@ -71,6 +76,14 @@ def test_a_good_token_is_checked_then_stored_through_standard_input(capsys):
     assert call["args"] == ["npx", "--no-install", "wrangler", "secret", "put", "GITHUB_TOKEN"]
     assert call["input"] == TOKEN + "\n" and call["cwd"] == trigger_token.DASHBOARD
     assert TOKEN not in " ".join(call["args"])
+    # The expiry GitHub states for the token, and the reminder before it.
+    assert f"It expires {EXPIRY}" in run.out and "e-mails you" in run.out
+
+
+@pytest.mark.req("REQ-CI-007")
+def test_a_token_that_never_expires_says_so(capsys):
+    code, _, _ = run(capsys, expiry=None)
+    assert code == 0 and "never expires" in run.out
 
 
 @pytest.mark.parametrize(
