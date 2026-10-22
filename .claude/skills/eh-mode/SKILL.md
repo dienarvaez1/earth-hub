@@ -8,7 +8,7 @@ argument-hint: "[status | direct | full | usgs [DAYS] | catchup | once | run | r
 
 Run from the repository root. One marker in the bucket, `_state/mode.json`, says which mode writes it
 (docs/technical/architecture.md#switching-modes). Full mode: poller → Kafka → consumer → PostgreSQL → API →
-`make export-r2`. Direct mode: poller → validate → R2, with the hourly workflow `.github/workflows/direct.yml`
+`make export-r2`. Direct mode: poller → validate → R2, with the 15-minute workflow `.github/workflows/direct.yml`
 (docs/technical/ci.md#direct-mode-on-a-schedule) keeping the dashboard current while no machine runs.
 
 | Argument | Command | Writes |
@@ -36,7 +36,7 @@ Run from the repository root. One marker in the bucket, `_state/mode.json`, says
   `make reconcile` clean. A failed `mode-direct` resumes full mode; a failed `mode-full` leaves the bucket in
   direct mode, and running it again is safe (it sends only the log entries not yet replayed).
 - A failed scheduled run: `gh run view <id> --log-failed`. Empty R2 values in its `env:` block mean the
-  repository secrets are empty: the user sets them (`gh secret set -f <file>` with the four `R2_*` lines).
+  `r2` environment's secrets are empty: the user sets them (`gh secret set -f <file> --env r2` with the four `R2_*` lines).
 - Filter lines with `@` from `gh` output before showing it.
 
 ## Report

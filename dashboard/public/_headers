@@ -1,4 +1,4 @@
-# Cloudflare static assets: headers for every file of the page. A preview until the
-# project's release, so kept out of search engines; the Worker sets the same on /data/*.
+# Cloudflare static assets: headers for every file of the page. Kept out of search engines
+# (shared by link, not promoted); the Worker sets the same on /data/*.
 /*
   X-Robots-Tag: noindex, nofollow

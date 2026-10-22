@@ -22,7 +22,7 @@ flowchart TB
         api["api (FastAPI, read-only),<br/>read by make export-r2"]
     end
 
-    direct["<b>direct mode</b><br/>GitHub Actions, hourly:<br/>poller + catch-up<br/>+ validation + ledger<br/>over BucketStore"]
+    direct["<b>direct mode</b><br/>GitHub Actions, every 15 min:<br/>poller + catch-up<br/>+ validation + ledger<br/>over BucketStore"]
 
     subgraph cloud["Cloudflare"]
         r2[("R2 bucket<br/>_state/mode.json<br/>says who writes")]
@@ -236,7 +236,7 @@ stateDiagram-v2
     handing_over --> direct: a check failed
     state "handing-over" as handing_over
     note left of full: exporter writes,<br/>schedule skips
-    note right of direct: direct rounds write<br/>(hourly on GitHub Actions),<br/>exporter refuses
+    note right of direct: direct rounds write<br/>(every 15 min on GitHub Actions),<br/>exporter refuses
 ```
 
 While the marker says `handing-over`, neither mode writes. The handover to direct mode needs no such state: it holds the bucket's lock, so no export can run, and changes the marker from `full` to `direct` in one conditional write. If anything fails before that write, the marker still says `full`.
@@ -275,7 +275,7 @@ sequenceDiagram
     H->>R: marker: direct (active), from this sequence number
     H->>R: release the lock
     Note over M,R: on any failure: marker still full,<br/>make restarts poller and catch-up
-    Note over R: the hourly schedule (or make direct-run) writes from now on
+    Note over R: the 15-minute schedule (or make direct-run) writes from now on
 ```
 
 It needs full mode idle: the poller and catch-up stopped, every message stored, `make reconcile` clean. It exports, then writes direct mode's state from PostgreSQL and Kafka: the ID map from `earthquake_ids`, with each record's `id` as its creation number; the poller's 26-hour state from `earthquakes.raw`, as a restarted poller rebuilds it; and catch-up's checkpoints. Then the marker says `direct`, with the log's sequence number at that moment.
@@ -389,7 +389,7 @@ make dashboard-deploy    # publish; prints the workers.dev address
 - **The map** shows every event as its own point, up to 5,000 events. Above that it clusters them, except events of magnitude 6 or more, which always stay single points on top.
 - **A point's popup** (a click) gives the event's time in UTC and, on the next line, where it happened: in the time zone its coordinates fall in, found by `@photostructure/tz-lookup` (the world's time-zone boundaries, nautical zones at sea), with the browser's summer time and abbreviation (`AKDT`, `CET`, else `GMT+9`); the zone's name shows on hover.
 - **The significant-events table** sorts by Time, Magnitude, Place or Depth from its column headers: ascending, descending, then the order Latest or Largest chose. It reorders the 10 events shown; Latest or Largest still picks them.
-- **Until the release, the page is a preview.** It's marked "Preview — in development" and asks search engines not to index it: `X-Robots-Tag: noindex` on every response, a `robots` meta tag, and a disallow-all `robots.txt`.
+- **Kept out of search engines.** The page is shared by link, not promoted: `X-Robots-Tag: noindex` on every response, a `robots` meta tag, and a disallow-all `robots.txt`.
 
 **Measured** (`reports/dashboard-performance.json`): medians of five cold runs in headless Chromium on a developer machine, with the data served locally.
 

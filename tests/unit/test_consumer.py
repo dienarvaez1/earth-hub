@@ -464,12 +464,14 @@ def test_an_idle_consumer_still_reports(caplog):
 
 
 class LaggingKafka(FakeKafka):
-    """Partition 0 ends at offset 120 and the consumer is at 100; partition 1 is unread."""
+    """Partition 0 ends at offset 120 and the consumer is at 100. Partitions 1 and 2 have
+    read nothing since assignment, so no position: the group committed 50 on partition 1
+    and nothing on partition 2."""
 
     def assignment(self):
         from confluent_kafka import TopicPartition
 
-        return [TopicPartition("earthquakes.raw", 0), TopicPartition("earthquakes.raw", 1)]
+        return [TopicPartition("earthquakes.raw", p) for p in (0, 1, 2)]
 
     def position(self, partitions):
         from confluent_kafka import TopicPartition
@@ -477,10 +479,17 @@ class LaggingKafka(FakeKafka):
         return [
             TopicPartition("earthquakes.raw", 0, 100),
             TopicPartition("earthquakes.raw", 1, -1001),
+            TopicPartition("earthquakes.raw", 2, -1001),
         ]
 
+    def committed(self, partitions, timeout):
+        from confluent_kafka import TopicPartition
+
+        stored = {1: 50, 2: -1001}
+        return [TopicPartition(tp.topic, tp.partition, stored[tp.partition]) for tp in partitions]
+
     def get_watermark_offsets(self, tp, timeout, cached):
-        return {0: (0, 120), 1: (40, 55)}[tp.partition]
+        return {0: (0, 120), 1: (40, 55), 2: (10, 30)}[tp.partition]
 
 
 @pytest.mark.req("REQ-OBS-002")
@@ -491,6 +500,11 @@ def test_the_summary_reports_lag_per_partition(caplog):
     clock.now += 2
     consumer.run_once()
     (summary,) = records(caplog, "consumer summary")
-    # Partition 1 has no position yet: everything from its first offset is still to read.
-    assert summary.lag_by_partition == {"earthquakes.raw[0]": 20, "earthquakes.raw[1]": 15}
-    assert summary.lag == 35
+    # Without a position, the committed offset counts (DEF-051: an idle partition was
+    # reported as wholly unread); without either, everything from the first offset.
+    assert summary.lag_by_partition == {
+        "earthquakes.raw[0]": 20,
+        "earthquakes.raw[1]": 5,
+        "earthquakes.raw[2]": 20,
+    }
+    assert summary.lag == 45

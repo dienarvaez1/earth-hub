@@ -15,7 +15,7 @@ const OBJECTS: Record<string, string> = {
 // Browsers revalidate after this (a 304 when nothing changed); exports run at most hourly.
 const MAX_AGE_S = 300;
 
-// A preview until the project's release: kept out of search engines, like the page's files
+// Shared by link, not promoted: kept out of search engines, like the page's files
 // (public/_headers).
 const ROBOTS = "noindex, nofollow";
 

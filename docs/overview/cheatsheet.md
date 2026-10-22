@@ -24,7 +24,7 @@ Commands that **call live services or change state** are marked ⚠. The skills 
 | `/eh-r2 [ls\|count\|get\|snapshot\|runs]` | Looks inside the R2 bucket, read-only | `make r2-ls`, `make r2-get` |
 | `/eh-mode [status\|direct\|full\|usgs\|catchup\|once\|run\|reconcile\|schedule\|runs]` | The mode, the handovers, the check against USGS and catching up, direct mode by hand or on GitHub's hourly schedule | `make mode`, `make mode-direct`, `make mode-full`, `gh workflow run direct.yml`, `make reconcile-usgs`, `make catchup-now` |
 | `/eh-dashboard [check\|dev\|build\|test\|deployments\|deploy]` | The live page and its data, a local server, tests, deploys | `make dashboard-dev`, `make dashboard-deploy` |
-| `/eh-status [reconcile]` | Health of every service, consumer lag, newest event, API, last export, the mode and the hourly schedule's last runs | `docker compose ps`, `make reconcile`, `make reconcile-usgs`, `make mode`, `gh run list --workflow direct.yml` |
+| `/eh-status [reconcile]` | Health of every service, consumer lag, newest event, API, last export, the mode and the schedule's last runs | `docker compose ps`, `make reconcile`, `make reconcile-usgs`, `make mode`, `gh run list --workflow direct.yml` |
 | `/eh-logs [service\|ID\|errors\|rejected\|summary]` | Reads the JSON logs with `jq`, follows one event | `docker compose logs … \| jq` |
 | `/eh-test [layer\|regression\|flake\|REQ-…\|keyword]` | Runs the tests by layer, or everything | `make test`, `make regression` |
 | `/eh-stop [pipeline\|api\|ui\|all\|reset]` | Stops services, keeping data (or wipes it, after asking) | `make ingest-stop`, `make down`, `make reset` |
@@ -169,7 +169,7 @@ Only while `make mode` says `full`. These write PostgreSQL, or the bucket throug
 
 ### Direct mode: no machine needed
 
-Only while `make mode` says `direct`. The hourly schedule does this by itself; the rest is for running or checking it by hand.
+Only while `make mode` says `direct`. The 15-minute schedule does this by itself; the rest is for running or checking it by hand.
 
 | Skill | Command | What it does |
 | --- | --- | --- |
@@ -180,7 +180,7 @@ Only while `make mode` says `direct`. The hourly schedule does this by itself; t
 | `/eh-mode catchup` | `make catchup-now` ⚠ | Catch up now: a direct round with the day feed, the month feed and the deletions, whether due or not |
 | `/eh-mode reconcile` | `make reconcile-direct [DEEP=1]` | Rows, manifest, snapshot, ID map and log agree, read-only ([direct mode](../technical/architecture.md#direct-mode)) |
 | `/eh-r2 count` | `make r2-get KEY=analytics/meta.json \| jq '{run_id, written_at, rows}'` | Rows in the bucket now (PostgreSQL falls behind until `make mode-full`) |
-| | `gh secret set -f <file>` ⚠ | The workflow's four `R2_*` repository secrets, from a file of `NAME=value` lines (empty values make every run fail) |
+| | `gh secret set -f <file> --env r2` ⚠ | The workflow's four `R2_*` secrets, in its `r2` environment, from a file of `NAME=value` lines (empty values make every run fail) |
 
 **Before closing the computer:** `make mode` says `direct (active)`, and no `make direct-run` is left running. **Back at it:** `make mode-full` brings PostgreSQL and the API up to date.
 

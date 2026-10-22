@@ -11,7 +11,7 @@ PostgreSQL directly, so **the API must be running**: check `curl -s -m 5 http://
 and if it doesn't answer, start it with `make api` first (say so).
 
 **Full mode only.** The exporter checks the bucket's mode marker after taking the lock, and refuses in
-direct mode ("the bucket is in direct mode, not full (make mode)"): there, the hourly direct rounds write the
+direct mode ("the bucket is in direct mode, not full (make mode)"): there, the direct rounds (every 15 minutes) write the
 rows and the snapshot themselves. Check `make -s mode` first; to export again, hand back with `/eh-mode full`.
 A **dry run** is not refused in direct mode (it takes no lock and writes nothing to the bucket), but its counts
 then compare a PostgreSQL that has fallen behind with the bucket: the rows direct mode stored show as

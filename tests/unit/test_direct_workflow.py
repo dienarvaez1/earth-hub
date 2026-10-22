@@ -11,7 +11,7 @@ from earth_hub.config import Settings
 REPO = Path(__file__).resolve().parents[2]
 WORKFLOWS = REPO / ".github" / "workflows"
 WORKFLOW = WORKFLOWS / "direct.yml"
-ROUND_CRON = "17 * * * *"
+ROUND_CRON = "2,17,32,47 * * * *"  # every 15 minutes, off the top of the hour
 RECONCILE_CRON = "41 5 * * *"
 R2_SETTINGS = {"R2_ACCOUNT_ID", "R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY", "R2_BUCKET"}
 
@@ -58,7 +58,7 @@ def test_the_daily_reconcile_also_checks_against_usgs_and_for_a_stopped_schedule
 @pytest.mark.req("REQ-CI-005")
 def test_one_run_at_a_time_never_cancelled(workflow):
     assert workflow["concurrency"] == {"group": "direct-mode", "cancel-in-progress": False}
-    # Shorter than the 15-minute lock and the hour between runs.
+    # No longer than the 15-minute lock plus a round; a run still going delays the next.
     assert all(job["timeout-minutes"] <= 20 for job in workflow["jobs"].values())
 
 
@@ -67,9 +67,9 @@ def test_catch_up_intervals_are_shorter_than_the_schedule_and_valid_settings(wor
     env = workflow["env"]
     catchup = int(env["CATCHUP_INTERVAL_SECONDS"])
     deleted = int(env["DELETED_CHECK_INTERVAL_SECONDS"])
-    # Hourly runs that start a few minutes late, unevenly, must still find catch-up due
-    # every hour and the deleted-events check every day.
-    assert re.fullmatch(r"\d+ \* \* \* \*", ROUND_CRON)
+    # Runs that start a few minutes late, unevenly, must still find catch-up due about every
+    # hour and the deleted-events check every day.
+    assert re.fullmatch(r"(\d+,)*\d+ \* \* \* \*", ROUND_CRON)
     assert 0 < catchup <= 3600 - 10 * 60
     assert 0 < deleted <= 86400 - 60 * 60
     settings = Settings(
@@ -87,6 +87,7 @@ def test_catch_up_intervals_are_shorter_than_the_schedule_and_valid_settings(wor
 def test_r2_credentials_reach_only_the_step_that_uses_them(workflow):
     assert "secrets" not in str(workflow.get("env", {}))
     for name, job in workflow["jobs"].items():
+        assert job["environment"] == "r2", name  # the environment only main can use
         assert "secrets" not in str(job.get("env", {})), name
         with_secrets = [s for s in job["steps"] if "secrets." in str(s.get("env", {}))]
         assert len(with_secrets) == 1, name

@@ -2,7 +2,7 @@
 
 A local-first earthquake data platform, built as a QA engineering portfolio project. The live USGS feed flows through Apache Kafka into validated PostgreSQL tables. A read-only REST API serves them, and a public dashboard shows them from an export to Cloudflare R2. The point is less the pipeline than the evidence that it works: every requirement traces to a passing test, every defect found is logged with how it was found and how it was fixed, and CI runs the regression on every pull request.
 
-**Status:** Milestones 1 to 6 are complete, and so are Milestone 7's CI and documentation; the public release, the rest of Milestone 7, is deferred. Milestone 8 is complete too: a second mode that runs without Docker, keeps its state in R2, and runs every hour on GitHub Actions ([status](docs/progress/plan.md#status)). The dashboard runs at **https://earth-hub.diego-narvaez.workers.dev**, marked as a preview and kept out of search engines until the release.
+**Status:** Milestones 1 to 7 are complete, the public release included. Milestone 8 is complete too: a second mode that runs without Docker, keeps its state in R2, and runs every 15 minutes on GitHub Actions ([status](docs/progress/plan.md#status)). The dashboard runs at **https://earth-hub.diego-narvaez.workers.dev**, shared by link and kept out of search engines.
 
 ## For reviewers
 
@@ -21,7 +21,7 @@ flowchart LR
         poller --> kafka[["Kafka"]] --> consumer["consumer +<br/>validation"]
         consumer --> pg[("PostgreSQL")] --> api["REST API"]
     end
-    direct["<b>direct mode</b><br/>poller + validation<br/>(GitHub Actions,<br/>hourly)"]
+    direct["<b>direct mode</b><br/>poller + validation<br/>(GitHub Actions,<br/>every 15 min)"]
     subgraph cf["Cloudflare"]
         direction TB
         r2[("R2 bucket")] --> dash["dashboard<br/>(DuckDB in<br/>the browser)"]
@@ -32,13 +32,13 @@ flowchart LR
     direct --> cf
 ```
 
-Two modes write the same bucket, one at a time: **full** (the whole pipeline, on a developer machine) and **direct** (no Docker, Kafka or PostgreSQL, run hourly by GitHub Actions so the dashboard stays current with no machine on). A marker in the bucket says which one; the handovers check both agree before switching:
+Two modes write the same bucket, one at a time: **full** (the whole pipeline, on a developer machine) and **direct** (no Docker, Kafka or PostgreSQL, run every 15 minutes by GitHub Actions so the dashboard stays current with no machine on). A marker in the bucket says which one; the handovers check both agree before switching:
 
 ```mermaid
 stateDiagram-v2
     direction TB
     full: full mode<br/>(your machine)
-    direct: direct mode<br/>(GitHub Actions, hourly)
+    direct: direct mode<br/>(GitHub Actions, every 15 min)
     full --> direct: make mode-direct<br/>export, write direct state
     direct --> full: make mode-full<br/>replay the log, reconcile
 ```
@@ -47,9 +47,9 @@ stateDiagram-v2
 
 | | |
 | --- | --- |
-| **Requirements** | 164 requirements, each with a stable ID and at least one passing test that names it (`@pytest.mark.req`). A test naming an unknown ID fails at collection, and `make traceability` fails if any requirement has no passing test |
+| **Requirements** | 165 requirements, each with a stable ID and at least one passing test that names it (`@pytest.mark.req`). A test naming an unknown ID fails at collection, and `make traceability` fails if any requirement has no passing test |
 | **Tests** | About 980, in eight layers: unit, integration, API, contract (Schemathesis), end-to-end, dashboard (in Chromium), disruptive (real outages) and performance. About 91% coverage across all layers |
-| **Defects** | 50 defects found and fixed, each with its milestone, severity, how it was found and the commit that fixed it; [six written up in full](docs/progress/defects.md) with root cause and prevention (kept in the git history) |
+| **Defects** | 51 defects found and fixed, each with its milestone, severity, how it was found and the commit that fixed it; [six written up in full](docs/progress/defects.md) with root cause and prevention (kept in the git history) |
 | **CI** | On every pull request and push to `main`, lint and unit tests, then the regression of every layer except performance, from the example settings and with no secrets ([docs/technical/ci.md](docs/technical/ci.md)) |
 | **Data integrity** | Kafka offsets committed only after the database; idempotent upserts; newer revisions win; `make reconcile` compares each topic with the database. The guarantee claimed is at-least-once, never exactly-once |
 | **Recovery** | PostgreSQL stopped while events arrive, a Kafka restart, crashes between the two commits, poller and consumer restarts: each tested, and each ending in a reconciliation |
@@ -106,7 +106,7 @@ The [demo walkthrough](docs/overview/demo.md) goes through these with what to lo
 | `make mode` / `make mode-direct` / `make mode-full` | Which mode writes the bucket / hand over to direct mode / back to full mode, checked before switching |
 | `make direct-once` / `make direct-run` / `make reconcile-direct` | Direct mode: one round / run until stopped / check its state in the bucket |
 | `make reconcile-usgs [DAYS=3]` / `make catchup-now` | The mode writing the bucket against USGS itself, every difference explained / catch up with USGS now, in either mode (both run after each switch) |
-| `gh workflow run direct.yml -f job=round` / `gh run list --workflow direct.yml` | Direct mode on GitHub Actions' hourly schedule: a round now / the recent runs |
+| `gh workflow run direct.yml -f job=round` / `gh run list --workflow direct.yml` | Direct mode on GitHub Actions' 15-minute schedule: a round now / the recent runs |
 | `make dashboard-install` / `make dashboard-dev` / `make dashboard-deploy` | The dashboard's Node dependencies and test browser / a local server over the real bucket / publish to Cloudflare Workers |
 | `make lint` / `make format` | Check / fix style and formatting with Ruff |
 | `make test` | Unit tests; no Docker or network needed |
@@ -155,8 +155,8 @@ It writes `reports/regression-summary.md`, JUnit XML for each layer, a coverage 
 
 **QA documents** in `docs/`:
 - the [test strategy](docs/progress/test-strategy.md): risks, levels, techniques, scope, reports and testing by milestone;
-- the [requirements](docs/progress/requirements.md), 164 of them, and the [traceability matrix](docs/progress/traceability-matrix.md);
-- the [defect log](docs/progress/defects.md): 50 defects found and fixed, 6 with full reports in the git history;
+- the [requirements](docs/progress/requirements.md), 165 of them, and the [traceability matrix](docs/progress/traceability-matrix.md);
+- the [defect log](docs/progress/defects.md): 51 defects found and fixed, 6 with full reports in the git history;
 - the [data-quality rules](docs/technical/data-quality-rules.md) and the [known limitations](docs/overview/limitations.md).
 
 ## How Claude Code was used
@@ -188,7 +188,7 @@ Earth-Hub was built with [Claude Code](https://claude.com/claude-code), Anthropi
 - independent oracles;
 - tests of the test tooling.
 
-Five of the 50 defects were in the test tooling itself (DEF-007, DEF-008, DEF-025, DEF-028, DEF-029), found because results were checked rather than trusted. Six were found after merge (DEF-034 to DEF-039), and are logged as such.
+Five of the 51 defects were in the test tooling itself (DEF-007, DEF-008, DEF-025, DEF-028, DEF-029), found because results were checked rather than trusted. Six were found after merge (DEF-034 to DEF-039), and are logged as such.
 
 ## Documentation
 
@@ -211,3 +211,7 @@ In three groups under `docs/`, indexed in [docs/README.md](docs/README.md):
 ## Data source
 
 Earthquake data comes from the [USGS Earthquake Hazards Program](https://earthquake.usgs.gov/), which is in the public domain.
+
+## License
+
+Earth-Hub is released under the [MIT License](LICENSE). The dashboard's bundled packages keep their own licenses, listed in `dist/third-party-licenses.txt` when it is built.

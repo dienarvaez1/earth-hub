@@ -1,4 +1,4 @@
-.PHONY: help install up down reset ingest ingest-once ingest-logs ingest-stop api api-dev api-stop kafka-ui kafka-ui-stop backfill catchup-once catchup-now reconcile-usgs consume reconcile reconcile-direct mode mode-direct mode-full direct-once direct-run export-r2 export-r2-runs r2-ls r2-count r2-get dashboard-install dashboard-build dashboard-dev dashboard-deploy test-dashboard check-db-outage lint format test test-integration test-e2e test-disruptive test-performance load load-ui test-all regression flake-check traceability smoke smoke-restart migrate coverage
+.PHONY: help install up down reset ingest ingest-once ingest-logs ingest-stop api api-dev api-stop kafka-ui kafka-ui-stop backfill catchup-once catchup-now reconcile-usgs consume reconcile reconcile-direct mode mode-direct mode-full direct-once direct-run export-r2 export-r2-runs r2-ls r2-count r2-get dashboard-install dashboard-build dashboard-dev dashboard-deploy test-dashboard check-db-outage lint format test test-integration test-e2e test-disruptive test-performance load load-ui test-all regression flake-check traceability release smoke smoke-restart migrate coverage
 
 help: ## List the available commands
 	@grep -E '^[a-z0-9-]+:.*## ' $(MAKEFILE_LIST) | awk -F ':.*## ' '{printf "  %-17s %s\n", $$1, $$2}'
@@ -176,6 +176,9 @@ flake-check: up ## Run the end-to-end suite 5 times in a row; fail on any failur
 
 traceability: ## Rebuild docs/progress/traceability-matrix.md from the last regression run
 	uv run python scripts/traceability.py
+
+release: ## The public release, step by step, asking before each change (DRY_RUN=1 lists the steps)
+	uv run python scripts/release.py $(if $(DRY_RUN),--dry-run)
 
 smoke: test-integration ## Smoke-test the running infrastructure
 
