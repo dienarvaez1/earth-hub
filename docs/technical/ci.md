@@ -74,11 +74,13 @@ Both also run by hand: **Actions → Direct mode → Run workflow**, or `gh work
 
 The dashboard's Worker (`dashboard/src/worker.ts`) has a cron trigger, `17 * * * *` in `dashboard/wrangler.template.jsonc`: every hour it asks GitHub's API to run `direct.yml`'s round on `main` (`POST /repos/dienarvaez1/earth-hub/actions/workflows/direct.yml/dispatches`, `{"ref": "main", "inputs": {"job": "round"}}`). Its scheduled handler cannot be reached over HTTP, so the page still exposes only its two files. Without a token it starts nothing and says so in its log; a refusal fails the trigger. `tests/dashboard/test_dashboard_trigger.py` runs it under `wrangler dev --test-scheduled` against a local stand-in for GitHub (REQ-CI-006).
 
-To set it up, once:
+To set it up, once, then again before the token expires: run `make trigger-token` in a terminal (`scripts/trigger_token.py`), then `make dashboard-deploy` the first time.
 
-1. Create a fine-grained token (GitHub → **Settings → Developer settings → Fine-grained tokens**): repository access only `earth-hub`, permission **Actions: Read and write**, nothing else. It expires: note the date, and repeat these steps before it.
-2. `cd dashboard && npx wrangler secret put GITHUB_TOKEN` reads it from the terminal and stores it on the Worker, never in the repository.
-3. `make dashboard-deploy` deploys the trigger with the page.
+1. It opens GitHub's form for a fine-grained token with its name, description and **Actions: Read and write** filled in; you pick repository access (only `earth-hub`) and the expiry, and note the date: rounds stop when it passes.
+2. It reads the token without showing it and checks it can see `direct.yml` (a read, which starts nothing): a token GitHub refuses, or one without access to the repository, is not stored.
+3. It stores it as the Worker's `GITHUB_TOKEN` secret through `wrangler secret put`'s standard input: never printed, written to a file or put on a command line.
+
+By hand, the same: create the token in **Settings → Developer settings → Fine-grained tokens**, then `cd dashboard && npx wrangler secret put GITHUB_TOKEN`, which reads it from the terminal.
 
 To run every 15 minutes once the repository is public, change the cron to `2,17,32,47 * * * *` and deploy.
 
