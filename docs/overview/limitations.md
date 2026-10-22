@@ -30,7 +30,7 @@ What Earth-Hub doesn't do, or does only within limits. These are deliberate trad
 
 Milestone 8 ([architecture](../technical/architecture.md#direct-mode)).
 - **One direct process at a time.** The marker and the lock keep direct mode and full mode's exports apart, but nothing stops two `make direct-run` processes on two machines, or one and the [scheduled workflow](../technical/ci.md#direct-mode-on-a-schedule): both would poll the feed, and take turns writing. Run one.
-- **On the schedule, events are up to an hour late**, and GitHub may delay or skip a scheduled run when busy. Nothing is lost while the gap stays under a day (the day feed); catch-up covers revisions of older events.
+- **On the schedule, events are up to 15 minutes late**, and GitHub may delay or skip a scheduled run when busy; it also switches the schedule off after 60 days with no activity in the repository. Nothing is lost while the gap stays under a day (the day feed); catch-up covers revisions of older events.
 - **Events are late during a handover**, by its length: neither mode polls while it runs (the next round catches up, from the day feed). A handover to direct mode is mostly its export, about 35 s with few changes; one back to full mode, the replay and the checks.
 - **Full mode's pipeline is not stopped by the marker.** `make mode-direct` stops the poller and catch-up; started again by hand in direct mode, they would store events in PostgreSQL that the replay then repeats. The handover back would find the processing times differ and stay in direct mode.
 - **After a return to full mode, the poller sends the day's events again.** Its state is rebuilt from `earthquakes.raw`, which did not see the direct period. The consumer finds them already stored (duplicates): nothing changes, but `raw_events` gets the rows.
@@ -41,7 +41,7 @@ Milestone 8 ([architecture](../technical/architecture.md#direct-mode)).
 
 ## Dashboard
 
-- **It's a preview.** It's marked "Preview — in development" and asks search engines not to index it, until the release.
+- **Not in search engines.** The page asks search engines not to index it: it's shared by link, not promoted.
 - **Two third parties:** the DuckDB-WASM engine comes from jsDelivr, since its 35 MB file is over a Worker's limit, and the map tiles from OpenFreeMap. If either is unavailable, the page or its map is too. Both see visitors' IP addresses.
 - **DuckDB-WASM is a development release** (`1.33.1-dev65.0`), because the newest stable one fails in current Chromium (DEF-032). The browser tests compare its answers with Python's DuckDB on every report.
 - **Tested in Chromium only.** Firefox and Safari aren't covered by the automated tests.
@@ -63,18 +63,6 @@ Milestone 8 ([architecture](../technical/architecture.md#direct-mode)).
 ## Testing and CI
 
 - **The performance layer runs only on a developer machine.** Shared CI runners can't repeat its timings within ±15%, so CI reports it as skipped, and its three requirements as not run (REQ-BF-011, REQ-DASH-008, REQ-API-014).
-- **CI shows a failing check, but can't block a merge yet.** On GitHub's free plan, a branch can be protected only in a public repository; making it public and protecting `main` are part of the release.
 - **The live feed is never part of the automated tests.** `make ingest` and `make reconcile` check the real feed by hand.
 - **Contract testing samples the inputs.** Schemathesis generates 60 requests per endpoint by default (`CONTRACT_EXAMPLES=1000` for a deeper run), which isn't an exhaustive search.
-- **No dependency or secret scanning in CI.** A secret scan of the whole history is part of the release audit.
-
-## Not yet done
-
-The release is deferred. These are planned, but not in place:
-- a license;
-- the public repository;
-- branch protection requiring CI;
-- `USGS_CONTACT` set to the repository's address;
-- removing the dashboard's preview marking.
-
-See [the implementation plan](../progress/plan.md#milestone-7--cicd-documentation-and-portfolio-release).
+- **No dependency or secret scanning in CI.** The release ran a secret scan (gitleaks) over every commit of every branch and pull request once; nothing scans new commits.

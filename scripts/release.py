@@ -23,7 +23,7 @@ The steps:
  10. finish      `release-public` merged (it moves the workflow to that environment and the
                  schedule to every 15 minutes), a round run by hand, then the repository's
                  R2 secrets deleted
- 11. deploy      the dashboard without its preview marking (make dashboard-deploy)
+ 11. deploy      the dashboard without its preview label, still out of search engines
 """
 
 import argparse
@@ -323,7 +323,7 @@ def finish(sh: Shell, state: dict) -> None:
 
 def deploy(sh: Shell, state: dict) -> None:
     sh.read("git", "fetch", "origin")
-    print("  The dashboard, built from main, without its preview marking.")
+    print("  The dashboard, built from main: no preview label, still out of search engines.")
     sh.require("Deploy it to Cloudflare now (make dashboard-deploy)?")
     with _worktree(sh, "origin/main") as tree:
         sh.change("cp", str(REPO / ".env"), str(tree / ".env"))

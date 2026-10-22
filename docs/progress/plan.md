@@ -23,7 +23,7 @@ As of 2026-10-20. The plan below is the original, with Milestone 7 revised; the 
 | 6. Analytics dashboard from R2, observability, performance | Done | #12, #13, #14, #15 |
 | 7.1 CI, third-party licenses, preview marking | Done | #16 |
 | 7.2 Documentation and demo | Done | #18; skills and cheat sheet #19; defect reports to history #20; docs reorganized #21 |
-| 7.3 Release: audit, license, public repository, branch protection, `USGS_CONTACT`, preview marking removed | **Deferred** | |
+| 7.3 Release: audit, license, public repository, branch protection, `USGS_CONTACT`, preview label removed | Done | #37, #38 (`make release`) |
 | 8.1 Persistence decisions in memory (`processing/ledger.py`), `EventStore`, `PostgresStore`; the record key | Done | #22, #23 |
 | 8.2 `BucketStore`, the direct runner, parity tests | Done | #24 |
 | 8.3 The mode switch, handovers with log replay | Done | #25 |
@@ -474,13 +474,13 @@ Revised on 2026-10-19: reports are built from the R2 bucket, not PostgreSQL, and
 
 ### Milestone 7 — CI/CD, documentation, and portfolio release
 
-Revised on 2026-10-19: the release (license, public repository, branch protection, `USGS_CONTACT`, removing the dashboard's preview marking) and the pre-release audit are deferred to a later step. Until then the repository stays private and the dashboard public, marked as a preview and kept out of search engines. The demo is a written walkthrough.
+Revised on 2026-10-19: the release (license, public repository, branch protection, `USGS_CONTACT`, removing the dashboard's preview marking) and the pre-release audit are deferred to a later step. Until then the repository stays private and the dashboard public, marked as a preview and kept out of search engines. The demo is a written walkthrough. Released later with `make release` (#37): the repository public, the email in old commits accepted (new commits use the noreply address), the MIT license, the direct-mode schedule every 15 minutes from an `r2` environment, and the dashboard's preview label removed (#38). The repository and the dashboard are not promoted: the dashboard stays out of search engines, and the repository has no description, topics or website.
 
 **Implementation**
 
 1. **CI** (`.github/workflows/ci.yml`, [ci.md](../technical/ci.md)): on every pull request and push to `main`, a quick job (lint, unit tests) and a regression job running `scripts/regression.py --skip performance` from the example settings, with no secrets; reports kept as artifacts and the summary on the run page; actions pinned to commit SHAs, read-only token. Performance stays local: shared runners cannot repeat its timings. Also in this step: the third-party licenses the public page must carry (DEF-035), and the page's preview marking.
 2. **Documentation and demo:** architecture diagrams (pipeline, topics and consumer groups, export and dashboard, recovery), the schema, API examples replayed by a test, SQL report examples, known limitations, a README written as the reviewer's entry point (including how Claude Code was used and which QA decisions stayed with the author), and `docs/demo.md`, a walkthrough of about 10 minutes.
-3. **Release (deferred):** the audit (a secret scan of the whole history, the author emails of three early commits), a LICENSE, the repository made public, branch protection requiring CI, `USGS_CONTACT`, and the preview marking removed.
+3. **Release** (done on the release day, with `make release`): the audit (a secret scan of the whole history, the author emails of three early commits), a LICENSE, the repository made public, branch protection requiring CI, `USGS_CONTACT`, and the preview marking removed.
 
 **QA work**
 

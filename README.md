@@ -2,7 +2,7 @@
 
 A local-first earthquake data platform, built as a QA engineering portfolio project. The live USGS feed flows through Apache Kafka into validated PostgreSQL tables. A read-only REST API serves them, and a public dashboard shows them from an export to Cloudflare R2. The point is less the pipeline than the evidence that it works: every requirement traces to a passing test, every defect found is logged with how it was found and how it was fixed, and CI runs the regression on every pull request.
 
-**Status:** Milestones 1 to 6 are complete, and so are Milestone 7's CI and documentation; the public release, the rest of Milestone 7, is deferred. Milestone 8 is complete too: a second mode that runs without Docker, keeps its state in R2, and runs every hour on GitHub Actions ([status](docs/progress/plan.md#status)). The dashboard runs at **https://earth-hub.diego-narvaez.workers.dev**, marked as a preview and kept out of search engines until the release.
+**Status:** Milestones 1 to 7 are complete, the public release included. Milestone 8 is complete too: a second mode that runs without Docker, keeps its state in R2, and runs every 15 minutes on GitHub Actions ([status](docs/progress/plan.md#status)). The dashboard runs at **https://earth-hub.diego-narvaez.workers.dev**, shared by link and kept out of search engines.
 
 ## For reviewers
 
@@ -21,7 +21,7 @@ flowchart LR
         poller --> kafka[["Kafka"]] --> consumer["consumer +<br/>validation"]
         consumer --> pg[("PostgreSQL")] --> api["REST API"]
     end
-    direct["<b>direct mode</b><br/>poller + validation<br/>(GitHub Actions,<br/>hourly)"]
+    direct["<b>direct mode</b><br/>poller + validation<br/>(GitHub Actions,<br/>every 15 min)"]
     subgraph cf["Cloudflare"]
         direction TB
         r2[("R2 bucket")] --> dash["dashboard<br/>(DuckDB in<br/>the browser)"]
@@ -32,13 +32,13 @@ flowchart LR
     direct --> cf
 ```
 
-Two modes write the same bucket, one at a time: **full** (the whole pipeline, on a developer machine) and **direct** (no Docker, Kafka or PostgreSQL, run hourly by GitHub Actions so the dashboard stays current with no machine on). A marker in the bucket says which one; the handovers check both agree before switching:
+Two modes write the same bucket, one at a time: **full** (the whole pipeline, on a developer machine) and **direct** (no Docker, Kafka or PostgreSQL, run every 15 minutes by GitHub Actions so the dashboard stays current with no machine on). A marker in the bucket says which one; the handovers check both agree before switching:
 
 ```mermaid
 stateDiagram-v2
     direction TB
     full: full mode<br/>(your machine)
-    direct: direct mode<br/>(GitHub Actions, hourly)
+    direct: direct mode<br/>(GitHub Actions, every 15 min)
     full --> direct: make mode-direct<br/>export, write direct state
     direct --> full: make mode-full<br/>replay the log, reconcile
 ```
@@ -106,7 +106,7 @@ The [demo walkthrough](docs/overview/demo.md) goes through these with what to lo
 | `make mode` / `make mode-direct` / `make mode-full` | Which mode writes the bucket / hand over to direct mode / back to full mode, checked before switching |
 | `make direct-once` / `make direct-run` / `make reconcile-direct` | Direct mode: one round / run until stopped / check its state in the bucket |
 | `make reconcile-usgs [DAYS=3]` / `make catchup-now` | The mode writing the bucket against USGS itself, every difference explained / catch up with USGS now, in either mode (both run after each switch) |
-| `gh workflow run direct.yml -f job=round` / `gh run list --workflow direct.yml` | Direct mode on GitHub Actions' hourly schedule: a round now / the recent runs |
+| `gh workflow run direct.yml -f job=round` / `gh run list --workflow direct.yml` | Direct mode on GitHub Actions' 15-minute schedule: a round now / the recent runs |
 | `make dashboard-install` / `make dashboard-dev` / `make dashboard-deploy` | The dashboard's Node dependencies and test browser / a local server over the real bucket / publish to Cloudflare Workers |
 | `make lint` / `make format` | Check / fix style and formatting with Ruff |
 | `make test` | Unit tests; no Docker or network needed |

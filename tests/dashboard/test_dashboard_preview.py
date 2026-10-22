@@ -1,5 +1,6 @@
 """What the public page carries beyond the reports: the licenses of the software it ships
-(DEF-035), and, until the release, its preview label and the requests to search engines."""
+(DEF-035), and the requests that keep it out of search engines: it is shared by link, not
+promoted."""
 
 import json
 import os
@@ -98,8 +99,8 @@ def test_robots_txt_disallows_everything(get):
 
 
 @pytest.mark.req("REQ-DASH-017")
-def test_the_page_says_it_is_a_preview(dash):
-    assert dash.page.locator("#preview").inner_text() == "Preview — in development"
-    assert dash.page.locator("#preview").is_visible()
+def test_the_page_asks_not_to_be_indexed_and_is_no_longer_a_preview(dash):
     robots = dash.page.locator('meta[name="robots"]').get_attribute("content")
     assert robots == "noindex, nofollow"
+    assert dash.page.locator("#preview").count() == 0
+    assert dash.page.locator("h1").inner_text() == "Earth-Hub earthquakes"

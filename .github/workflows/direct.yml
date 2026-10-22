@@ -1,7 +1,7 @@
 # Direct mode on a schedule (docs/technical/ci.md#direct-mode-on-a-schedule): USGS straight to
 # R2 with no machine of ours running.
 #
-# round      every hour: one poller round, and catch-up if due (make direct-once)
+# round      every 15 minutes: one poller round, and catch-up if due (make direct-once)
 # reconcile  every day: direct mode's bucket invariants (make reconcile-direct), then the bucket
 #            against USGS (make reconcile-usgs), failing if no round has written for 2 hours:
 #            the alarm for a schedule GitHub stopped running (a failed run e-mails). Read-only.
@@ -10,16 +10,16 @@
 # schedule, `make mode-direct` resumes it. Only one direct process should write: stop any
 # `make direct-run` elsewhere while this schedule is on.
 #
-# The only workflow with secrets: R2 credentials, as repository secrets (GitHub Free has no
-# environments for private repositories), given only to the step that needs them. No
-# pull_request or push trigger, and pull requests from forks never get secrets. Actions are
-# pinned to commit SHAs (the tag is in the comment); the token is read-only.
+# The only workflow with secrets: R2 credentials, in the `r2` environment, which only `main`
+# can use, given only to the step that needs them. No pull_request or push trigger, and pull
+# requests from forks never get secrets. Actions are pinned to commit SHAs (the tag is in the
+# comment); the token is read-only.
 
 name: Direct mode
 
 on:
   schedule:
-    - cron: "17 * * * *" # round
+    - cron: "2,17,32,47 * * * *" # round, off the busy top of the hour
     - cron: "41 5 * * *" # reconcile
   workflow_dispatch:
     inputs:
@@ -40,15 +40,16 @@ concurrency:
 
 env:
   UV_PYTHON_DOWNLOADS: automatic
-  # GitHub starts scheduled runs a few minutes late, unevenly: intervals a little shorter than
-  # the schedule, so an hourly run never finds catch-up 59 minutes old and skips it.
+  # Catch-up about every hour, and the deleted-events check every day: due a little early, as
+  # GitHub starts scheduled runs late, unevenly; the first round after that runs them.
   CATCHUP_INTERVAL_SECONDS: "3000"
   DELETED_CHECK_INTERVAL_SECONDS: "82800"
 
 jobs:
   round:
     name: Direct round
-    if: github.event.schedule == '17 * * * *' || inputs.job == 'round'
+    if: github.event.schedule == '2,17,32,47 * * * *' || inputs.job == 'round'
+    environment: r2
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
@@ -79,6 +80,7 @@ jobs:
   reconcile:
     name: Direct reconcile
     if: github.event.schedule == '41 5 * * *' || inputs.job == 'reconcile'
+    environment: r2
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
