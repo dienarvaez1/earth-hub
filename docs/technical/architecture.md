@@ -385,7 +385,7 @@ make dashboard-deploy    # publish; prints the workers.dev address
 
 **With Claude Code:** `/eh-dashboard dev`, `/eh-dashboard deploy`, and `/eh-dashboard` to check the live page and the data it serves.
 
-- **Time presets:** Today (the default), This week (from Monday), This month, Last 3 months, This year, Last 3 years, and Custom with From and To calendars. Every period is whole UTC days through today, and each preset picks a chart grouping: per day, week or month.
+- **Time presets:** Today (the default), Yesterday, This week (from Monday), Last week (Monday to Sunday), This month, Last month, Last 3 months, This year, Last year, Last 3 years, and Custom with From and To calendars. Every period is whole UTC days through today, or through the end of the previous day, week, month or year, and each preset picks a chart grouping: per day, week or month.
 - **The map** shows every event as its own point, up to 5,000 events. Above that it clusters them, except events of magnitude 6 or more, which always stay single points on top.
 - **A point's popup** (a click) gives the event's time in UTC and, on the next line, where it happened: in the time zone its coordinates fall in, found by `@photostructure/tz-lookup` (the world's time-zone boundaries, nautical zones at sea), with the browser's summer time and abbreviation (`AKDT`, `CET`, else `GMT+9`); the zone's name shows on hover.
 - **The significant-events table** sorts by Time, Magnitude, Place or Depth from its column headers: ascending, descending, then the order Latest or Largest chose. It reorders the 10 events shown; Latest or Largest still picks them.
