@@ -5,6 +5,7 @@ import * as charts from "./charts";
 import { DEFAULT_FILTER, Db, type Filter, type Row } from "./db";
 import { EventMap, legend } from "./map";
 import { BUCKET, DEFAULT_PERIOD, type Period, day, firstDay, lastDay } from "./periods";
+import { countryLabel, countryOrder, regionLabel, regionOrder } from "./places";
 
 interface Meta {
   run_id: string;
@@ -150,26 +151,41 @@ async function fillOptions(db: Db): Promise<void> {
     if (range.first_event !== null) input.min = day(new Date(range.first_event as number));
     input.max = day(new Date());
   }
-  fill("country", await db.query("countries"), (r) => String(r.country));
+  fillCountries(await db.query("countries"));
   fill("event_type", await db.query("event_types"), (r) => String(r.event_type), DEFAULT_EVENT_TYPE);
-  fill("region", await db.query("regions"), (r) => String(r.region));
+  fillRegions(await db.query("regions"));
 }
+
+// The place menus show US states and territories as "US-<name>", grouped (places.ts).
+const fillCountries = (rows: Row[]) =>
+  fill("country", rows, (r) => String(r.country), "", countryLabel, countryOrder);
+const fillRegions = (rows: Row[]) =>
+  fill("region", rows, (r) => String(r.region), "", regionLabel, regionOrder);
 
 // The type shown at first and after Reset: other types (quarry blasts, explosions...) only
 // when chosen. "All" when the data has no earthquakes.
 const DEFAULT_EVENT_TYPE = "earthquake";
 
 /** Fills a select's options, keeping its choice; `initial` is chosen on the first fill and
- * is the form's default (what Reset returns to). */
-function fill(name: string, rows: Row[], value: (r: Row) => string, initial = ""): void {
+ * is the form's default (what Reset returns to); `label` is what an option shows for its
+ * value, and `order` puts the options in the menu's order (as given by default). */
+function fill(
+  name: string,
+  rows: Row[],
+  value: (r: Row) => string,
+  initial = "",
+  label: (v: string) => string = (v) => v,
+  order: (rows: Row[], value: (r: Row) => string) => Row[] = (rows) => rows,
+): void {
   const element = select(name);
   const first = element.dataset.filled === undefined;
   const current = first ? initial : element.value;
   const all = new Option("All", "", initial === "");
   element.replaceChildren(all);
-  for (const row of rows) {
+  for (const row of order(rows, value)) {
     const v = value(row);
-    element.append(new Option(`${v} (${numbers.format(row.events as number)})`, v, v === initial));
+    const text = `${label(v)} (${numbers.format(row.events as number)})`;
+    element.append(new Option(text, v, v === initial));
   }
   element.value = rows.some((r) => value(r) === current) ? current : "";
   if (element.value === "") all.defaultSelected = true; // the initial type is not in the data
@@ -265,7 +281,7 @@ async function render(db: Db, map: EventMap): Promise<void> {
   const regionOptions = await db.query("regions");
   status.timings.last_query_ms = performance.now() - t0;
 
-  fill("region", regionOptions, (r) => String(r.region));
+  fillRegions(regionOptions);
   showSummary(summary);
   await map.show(points);
   charts.overTime($("#chart-time"), time, filter.time_bucket);

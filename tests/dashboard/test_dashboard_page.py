@@ -5,7 +5,9 @@ import json
 from datetime import datetime, timedelta
 
 import pytest
-from support.dashboard_data import EVENTS
+from support.dashboard import LocalDashboard
+from support.dashboard_data import EVENTS, event
+from support.dashboard_data import build as build_snapshot
 
 pytestmark = pytest.mark.req("REQ-DASH-007")
 
@@ -533,26 +535,151 @@ def test_the_magnitude_bands_are_the_legends(dash):
     )
     assert options == [
         ["", "All"],
+        ["2.5:", "2.5 and above"],
         [":2.5", "Below 2.5"],
         ["2.5:4.5", "2.5 to 4.5"],
         ["4.5:6", "4.5 to 6"],
         ["6:", "6 and above"],
     ]
-    assert [label for _, label in options[1:]] == [label for _, label, _ in LEVELS[:4]]
+    bands = options[2:]
+    assert [label for _, label in bands] == [label for _, label, _ in LEVELS[:4]]
     assert [b for _, _, b in LEVELS[:4]] == [c for _, c in STOPS]  # the legend's colors
-    assert page.input_value("select[name=magnitude]") == ""  # All by default
 
     def events():
         return dash.status()["summary"]["events"]
 
-    everything = events()
+    everything = events()  # the fixture picks All
     counts = {}
     for value, _ in options[1:]:
         dash.after_update(lambda value=value: page.select_option("select[name=magnitude]", value))
         counts[value] = events()
     # Each band includes its lower edge: 2.49 and -0.43; 2.5; 4.5 and 5.2; none.
-    assert counts == {":2.5": 2, "2.5:4.5": 1, "4.5:6": 2, "6:": 0}
-    assert everything == sum(counts.values()) + 1  # All also keeps the one without a magnitude
+    assert counts == {"2.5:": 3, ":2.5": 2, "2.5:4.5": 1, "4.5:6": 2, "6:": 0}
+    assert counts["2.5:"] == counts["2.5:4.5"] + counts["4.5:6"] + counts["6:"]
+    # All also keeps the one without a magnitude.
+    assert everything == sum(counts[value] for value, _ in bands) + 1
+
+
+@pytest.mark.req("REQ-DASH-020")
+def test_the_page_starts_on_magnitude_2_5_and_above(browser_page, server):
+    browser_page.open(
+        server.url, now="2024-04-02T12:00:00+00:00", period="last_3_years", magnitude=None
+    )
+    page = browser_page.page
+    assert page.input_value("select[name=magnitude]") == "2.5:"
+    # 2.5, 4.5 and 5.2: the earthquakes below 2.5 and the one without a magnitude are left out.
+    assert browser_page.status()["summary"]["events"] == 3
+    assert browser_page.status()["mapFeatures"] == 3
+    browser_page.after_update(lambda: page.select_option("select[name=magnitude]", ""))
+    assert browser_page.status()["summary"]["events"] == 6
     page.click("button[type=reset]")
     page.wait_for_function("window.__earthHub.summary.events === 0")
-    assert page.input_value("select[name=magnitude]") == ""
+    assert page.input_value("select[name=magnitude]") == "2.5:"
+    assert browser_page.errors == [] and browser_page.blocked == []
+
+
+@pytest.mark.req("REQ-DASH-020")
+def test_the_rankings_say_what_drives_their_counts(dash):
+    page = dash.page
+    countries = page.inner_text("#chart-countries + .note")
+    assert "seismic networks" in countries and "magnitude 4.5" in countries
+    assert "Unknown" in page.inner_text("#chart-regions + .note")
+
+
+@pytest.mark.req("REQ-DASH-021")
+def test_the_place_menus_list_unknown_first_and_us_places_with_a_prefix(dash):
+    page = dash.page
+    # Options count every event, the deleted one too; values stay as stored. The states
+    # come after the other regions.
+    assert options(page, "country") == [
+        ["", "All"],
+        ["Unknown", "Unknown (1)"],
+        ["Japan", "Japan (1)"],
+        ["Mexico", "Mexico (1)"],
+        ["United States", "United States (5)"],
+    ]
+    assert options(page, "region") == [
+        ["", "All"],
+        ["Unknown", "Unknown (2)"],
+        ["Baja California", "Baja California (1)"],
+        ["Alaska", "US-Alaska (4)"],
+        ["California", "US-California (1)"],
+    ]
+    dash.after_update(lambda: page.select_option("select[name=region]", "Alaska"))
+    assert dash.status()["summary"]["events"] == 2  # 2.49 and 2.5: not the deleted or the blast
+    # The region menu follows the country, keeping its labels.
+    dash.after_update(lambda: page.select_option("select[name=country]", "United States"))
+    assert [label for _, label in options(page, "region")] == [
+        "All",
+        "US-Alaska (4)",
+        "US-California (1)",
+    ]
+
+
+TERRITORIES = [
+    event(1, "2024-01-01T00:00:00", 3.0, "Puerto Rico", None),
+    event(2, "2024-01-02T00:00:00", 3.1, "Guam", None),
+    event(3, "2024-01-03T00:00:00", 3.2, "American Samoa", None),
+    event(4, "2024-01-04T00:00:00", 3.3, "Northern Mariana Islands", None),
+    event(5, "2024-01-05T00:00:00", 3.4, "U.S. Virgin Islands", None),
+    event(6, "2024-01-06T00:00:00", 3.5, "Samoa", None),  # the independent state
+    event(7, "2024-01-07T00:00:00", 3.6, "Georgia", None),  # the country, not the state
+    event(8, "2024-01-08T00:00:00", 3.7, "United States", "Georgia"),
+    event(9, "2024-01-09T00:00:00", 3.8, "Vanuatu", None),  # after United States
+    event(10, "2024-01-09T01:00:00", 3.9, "Mexico", "Baja California"),
+    event(11, "2024-01-09T02:00:00", 4.0, "United States", "Alaska"),
+]
+
+
+@pytest.fixture(scope="module")
+def territories_server(built, tmp_path_factory):
+    snapshot = build_snapshot(tmp_path_factory.mktemp("territories"), TERRITORIES)
+    local = LocalDashboard(tmp_path_factory.mktemp("r2-territories"))
+    meta = {
+        "table": "earthquakes",
+        "run_id": "2024-01-10T12-00-00Z-test",
+        "written_at": "2024-01-10T12:00:00Z",
+        "rows": len(TERRITORIES),
+        "bytes": snapshot.stat().st_size,
+    }
+    local.seed(snapshot, meta)
+    local.start()
+    yield local
+    local.stop()
+
+
+@pytest.mark.req("REQ-DASH-021")
+def test_us_territories_and_states_are_grouped_with_the_prefix(browser_page, territories_server):
+    browser_page.open(territories_server.url, now="2024-01-10T12:00:00+00:00", period="this_year")
+    page = browser_page.page
+    # The territories right after United States, alphabetically by what the menu shows.
+    assert options(page, "country") == [
+        ["", "All"],
+        ["Georgia", "Georgia (1)"],
+        ["Mexico", "Mexico (1)"],
+        ["Samoa", "Samoa (1)"],
+        ["United States", "United States (2)"],
+        ["American Samoa", "US-American Samoa (1)"],
+        ["Guam", "US-Guam (1)"],
+        ["Northern Mariana Islands", "US-Northern Mariana Islands (1)"],
+        ["Puerto Rico", "US-Puerto Rico (1)"],
+        ["U.S. Virgin Islands", "US-Virgin Islands (1)"],
+        ["Vanuatu", "Vanuatu (1)"],
+    ]
+    # The states after the other regions.
+    assert options(page, "region") == [
+        ["", "All"],
+        ["Unknown", "Unknown (8)"],
+        ["Baja California", "Baja California (1)"],
+        ["Alaska", "US-Alaska (1)"],
+        ["Georgia", "US-Georgia (1)"],
+    ]
+    browser_page.after_update(lambda: page.select_option("select[name=country]", "Puerto Rico"))
+    assert browser_page.status()["summary"]["events"] == 1
+    assert browser_page.errors == [] and browser_page.blocked == []
+
+
+def options(page, name):
+    return page.eval_on_selector_all(
+        f"select[name={name}] option", "os => os.map(o => [o.value, o.textContent])"
+    )

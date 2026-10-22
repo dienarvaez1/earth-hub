@@ -47,10 +47,13 @@
         <fieldset>
           <legend>Magnitude</legend>
           <!-- The bands of the map's legend, as "min:max": min inclusive, max exclusive, an
-               empty side no limit. A band leaves out events without a magnitude; All keeps them. -->
+               empty side no limit. A band leaves out events without a magnitude; All keeps them.
+               2.5 and above is the default, as on USGS's map: below it, counts follow how
+               dense the seismic networks are more than how many earthquakes there are. -->
           <label>Band
             <select name="magnitude">
-              <option value="" selected>All</option>
+              <option value="">All</option>
+              <option value="2.5:" selected>2.5 and above</option>
               <option value=":2.5">Below 2.5</option>
               <option value="2.5:4.5">2.5 to 4.5</option>
               <option value="4.5:6">4.5 to 6</option>
@@ -108,10 +111,19 @@
         <section class="panel">
           <h2>Top 10 countries</h2>
           <figure id="chart-countries"></figure>
+          <p class="note" id="rankings-note">
+            Counts follow how dense the seismic networks are, not only how often the ground
+            shakes: the United States records earthquakes too small to feel, most of the world
+            only from about magnitude 4.5.
+          </p>
         </section>
         <section class="panel">
           <h2>Top 10 regions</h2>
           <figure id="chart-regions"></figure>
+          <p class="note" id="regions-note">
+            Regions are US states, or the area the USGS place names: outside the United
+            States most places name only a country, so their events count under Unknown.
+          </p>
         </section>
       </div>
 
