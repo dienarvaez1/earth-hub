@@ -16,13 +16,13 @@ Commands that **call live services or change state** are marked ⚠. The skills 
 | `/eh-start [infra\|pipeline\|api\|ui\|dashboard\|all]` | Starts services and waits until healthy | `make up`, `make ingest`, `make api` |
 | `/eh-usgs [feed\|event\|count\|query\|headers]` | Asks the live USGS services directly | `curl` on the feeds and FDSN |
 | `/eh-poller [rounds\|once\|restart\|health]` | The poller's rounds, one manual poll, a restart | `make ingest-once` |
-| `/eh-backfill [START [END]\|catchup\|progress]` | Loads history from FDSN, catches up | `make backfill`, `make catchup-once` (or `make catchup-now`, in either mode) |
+| `/eh-backfill [START [END]\|catchup\|progress]` | Loads history from FDSN in full mode, then reconciles and exports; catches up | `make backfill-full`, `make catchup-once` (or `make catchup-now`, in either mode) |
 | `/eh-kafka [topics\|offsets\|lag\|read\|tail\|find]` | Topics, offsets, lag, and messages by offset or event ID | `kafka-*.sh` in the broker container |
 | `/eh-db [counts\|outcomes\|rejected\|event ID\|merged\|latest\|strongest\|SQL]` | Read-only SQL on PostgreSQL | `psql` in the database container |
 | `/eh-api [health\|list\|event\|stats\|hourly\|magnitude\|export]` | Calls the REST API (served from PostgreSQL) | `curl` on `/api/v1/…` |
 | `/eh-export [dry\|run\|verify\|runs]` | Copies PostgreSQL's table to R2 through the API, and the dashboard's snapshot | `make export-r2` |
 | `/eh-r2 [ls\|count\|get\|snapshot\|runs\|audit]` | Looks inside the R2 bucket, read-only, direct mode's audit trail included | `make r2-ls`, `make r2-get`, `make direct-runs` |
-| `/eh-mode [status\|direct\|full\|usgs\|catchup\|once\|run\|reconcile\|schedule\|runs]` | The mode, the handovers, the check against USGS and catching up, direct mode by hand or on GitHub Actions, and its executions (the audit trail of the hourly rounds the Cloudflare trigger starts) | `make mode`, `make mode-direct`, `make mode-full`, `gh workflow run direct.yml`, `make direct-runs`, `make reconcile-usgs`, `make catchup-now` |
+| `/eh-mode [status\|direct\|full\|usgs\|catchup\|once\|run\|reconcile\|schedule\|runs]` | The mode, switching modes in one command, the check against USGS and catching up, direct mode by hand or on GitHub Actions, and its executions (the audit trail of the hourly rounds the Cloudflare trigger starts) | `make mode`, `make to-direct`, `make to-full`, `gh workflow run direct.yml`, `make direct-runs`, `make reconcile-usgs`, `make catchup-now` |
 | `/eh-dashboard [check\|dev\|build\|test\|deployments\|deploy\|trigger]` | The live page and its data, a local server, tests, deploys, and the Worker's hourly trigger | `make dashboard-dev`, `make dashboard-deploy`, `wrangler secret list` |
 | `/eh-status [reconcile]` | Health of every service, consumer lag, newest event, API, last export, the mode and direct mode's latest executions | `docker compose ps`, `make reconcile`, `make reconcile-usgs`, `make mode`, `make direct-runs` |
 | `/eh-logs [service\|ID\|errors\|rejected\|summary]` | Reads the JSON logs with `jq`, follows one event | `docker compose logs … \| jq` |
@@ -61,7 +61,8 @@ Always send a User-Agent: `UA="earth-hub (manual check)"`.
 | `/eh-poller` | `docker compose logs --no-log-prefix --since 30m poller \| jq -cR 'fromjson? \| select(.message == "round complete") \| {ts, published, unchanged}'` | The last rounds: published, unchanged, rejected |
 | `/eh-poller once` | `make ingest-once` ⚠ | One round from your machine, then exit |
 | `/eh-poller health` | `docker compose exec -T poller python -m earth_hub.healthcheck poller` | 0 if a round succeeded within 3 poll intervals |
-| `/eh-backfill 2026-01-01` | `make backfill START=2026-01-01 [END=2026-06-01]` ⚠ | History from FDSN, one week per request; re-runs skip finished weeks |
+| `/eh-backfill 2026-01-01` | `make backfill-full START=2026-01-01 [END=2026-06-01]` ⚠ | History from FDSN in full mode, in one command: starts the pipeline, backfills (one week per request; re-runs skip finished weeks), waits for the consumer, reconciles, exports to R2 for the dashboard. Refused in direct mode |
+| | `make backfill START=… [END=…]` ⚠ | The backfill alone, without the waiting, the reconcile and the export |
 | `/eh-backfill catchup` | `make catchup-once` ⚠ | One `all_month` pass and one deleted-events check (full mode) |
 | `/eh-mode catchup` | `make catchup-now` ⚠ | The same in whichever mode writes the bucket; in direct mode a round with the day feed too |
 | `/eh-backfill progress` | `docker compose exec -T postgres psql -U earth_hub_app earth_hub -c "SELECT job, status, count(*), sum(fetched), sum(rejected) FROM backfill_windows GROUP BY 1, 2"` | Which weeks are done, and the features dropped before Kafka |
@@ -150,8 +151,9 @@ One marker in the bucket, `_state/mode.json`, says which mode writes it ([how it
 | Skill | Command | What it does |
 | --- | --- | --- |
 | `/eh-mode` | `make mode` | Which mode writes the bucket: `full` or `direct`, and since when |
-| `/eh-mode direct` | `make mode-direct` ⚠ | **Full → direct:** stops the poller and catch-up, exports, writes direct mode's state. The schedule takes over |
-| `/eh-mode full` | `make mode-full` ⚠ | **Direct → full:** replays direct mode's log into Kafka and PostgreSQL, checks, switches back, restarts the poller. Pauses the schedule |
+| `/eh-mode direct` | `make to-direct` ⚠ | **Full → direct, in one command:** waits for the consumers, `make reconcile`, then `make mode-direct` (stops the poller and catch-up, exports, writes direct mode's state, catches up, checks against USGS), then `make down`. The hourly rounds take over; `DRY_RUN=1` lists the steps |
+| `/eh-mode full` | `make to-full` ⚠ | **Direct → full, in one command:** checks Docker and the mode, `make up`, `make mode-full` (replays direct mode's log into Kafka and PostgreSQL, checks, switches back, restarts the poller), waits for the consumers, `make reconcile`. The hourly rounds then skip |
+| | `make mode-direct` / `make mode-full` ⚠ | The handovers alone, without the checks and waiting around them |
 | `/eh-mode usgs` | `make reconcile-usgs [DAYS=3]` | The mode writing the bucket against USGS itself, every difference explained or flagged; runs by itself after each switch ([how](../technical/architecture.md#reconciliation-with-usgs)) |
 | `/eh-mode catchup` | `make catchup-now` ⚠ | Catch up with USGS now in either mode: day feed, month feed, deletions; runs by itself after each switch |
 
@@ -183,7 +185,7 @@ Only while `make mode` says `direct`. The hourly rounds (a Cloudflare cron trigg
 | `/eh-r2 count` | `make r2-get KEY=analytics/meta.json \| jq '{run_id, written_at, rows}'` | Rows in the bucket now (PostgreSQL falls behind until `make mode-full`) |
 | | `gh secret set -f <file>` ⚠ | The workflow's four `R2_*` secrets, from a file of `NAME=value` lines: repository secrets while the repository is private, `--env r2` once it is public (empty values make every run fail) |
 
-**Before closing the computer:** `make mode` says `direct (active)`, and no `make direct-run` is left running. **Back at it:** `make mode-full` brings PostgreSQL and the API up to date.
+**Before closing the computer:** `make mode` says `direct (active)`, and no `make direct-run` is left running. **Back at it:** `make to-full` brings PostgreSQL and the API up to date.
 
 ## 10. Dashboard: from the bucket
 

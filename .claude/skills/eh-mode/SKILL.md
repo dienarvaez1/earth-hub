@@ -15,8 +15,8 @@ cron trigger, keeping the dashboard current while no machine runs.
 | Argument | Command | Writes |
 | --- | --- | --- |
 | `status` (default) | `make -s mode`, `make -s direct-runs LIMIT=5` | no |
-| `direct` | `make mode-direct` ⚠ (stops poller and catch-up, exports, hands over; ~1 min) | bucket, stops services |
-| `full` | `make mode-full` ⚠ (replays direct mode's log into Kafka, checks, switches back; the hourly rounds then skip) | bucket, Kafka, PostgreSQL |
+| `direct` | `make to-direct` ⚠ (in the background: waits for the consumers, `make reconcile`, `make mode-direct`, which stops the poller and catch-up, exports, hands over, catches up and checks against USGS, then `make down`; a few minutes) | bucket, stops services |
+| `full` | `make to-full` ⚠ (in the background: Docker and the mode checked, `make up`, `make mode-full`, which replays direct mode's log into Kafka, checks and switches back, then waits for the consumers and `make reconcile`; the hourly rounds then skip) | bucket, Kafka, PostgreSQL |
 | `usgs [DAYS]` | `make reconcile-usgs [DAYS=3]`: the mode writing the bucket against USGS, every difference pending (explained) or not | no |
 | `catchup` | `make catchup-now` ⚠ (in either mode: day feed, month feed and deletions, whether due or not) | bucket, or Kafka in full mode |
 | `once` | `make direct-once` ⚠ (one poller round, and catch-up if due) | bucket |
@@ -27,6 +27,10 @@ cron trigger, keeping the dashboard current while no machine runs.
 
 - **After a switch, `direct` and `full` catch up and run the USGS check by themselves**; a check that finds an
   unexplained difference fails the command, but the switch stands. Report the check's table.
+- **`make to-full` and `make to-direct` (`scripts/modes.py`) wrap the handovers** with their checks and print each
+  step: exit 2 means it refused to start (the wrong mode, Docker not running, a local `direct-run`) and changed
+  nothing; exit 1 means a step failed (named in its output) and the steps before it stand; rerunning is safe.
+  `DRY_RUN=1` lists the steps. `make mode-full` / `make mode-direct` remain, for the handover alone.
 - **Everything but `status`, `usgs`, `reconcile` and `runs` writes the real bucket or stops services:** run it only
   when the user asked for that (the argument counts). Never edit `_state/mode.json` by hand.
 - **One direct process.** Before `once`, `run` or `schedule`, check `pgrep -fl 'earth_hub.direct run'`; a local

@@ -161,6 +161,7 @@ The same bucket can be written without Docker: [direct mode](../technical/archit
 
 ```bash
 make mode                # full (active): this machine's export writes the bucket
+make to-direct DRY_RUN=1 # the steps of the switch, in one command, without running them
 make mode-direct         # hand over: stops the poller and catch-up, exports, switches, catches up, checks against USGS
 make direct-once         # one round from this machine (or let the hourly rounds run)
 make reconcile-direct    # the bucket's state agrees with itself
@@ -168,6 +169,7 @@ make reconcile-usgs      # and with USGS: every difference pending, or flagged
 make catchup-now         # catch up now, without waiting for the next hourly round
 make direct-runs         # the audit trail: each run, who started it, what it processed
 make mode-full           # replay direct mode's log into Kafka and PostgreSQL, check, switch back
+                         # (make to-full / make to-direct: the same switches with every check around them)
 make reconcile           # and full mode has every event direct mode processed
 ```
 

@@ -1,0 +1,267 @@
+"""Switch modes, or backfill in full mode, in one command each, with every check around them.
+
+    uv run python scripts/modes.py to-full                # make to-full
+    uv run python scripts/modes.py backfill START [END]   # make backfill-full START=... [END=...]
+    uv run python scripts/modes.py to-direct              # make to-direct
+    ... --dry-run                                         # list the steps, run nothing
+
+Each runs the existing make targets (the handovers stay in earth_hub.direct.handover), with the
+checks a person would otherwise make by hand: Docker running, the bucket in the expected mode,
+no `make direct-run` left running, the consumers caught up (lag 0) before a switch and after a
+backfill, and `make reconcile` clean. It prints each step, and stops at the first that fails
+with what failed; every step can be run again.
+
+- to-full:   make up, make mode-full (replays direct mode's log, switches, restarts the poller and
+             catch-up, catches up, checks against USGS), waits for the consumers, make reconcile.
+- backfill:  full mode only: make ingest (the consumers), make backfill, waits for
+             consumer-backfill, make reconcile, then make export-r2 so R2 and the dashboard
+             have the history.
+- to-direct: waits for the consumers, make reconcile, make mode-direct (stops the poller and
+             catch-up, exports, switches, catches up, checks against USGS), then make down: direct
+             mode needs no Docker (the data is kept; to-full starts it again).
+
+All three write the real bucket, Kafka or PostgreSQL: run them only when meant (the /eh-mode and
+/eh-backfill skills run them when asked).
+"""
+
+import argparse
+import re
+import subprocess
+import sys
+import time
+from collections.abc import Callable
+from dataclasses import dataclass, field
+from datetime import date
+from pathlib import Path
+
+REPO = Path(__file__).resolve().parents[1]
+GROUPS = ("earth-hub-consumer", "earth-hub-consumer-backfill")
+DIRECT, FULL = "direct (active)", "full (active)"
+
+
+class Refused(Exception):
+    """The starting state is not one this command runs from; nothing was changed."""
+
+
+class Failed(Exception):
+    """A step failed; what ran before it stands."""
+
+
+@dataclass
+class Shell:
+    """Runs commands from the repository's root. `read` changes nothing; `run` may change
+    something and streams its output (only listed in a dry run)."""
+
+    dry_run: bool = False
+    sleep: Callable[[float], None] = time.sleep
+    clock: Callable[[], float] = time.monotonic
+    ran: list[list[str]] = field(default_factory=list)
+
+    def read(self, *cmd: str) -> tuple[int, str]:
+        result = subprocess.run(cmd, cwd=REPO, capture_output=True, text=True)
+        return result.returncode, result.stdout + result.stderr
+
+    def run(self, *cmd: str) -> None:
+        self.ran.append(list(cmd))
+        shown = " ".join(cmd)
+        if self.dry_run:
+            print(f"    would run: {shown}")
+            return
+        print(f"    $ {shown}", flush=True)
+        if subprocess.run(cmd, cwd=REPO).returncode != 0:
+            raise Failed(f"`{shown}` failed (above)")
+
+
+class Steps:
+    def __init__(self, shell: Shell, total: int):
+        self.shell, self.total, self.n = shell, total, 0
+
+    def __call__(self, title: str) -> None:
+        self.n += 1
+        print(f"[{self.n}/{self.total}] {title}", flush=True)
+
+
+# The checks.
+
+
+def require_docker(shell: Shell) -> None:
+    code, _ = shell.read("docker", "info")
+    if code != 0:
+        raise Refused("Docker is not running: start Docker Desktop, then run this again")
+
+
+def mode(shell: Shell) -> str:
+    code, out = shell.read("uv", "run", "python", "-m", "earth_hub.direct.handover", "status")
+    if code != 0:
+        raise Failed(f"could not read the mode: {out.strip()[-300:]}")
+    return out.strip().splitlines()[-1] if out.strip() else ""
+
+
+def require_no_direct_run(shell: Shell) -> None:
+    code, out = shell.read("pgrep", "-fl", "earth_hub.direct run")
+    if code == 0 and out.strip():
+        raise Refused(
+            "a `make direct-run` is running on this machine: stop it (Ctrl-C) first, or the two "
+            "modes would write in turn"
+        )
+
+
+def lag(shell: Shell, group: str) -> int | None:
+    """Messages left to read by `group`, from the broker; None when it cannot say."""
+    code, out = shell.read(
+        "docker", "compose", "exec", "-T", "kafka", "/opt/kafka/bin/kafka-consumer-groups.sh",
+        "--bootstrap-server", "localhost:9092", "--describe", "--group", group,
+    )  # fmt: skip
+    if code != 0:
+        return None
+    total, rows = 0, 0
+    for line in out.splitlines():
+        cols = line.split()
+        if len(cols) >= 6 and cols[0] == group and re.fullmatch(r"\d+|-", cols[5]):
+            rows += 1
+            total += 0 if cols[5] == "-" else int(cols[5])
+    return total if rows else None
+
+
+def wait_for_consumers(shell: Shell, groups, timeout_s: float, every_s: float = 10) -> None:
+    if shell.dry_run:
+        print(f"    would wait for lag 0 in {', '.join(groups)}")
+        return
+    deadline = shell.clock() + timeout_s
+    while True:
+        left = {g: lag(shell, g) for g in groups}
+        if all(v == 0 for v in left.values()):
+            print("    lag 0: " + ", ".join(groups), flush=True)
+            return
+        shown = ", ".join(f"{g} {'?' if v is None else v}" for g, v in left.items())
+        if shell.clock() >= deadline:
+            minutes = f"{timeout_s / 60:.0f} min"
+            raise Failed(
+                f"the consumers did not catch up within {minutes} ({shown}); "
+                "check /eh-status, then run this again"
+            )
+        print(f"    waiting: {shown}", flush=True)
+        shell.sleep(every_s)
+
+
+# The commands.
+
+
+def to_full(shell: Shell, *, wait_s: float = 600) -> None:
+    step = Steps(shell, 6)
+    step("Docker is running")
+    require_docker(shell)
+    step("Kafka and PostgreSQL up")
+    shell.run("make", "up")
+    step("The bucket is in direct mode, and no `make direct-run` runs here")
+    current = mode(shell)
+    if current.startswith(FULL):
+        raise Refused(f"already in full mode: {current}")
+    if not current.startswith(DIRECT):
+        raise Refused(f"the bucket is mid-handover or unreadable ({current}): see /eh-mode")
+    require_no_direct_run(shell)
+    step("Hand over to full mode (make mode-full)")
+    shell.run("make", "mode-full")
+    step("The consumers caught up")
+    wait_for_consumers(shell, GROUPS, wait_s)
+    step("Kafka against PostgreSQL (make reconcile)")
+    shell.run("make", "reconcile")
+    if shell.dry_run:
+        print("Dry run: nothing was changed.")
+        return
+    print(f"Full mode: {mode(shell)}. The poller and catch-up run; "
+          "the dashboard updates when you run make export-r2.")  # fmt: skip
+
+
+def backfill(shell: Shell, start: date, end: date | None, *, wait_s: float = 3600) -> None:
+    if end is not None and end <= start:
+        raise Refused(f"END ({end}) must be after START ({start})")
+    step = Steps(shell, 7)
+    step("Docker is running")
+    require_docker(shell)
+    step("Kafka and PostgreSQL up, the bucket in full mode")
+    shell.run("make", "up")
+    current = mode(shell)
+    if not current.startswith(FULL):
+        raise Refused(f"backfill runs in full mode only, and the bucket is in {current}: "
+                      "run make to-full (/eh-mode full) first")  # fmt: skip
+    step("The pipeline running (make ingest: the consumers store what the backfill sends)")
+    shell.run("make", "ingest")
+    step(f"Backfill {start} to {end or 'now'} from USGS FDSN (make backfill)")
+    shell.run("make", "backfill", f"START={start}", *([f"END={end}"] if end else []))
+    step("consumer-backfill caught up")
+    wait_for_consumers(shell, ("earth-hub-consumer-backfill",), wait_s)
+    step("Kafka against PostgreSQL (make reconcile)")
+    shell.run("make", "reconcile")
+    step("R2 and the dashboard updated (make export-r2)")
+    shell.run("make", "export-r2")
+    if shell.dry_run:
+        print("Dry run: nothing was changed.")
+        return
+    print("Backfill done: stored, reconciled and exported. `make -s export-r2-runs | tail -1` "
+          "shows the export's counts.")  # fmt: skip
+
+
+def to_direct(shell: Shell, *, wait_s: float = 600) -> None:
+    step = Steps(shell, 7)
+    step("Docker is running")
+    require_docker(shell)
+    step("The bucket is in full mode")
+    current = mode(shell)
+    if current.startswith(DIRECT):
+        raise Refused(f"already in direct mode: {current}")
+    if not current.startswith(FULL):
+        raise Refused(f"the bucket is mid-handover or unreadable ({current}): see /eh-mode")
+    step("The consumers caught up")
+    wait_for_consumers(shell, GROUPS, wait_s)
+    step("Kafka against PostgreSQL (make reconcile; the handover needs it clean)")
+    shell.run("make", "reconcile")
+    step("Hand over to direct mode (make mode-direct)")
+    shell.run("make", "mode-direct")
+    step("Docker stopped (make down; the data is kept, make to-full starts it again)")
+    shell.run("make", "down")
+    step("Direct mode's latest executions")
+    shell.run("make", "-s", "direct-runs", "LIMIT=3")
+    if shell.dry_run:
+        print("Dry run: nothing was changed.")
+        return
+    print("Direct mode: the hourly rounds write the bucket; this computer can be closed.")
+
+
+def parse_date(text: str) -> date:
+    try:
+        return date.fromisoformat(text)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"not a date (YYYY-MM-DD): {text}") from None
+
+
+def main(argv: list[str] | None = None, shell: Shell | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("--dry-run", action="store_true", help="list the steps, run nothing")
+    commands = parser.add_subparsers(dest="command", required=True)
+    commands.add_parser("to-full", help="direct mode to full mode")
+    commands.add_parser("to-direct", help="full mode to direct mode")
+    fill = commands.add_parser("backfill", help="backfill a range in full mode, then export")
+    fill.add_argument("start", type=parse_date)
+    fill.add_argument("end", type=parse_date, nargs="?")
+    args = parser.parse_args(argv)
+    shell = shell or Shell()
+    shell.dry_run = shell.dry_run or args.dry_run
+    try:
+        if args.command == "to-full":
+            to_full(shell)
+        elif args.command == "to-direct":
+            to_direct(shell)
+        else:
+            backfill(shell, args.start, args.end)
+    except Refused as exc:
+        print(f"Not started: {exc}.")
+        return 2
+    except Failed as exc:
+        print(f"Stopped: {exc}. The steps before it stand; run this again once it is fixed.")
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

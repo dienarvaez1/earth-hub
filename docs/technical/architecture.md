@@ -229,6 +229,8 @@ flowchart TB
 
 One marker in the bucket, `_state/mode.json`, chooses the mode. It is the setting every process checks: the exporter writes only in full mode, a direct round only in direct mode, so they never write at once. It lives in the bucket rather than in `.env`, so two machines can't disagree about it. Changing it is a handover, which checks that the other mode holds everything before switching, and changes the marker with conditional writes.
 
+**In one command each** (`scripts/modes.py`): `make to-full` and `make to-direct` run the handover below with the checks around it: Docker running, the bucket in the expected mode, no local `make direct-run`, the consumers caught up (lag 0) and `make reconcile` clean; `make to-direct` ends with `make down`, as direct mode needs no Docker. `make backfill-full START=… [END=…]` backfills in full mode only, then waits for `consumer-backfill`, reconciles and exports, so the dashboard has the history. Each prints its steps, refuses a wrong starting state without changing anything (exit 2), and stops at the first step that fails (exit 1); `DRY_RUN=1` lists the steps. `/eh-mode full`, `/eh-mode direct` and `/eh-backfill START END` run them.
+
 ```mermaid
 stateDiagram-v2
     direction TB

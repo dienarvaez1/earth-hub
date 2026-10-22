@@ -42,6 +42,7 @@ Local-first earthquake data platform: USGS GeoJSON feed → Python poller → Ka
 - `make reconcile-direct [DEEP=1]`: direct mode's bucket invariants (read-only).
 - `make direct-runs [LIMIT=20]`: direct mode's audit trail, one line per execution (read-only; `earth_hub/direct/audit.py`).
 - `make reconcile-usgs [DAYS=3]`: the mode writing the bucket against USGS, every difference explained (read-only; `earth_hub/usgs_reconcile.py`). `make catchup-now`: catch up with USGS now, in either mode. Both run at the end of `make mode-direct` and `make mode-full`.
+- `make to-full` / `make to-direct` / `make backfill-full START=… [END=…]` (`scripts/modes.py`, `DRY_RUN=1` lists the steps): one command each, around the targets below, with their checks (Docker, the mode, no local `direct-run`, consumers caught up, `make reconcile`); `to-direct` ends with `make down`, `backfill-full` with `make export-r2`. They write the real bucket, Kafka or PostgreSQL: only when the user asks.
 - `make mode` / `make mode-direct` / `make mode-full`: show / hand over the bucket between modes. `make direct-once` / `make direct-run`: run direct mode. All but `make mode` write to the real bucket or stop services: only when the user asks.
 - `make dashboard-install` / `make dashboard-build` / `make dashboard-dev` / `make test-dashboard`: the dashboard's Node setup, build, local server over the real bucket, browser tests.
 - `make dashboard-deploy`: publish the dashboard and the Worker's cron trigger to Cloudflare Workers. Only when the user asks; never part of the tests.
