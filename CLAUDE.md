@@ -46,6 +46,7 @@ Local-first earthquake data platform: USGS GeoJSON feed → Python poller → Ka
 - `make export-r2 [DRY_RUN=1] [VERIFY=1]` / `make export-r2-runs`: on-demand copy of `earthquakes` to R2 through the API / list runs. Never part of the test suite.
 - `make r2-ls [PREFIX=] [LIMIT=]` / `make r2-count [PREFIX=]` / `make r2-get KEY= [OUT=]`: read-only look at the bucket (`export/browse.py`; it must never write).
 - Skills: `.claude/skills/eh*` (`/eh-status`, `/eh-kafka`, `/eh-db`, …), indexed in `docs/overview/cheatsheet.md`. A new skill or make target used in them goes in the cheat sheet; `tests/unit/test_cheatsheet.py` checks both exist.
+- `make release [DRY_RUN=1]`: the public release (`scripts/release.py`), interactive: run by the user in a terminal, never by Claude or the tests.
 - `make api` / `make api-dev`: serve the API (container / host with reload) at http://127.0.0.1:8000/docs.
 
 Add dependencies with `uv add <pkg>` (or `uv add --dev <pkg>`); never edit `uv.lock` by hand.
