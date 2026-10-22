@@ -28,9 +28,9 @@
           <legend>Time (UTC)</legend>
           <label>Period
             <select name="period">
-              <option value="today" selected>Today</option>
+              <option value="today">Today</option>
               <option value="yesterday">Yesterday</option>
-              <option value="this_week">This week</option>
+              <option value="this_week" selected>This week</option>
               <option value="last_week">Last week</option>
               <option value="this_month">This month</option>
               <option value="last_month">Last month</option>
@@ -85,13 +85,24 @@
       <section class="panel">
         <div class="panel-head">
           <h2>Events over time</h2>
-          <label>Per
-            <select name="time_bucket" form="filters">
-              <option value="day" selected>day</option>
-              <option value="week">week</option>
-              <option value="month">month</option>
-            </select>
-          </label>
+          <div class="panel-controls">
+            <label>Style
+              <select name="chart_style" form="filters">
+                <option value="stacked" selected>Stacked columns</option>
+                <option value="areas">Stacked areas</option>
+                <option value="lines">Lines</option>
+                <option value="trend">Trendlines</option>
+              </select>
+            </label>
+            <label>Per
+              <select name="time_bucket" form="filters">
+                <option value="hour" selected>hour</option>
+                <option value="day">day</option>
+                <option value="week">week</option>
+                <option value="month">month</option>
+              </select>
+            </label>
+          </div>
         </div>
         <figure id="chart-time"></figure>
       </section>
@@ -108,10 +119,19 @@
         <section class="panel">
           <h2>Top 10 countries</h2>
           <figure id="chart-countries"></figure>
+          <p class="note" id="rankings-note">
+            Counts follow how dense the seismic networks are, not only how often the ground
+            shakes: the United States records earthquakes too small to feel, most of the world
+            only from about magnitude 4.5.
+          </p>
         </section>
         <section class="panel">
           <h2>Top 10 regions</h2>
           <figure id="chart-regions"></figure>
+          <p class="note" id="regions-note">
+            Regions are US states, or the area the USGS place names: outside the United
+            States most places name only a country, so their events count under Unknown.
+          </p>
         </section>
       </div>
 

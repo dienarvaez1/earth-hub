@@ -177,19 +177,19 @@ ORDER BY preferred_event_id;
 
 ## Dashboard reports
 
-The page runs every report unchanged. All filters live in one `filter` table, set through `set_filter.sql`, so no report takes parameters; `setup.sql` creates it, and the `events` and `filtered` views every report reads. Times are bucketed from `event_time_ms` as a plain UTC `TIMESTAMP`, so results never depend on the browser's time zone.
+The page runs every report unchanged. All filters live in one `filter` table, set through `set_filter.sql`, so no report takes parameters; `setup.sql` creates it, and the `events` and `filtered` views every report reads (and `matched`, for the menus). Times are bucketed from `event_time_ms` as a plain UTC `TIMESTAMP`, so results never depend on the browser's time zone.
 
 | File | Answers | Filtered |
 | --- | --- | --- |
-| `setup.sql` | Creates the `filter` table and the `events` and `filtered` views | |
+| `setup.sql` | Creates the `filter` table and the `events`, `matched` and `filtered` views | |
 | `set_filter.sql` | Sets every filter at once (11 parameters, in order) | |
 | `summary.sql` | The headline numbers: events, strongest, first and last, countries, tsunami flags | yes |
-| `over_time.sql` | Events per day, ISO week or month, empty periods included, split by magnitude level | yes |
+| `over_time.sql` | Events per hour, day, ISO week or month, empty periods included, split by magnitude level | yes |
 | `magnitude_bins.sql` | Events per half-unit of magnitude, empty bins included | yes |
 | `map_points.sql` | One point per event, for the map and the depth chart | yes |
-| `top_countries.sql`, `top_regions.sql` | The `top_n` countries and regions by events | yes |
+| `top_countries.sql`, `top_regions.sql` | The `top_n` countries and regions by events, split by magnitude level | yes |
 | `significant.sql`, `largest.sql` | The latest and the strongest `top_n` events at or above `significant_magnitude` | yes |
-| `countries.sql`, `regions.sql`, `event_types.sql` | The options of the filter's menus | no (regions: by the chosen country) |
+| `countries.sql`, `regions.sql`, `event_types.sql` | The options of the filter's menus, counted under the rest of the filter | yes, except each menu's own choice (regions: listed for the chosen country) |
 | `date_range.sql` | The first and last event, the custom calendar's limits | no |
 
 To run them on the real snapshot: after `make export-r2`, start `make dashboard-dev`, then from the repository's root (with Claude Code, `/eh-r2 snapshot` saves the file from the bucket directly, without the local server):
@@ -286,26 +286,26 @@ Per ISO week, from Monday. Weeks without events are listed with 0, so a chart's 
 
 ### Where
 
-`top_countries.sql`: events without a country are grouped as `Unknown`, and ties are in alphabetical order.
+`top_countries.sql`: events without a country are grouped as `Unknown`, and ties are in alphabetical order. Each country's events are also counted by magnitude level, as in `over_time.sql`: the page draws each bar as its share of the events in the bars shown, split by level.
 
 <!-- replay: dashboard top_countries -->
 
-| country | events | max_magnitude |
-| --- | --- | --- |
-| United States | 4 | 2.5 |
-| Japan | 1 | 5.2 |
-| Mexico | 1 | 4.5 |
-| Unknown | 1 | NULL |
+| country | events | max_magnitude | below_2_5 | from_2_5 | from_4_5 | from_6 | no_magnitude |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| United States | 4 | 2.5 | 3 | 1 | 0 | 0 | 0 |
+| Japan | 1 | 5.2 | 0 | 0 | 1 | 0 | 0 |
+| Mexico | 1 | 4.5 | 0 | 0 | 1 | 0 | 0 |
+| Unknown | 1 | NULL | 0 | 0 | 0 | 0 | 1 |
 
 `top_regions.sql`, here with `top_n = 3`. A region is shown with its country, since names repeat across countries.
 
 <!-- replay: dashboard top_regions top_n=3 -->
 
-| region | country | events | max_magnitude |
-| --- | --- | --- | --- |
-| Alaska | United States | 3 | 2.5 |
-| Baja California | Mexico | 1 | 4.5 |
-| California | United States | 1 | -0.43 |
+| region | country | events | max_magnitude | below_2_5 | from_2_5 | from_4_5 | from_6 | no_magnitude |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Alaska | United States | 3 | 2.5 | 2 | 1 | 0 | 0 | 0 |
+| Baja California | Mexico | 1 | 4.5 | 0 | 0 | 1 | 0 | 0 |
+| California | United States | 1 | -0.43 | 1 | 0 | 0 | 0 | 0 |
 
 ### The events to look at
 
@@ -341,7 +341,7 @@ Per ISO week, from Monday. Weeks without events are listed with 0, so a chart's 
 
 ### The filter's options
 
-`countries.sql` lists every country for the country filter. It ignores the filter, and counts the deleted event too: these are options, not results.
+`countries.sql` lists every country for the country filter, with its number of events under the rest of the filter: time, magnitude, region, type and deletions, but not the chosen country, so the counts follow the other choices. Here the default filter leaves out the deleted event. `regions.sql` and `event_types.sql` count the same way, each leaving out its own choice. All three read `matched`, the view in `setup.sql` that says, for every event, which parts of the filter it passes; `filtered` keeps the events that pass them all.
 
 <!-- replay: dashboard countries -->
 
@@ -349,7 +349,7 @@ Per ISO week, from Monday. Weeks without events are listed with 0, so a chart's 
 | --- | --- |
 | Japan | 1 |
 | Mexico | 1 |
-| United States | 5 |
+| United States | 4 |
 | Unknown | 1 |
 
 `date_range.sql` gives the custom calendar's limits.

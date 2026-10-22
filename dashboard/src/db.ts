@@ -23,7 +23,7 @@ export interface Filter {
   region: string | null;
   event_type: string | null;
   include_deleted: boolean;
-  time_bucket: "day" | "week" | "month";
+  time_bucket: "hour" | "day" | "week" | "month";
   top_n: number;
   significant_magnitude: number;
 }

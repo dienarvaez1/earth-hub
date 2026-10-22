@@ -5,7 +5,9 @@ import json
 from datetime import datetime, timedelta
 
 import pytest
-from support.dashboard_data import EVENTS
+from support.dashboard import LocalDashboard
+from support.dashboard_data import EVENTS, event
+from support.dashboard_data import build as build_snapshot
 
 pytestmark = pytest.mark.req("REQ-DASH-007")
 
@@ -42,6 +44,11 @@ def as_page(value):
         {"include_deleted": True, "time_bucket": "day"},
         {"time_bucket": "week", "top_n": 2},
         {"start_time": "2024-02-29 00:00:00", "end_time": "2024-03-01 00:00:00"},
+        {
+            "time_bucket": "hour",
+            "start_time": "2024-02-28 00:00:00",
+            "end_time": "2024-03-02 00:00:00",
+        },
         {"min_magnitude": 2.5, "max_magnitude": 5.0},
         {"country": "United States", "region": "Alaska"},
         {"country": "Unknown"},
@@ -90,8 +97,9 @@ def test_the_charts_are_drawn_from_the_results(dash):
     # One segment per day and magnitude level with events: 6 events, 28 Feb to 10 Mar.
     assert len(page.query_selector_all('#chart-time g[aria-label="rect"] rect')) == 6
     assert len(page.query_selector_all('#chart-magnitude g[aria-label="rect"] rect')) == 12
+    # One segment per country and magnitude level with events: the United States has two.
     countries = page.query_selector_all('#chart-countries g[aria-label="bar"] rect')
-    assert len(countries) == 4
+    assert len(countries) == 5
     for figure in ("time", "magnitude", "depth", "countries", "regions"):
         svg = page.query_selector(f"#chart-{figure} svg[role=img]")
         assert svg is not None and svg.get_attribute("aria-label"), figure
@@ -110,7 +118,7 @@ def test_the_form_filters_the_page(dash):
     regions = page.eval_on_selector_all("select[name=region] option", "os => os.map(o => o.value)")
     assert regions == ["", "Baja California"]
 
-    page.click("button[type=reset]")  # back to Today, 2 April: only event 8, a quarry blast
+    page.click("button[type=reset]")  # back to This week, 1-2 April: only 8, a quarry blast
     page.wait_for_function("window.__earthHub.summary.events === 0")
     dash.after_update(lambda: page.select_option("select[name=period]", "last_3_years"))
 
@@ -294,8 +302,8 @@ def test_the_table_sorts_by_each_column_header(browser_page, large_server):
 @pytest.mark.parametrize(
     ("period", "events", "first", "bucket"),
     [
-        ("today", 1, "2024-03-10T23:00:00", "day"),  # the whole UTC day, 23:00 included
-        ("this_week", 2, "2024-03-04T06:00:00", "day"),  # from Monday
+        ("today", 1, "2024-03-10T23:00:00", "hour"),  # the whole UTC day, 23:00 included
+        ("this_week", 2, "2024-03-04T06:00:00", "hour"),  # from Monday
         ("this_month", 3, "2024-03-01T00:00:00", "day"),
         ("last_3_months", 6, "2024-02-28T23:59:59.999", "week"),  # from 10 December
         ("this_year", 6, "2024-02-28T23:59:59.999", "week"),
@@ -305,7 +313,7 @@ def test_the_table_sorts_by_each_column_header(browser_page, large_server):
 def test_each_preset_selects_its_days(browser_page, server, period, events, first, bucket):
     browser_page.open(server.url, now="2024-03-10T12:00:00+00:00")
     page = browser_page.page
-    if period != "today":
+    if period != "this_week":  # the default
         browser_page.after_update(lambda: page.select_option("select[name=period]", period))
     summary = browser_page.status()["summary"]
     assert summary["events"] == events
@@ -325,7 +333,7 @@ LAST_OF_28 = "2024-02-28T23:59:59.999"
     ("period", "now", "events", "first", "last", "bucket"),
     [
         # 29 February: not event 1 (the day before) nor 4 (1 March, 00:00).
-        ("yesterday", "2024-03-01T12:00", 2, "2024-02-29T00:00:00", "2024-02-29T12:00:00", "day"),
+        ("yesterday", "2024-03-01T12:00", 2, "2024-02-29T00:00:00", "2024-02-29T12:00:00", "hour"),
         # From Wednesday 6 March: Monday 26 February to Sunday 3 March, not 5 (Monday 4 March).
         ("last_week", "2024-03-06T12:00", 4, LAST_OF_28, "2024-03-01T00:00:00", "day"),
         # February of a leap year, through the 29th, not 4 (1 March, 00:00).
@@ -351,12 +359,15 @@ def test_the_previous_periods_end_before_today(
 
 
 @pytest.mark.req("REQ-DASH-010")
-def test_today_is_the_default(browser_page, server):
+def test_this_week_is_the_default(browser_page, server):
     browser_page.open(server.url, now="2024-02-29T08:00:00+00:00")
     page = browser_page.page
-    assert page.input_value("select[name=period]") == "today"
-    assert browser_page.status()["summary"]["events"] == 2  # events 2 and 3
-    assert page.input_value("select[name=time_bucket]") == "day"
+    assert page.input_value("select[name=period]") == "this_week"
+    # From Monday 26 February: events 1, 2 and 3.
+    assert browser_page.status()["summary"]["events"] == 3
+    assert page.input_value("select[name=time_bucket]") == "hour"
+    assert page.input_value("select[name=chart_style]") == "stacked"
+    assert page.input_value("select[name=magnitude]") == ""
 
 
 @pytest.mark.req("REQ-DASH-010")
@@ -391,7 +402,7 @@ def test_earthquakes_are_the_default_type(dash):
     dash.after_update(lambda: page.select_option("select[name=event_type]", "quarry blast"))
     assert dash.status()["summary"]["events"] == 1
     page.click("button[type=reset]")
-    page.wait_for_function("window.__earthHub.summary.events === 0")  # Today, 2 April
+    page.wait_for_function("window.__earthHub.summary.events === 0")  # This week, 1-2 April
     assert page.input_value("select[name=event_type]") == "earthquake"
 
 
@@ -556,3 +567,220 @@ def test_the_magnitude_bands_are_the_legends(dash):
     page.click("button[type=reset]")
     page.wait_for_function("window.__earthHub.summary.events === 0")
     assert page.input_value("select[name=magnitude]") == ""
+
+
+@pytest.mark.req("REQ-DASH-020")
+def test_the_rankings_say_what_drives_their_counts(dash):
+    page = dash.page
+    countries = page.inner_text("#chart-countries + .note")
+    assert "seismic networks" in countries and "magnitude 4.5" in countries
+    assert "Unknown" in page.inner_text("#chart-regions + .note")
+
+
+@pytest.mark.req("REQ-DASH-021")
+def test_the_place_menus_list_unknown_first_and_us_places_with_a_prefix(dash):
+    page = dash.page
+    # Earthquakes, deleted ones left out (REQ-DASH-024); values stay as stored. The states
+    # come after the other regions.
+    assert options(page, "country") == [
+        ["", "All"],
+        ["Unknown", "Unknown (1)"],
+        ["Japan", "Japan (1)"],
+        ["Mexico", "Mexico (1)"],
+        ["United States", "United States (3)"],
+    ]
+    assert options(page, "region") == [
+        ["", "All"],
+        ["Unknown", "Unknown (2)"],
+        ["Baja California", "Baja California (1)"],
+        ["Alaska", "US-Alaska (2)"],
+        ["California", "US-California (1)"],
+    ]
+    dash.after_update(lambda: page.select_option("select[name=region]", "Alaska"))
+    assert dash.status()["summary"]["events"] == 2  # 2.49 and 2.5: not the deleted or the blast
+    # The region menu follows the country, keeping its labels.
+    dash.after_update(lambda: page.select_option("select[name=country]", "United States"))
+    assert [label for _, label in options(page, "region")] == [
+        "All",
+        "US-Alaska (2)",
+        "US-California (1)",
+    ]
+
+
+TERRITORIES = [
+    event(1, "2024-01-01T00:00:00", 3.0, "Puerto Rico", None),
+    event(2, "2024-01-02T00:00:00", 3.1, "Guam", None),
+    event(3, "2024-01-03T00:00:00", 3.2, "American Samoa", None),
+    event(4, "2024-01-04T00:00:00", 3.3, "Northern Mariana Islands", None),
+    event(5, "2024-01-05T00:00:00", 3.4, "U.S. Virgin Islands", None),
+    event(6, "2024-01-06T00:00:00", 3.5, "Samoa", None),  # the independent state
+    event(7, "2024-01-07T00:00:00", 3.6, "Georgia", None),  # the country, not the state
+    event(8, "2024-01-08T00:00:00", 3.7, "United States", "Georgia"),
+    event(9, "2024-01-09T00:00:00", 3.8, "Vanuatu", None),  # after United States
+    event(10, "2024-01-09T01:00:00", 3.9, "Mexico", "Baja California"),
+    event(11, "2024-01-09T02:00:00", 4.0, "United States", "Alaska"),
+]
+
+
+@pytest.fixture(scope="module")
+def territories_server(built, tmp_path_factory):
+    snapshot = build_snapshot(tmp_path_factory.mktemp("territories"), TERRITORIES)
+    local = LocalDashboard(tmp_path_factory.mktemp("r2-territories"))
+    meta = {
+        "table": "earthquakes",
+        "run_id": "2024-01-10T12-00-00Z-test",
+        "written_at": "2024-01-10T12:00:00Z",
+        "rows": len(TERRITORIES),
+        "bytes": snapshot.stat().st_size,
+    }
+    local.seed(snapshot, meta)
+    local.start()
+    yield local
+    local.stop()
+
+
+@pytest.mark.req("REQ-DASH-021")
+def test_us_territories_and_states_are_grouped_with_the_prefix(browser_page, territories_server):
+    browser_page.open(territories_server.url, now="2024-01-10T12:00:00+00:00", period="this_year")
+    page = browser_page.page
+    # The territories right after United States, alphabetically by what the menu shows.
+    assert options(page, "country") == [
+        ["", "All"],
+        ["Georgia", "Georgia (1)"],
+        ["Mexico", "Mexico (1)"],
+        ["Samoa", "Samoa (1)"],
+        ["United States", "United States (2)"],
+        ["American Samoa", "US-American Samoa (1)"],
+        ["Guam", "US-Guam (1)"],
+        ["Northern Mariana Islands", "US-Northern Mariana Islands (1)"],
+        ["Puerto Rico", "US-Puerto Rico (1)"],
+        ["U.S. Virgin Islands", "US-Virgin Islands (1)"],
+        ["Vanuatu", "Vanuatu (1)"],
+    ]
+    # The states after the other regions.
+    assert options(page, "region") == [
+        ["", "All"],
+        ["Unknown", "Unknown (8)"],
+        ["Baja California", "Baja California (1)"],
+        ["Alaska", "US-Alaska (1)"],
+        ["Georgia", "US-Georgia (1)"],
+    ]
+    browser_page.after_update(lambda: page.select_option("select[name=country]", "Puerto Rico"))
+    assert browser_page.status()["summary"]["events"] == 1
+    assert browser_page.errors == [] and browser_page.blocked == []
+
+
+def options(page, name):
+    return page.eval_on_selector_all(
+        f"select[name={name}] option", "os => os.map(o => [o.value, o.textContent])"
+    )
+
+
+@pytest.mark.req("REQ-DASH-022")
+def test_events_over_time_as_areas_lines_or_trendlines_in_the_legend_colors(dash, expected):
+    page = dash.page
+    expected.set_filter(event_type="earthquake", start_time=datetime(2021, 4, 2))
+    rows = expected.query("over_time")
+    # The levels with events in the range, in the legend's order and colors.
+    colors = [color for key, _, color in LEVELS if any(r[key] > 0 for r in rows)]
+    assert len(rows) >= 2 and colors == ["#fed976", "#fd8d3c", "#e31a1c", "#a8a29e"]
+
+    def strokes(mark):
+        return page.eval_on_selector_all(
+            f'#chart-time g[aria-label="{mark}"] path',
+            "ps => ps.map(p => p.getAttribute('stroke') ?? p.parentElement.getAttribute('stroke'))",
+        )
+
+    # Stacked columns by default. Stacked areas: from the baseline up 4.5 to 6, 2.5 to 4.5,
+    # Below 2.5, then No magnitude, so each layer's top is at or above the one below it (6 and
+    # above: no events).
+    assert page.input_value("select[name=chart_style]") == "stacked"
+    dash.after_update(lambda: page.select_option("select[name=chart_style]", "areas"))
+    areas = page.eval_on_selector_all(
+        '#chart-time g[aria-label="area"] path',
+        "ps => ps.map(p => [p.getAttribute('fill'), p.getBBox().y])",
+    )
+    assert sorted(fill for fill, _ in areas) == sorted(colors)
+    top = dict(areas)  # SVG y grows downwards
+    assert top["#e31a1c"] > top["#fd8d3c"] > top["#fed976"] >= top["#a8a29e"]
+    dash.after_update(lambda: page.select_option("select[name=chart_style]", "lines"))
+    assert sorted(strokes("line")) == sorted(colors)  # one line per level
+    assert page.query_selector('#chart-time g[aria-label="rect"]') is None
+    dash.after_update(lambda: page.select_option("select[name=chart_style]", "trend"))
+    assert sorted(strokes("linear-regression")) == sorted(colors)  # one trend per level
+    dots = page.query_selector_all('#chart-time g[aria-label="dot"] circle')
+    assert len(dots) == len(rows) * len(colors)  # every period of every level, zeros too
+    svg = page.query_selector("#chart-time svg[role=img]")
+    assert "trend" in svg.get_attribute("aria-label")
+    # The chart's legend stays, in the map legend's colors.
+    swatches = page.eval_on_selector_all(
+        "#chart-time [class*=swatch] > :is(span, div)", "els => els.map(e => e.textContent.trim())"
+    )
+    assert [label for _, label, _ in LEVELS] == [s for s in swatches if s]
+    page.click("button[type=reset]")
+    page.wait_for_function("window.__earthHub.summary.events === 0")
+    assert page.input_value("select[name=chart_style]") == "stacked"
+
+
+@pytest.mark.req("REQ-DASH-023")
+def test_the_top_bars_are_shares_split_by_magnitude_level(dash):
+    page = dash.page
+
+    def segments(figure):
+        return page.eval_on_selector_all(
+            f'#chart-{figure} g[aria-label="bar"] rect',
+            "rs => rs.map(r => [r.getAttribute('fill'), r.getBBox().width])",
+        )
+
+    # Earthquakes only, 6 in all: the United States 3 (2.49, -0.43 below 2.5; 2.5), Japan 5.2,
+    # Mexico 4.5 and one without a country or magnitude.
+    fills = sorted(fill for fill, _ in segments("countries"))
+    assert fills == sorted(["#fed976", "#fd8d3c", "#e31a1c", "#e31a1c", "#a8a29e"])
+    widths = [w for _, w in segments("countries")]
+    unit = min(widths)  # one event: 1/6 of the events
+    assert sorted(round(w / unit, 2) for w in widths) == [1, 1, 1, 1, 2]
+    # The axis is in percent, and each bar ends with its number of events.
+    ticks = page.eval_on_selector_all(
+        '#chart-countries g[aria-label="x-axis tick label"] text',
+        "ts => ts.map(t => t.textContent)",
+    )
+    assert ticks and all(t.endswith("%") for t in ticks)
+    labels = page.eval_on_selector_all(
+        '#chart-countries g[aria-label="text"] text', "ts => ts.map(t => t.textContent)"
+    )
+    assert labels == ["3", "1", "1", "1"]
+    swatches = page.eval_on_selector_all(
+        "#chart-regions [class*=swatch] > :is(span, div)",
+        "els => els.map(e => e.textContent.trim())",
+    )
+    assert [label for _, label, _ in LEVELS] == [s for s in swatches if s]
+
+
+@pytest.mark.req("REQ-DASH-024")
+def test_the_menu_counts_follow_the_other_choices(browser_page, server):
+    # Sunday 10 March: this week (the default) holds 5 (California, Monday 4 March), 6 (Japan)
+    # and the deleted 7; today only 6.
+    browser_page.open(server.url, now="2024-03-10T23:30:00+00:00")
+    page = browser_page.page
+
+    def counts(name):
+        return [label for _, label in options(page, name)]
+
+    assert counts("country") == [
+        "All", "Unknown (0)", "Japan (1)", "Mexico (0)", "United States (1)",
+    ]  # fmt: skip
+    assert counts("event_type") == ["All", "earthquake (2)", "quarry blast (0)"]
+    browser_page.after_update(lambda: page.select_option("select[name=period]", "today"))
+    assert counts("country") == [
+        "All", "Unknown (0)", "Japan (1)", "Mexico (0)", "United States (0)",
+    ]  # fmt: skip
+    assert counts("event_type") == ["All", "earthquake (1)", "quarry blast (0)"]
+    assert counts("region")[:2] == ["All", "Unknown (1)"]
+    # Deleted events count once included; a menu's own choice leaves its counts alone.
+    browser_page.after_update(lambda: page.select_option("select[name=period]", "this_week"))
+    browser_page.after_update(lambda: page.check("input[name=include_deleted]"))
+    assert "United States (2)" in counts("country")
+    browser_page.after_update(lambda: page.select_option("select[name=country]", "Japan"))
+    assert "United States (2)" in counts("country")
+    assert counts("event_type") == ["All", "earthquake (1)", "quarry blast (0)"]
+    assert browser_page.errors == [] and browser_page.blocked == []

@@ -196,6 +196,13 @@ button {
   gap: 6px;
 }
 
+.panel-controls {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 4px 12px;
+}
+
 .map-foot {
   display: flex;
   justify-content: space-between;

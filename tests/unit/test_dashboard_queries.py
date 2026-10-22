@@ -68,6 +68,25 @@ def test_events_per_day_in_utc_with_empty_days(dash):
 
 
 @pytest.mark.req("REQ-DASH-002")
+def test_events_per_hour_in_utc_with_empty_hours(dash):
+    dash.set_filter(time_bucket="hour", start_time=at("2024-02-28"), end_time=at("2024-03-02"))
+    rows = dash.query("over_time")
+    hours = {r["period"].isoformat(sep=" ")[:16]: r["events"] for r in rows}
+    # 28 February 23:00 to 1 March 00:00, every hour listed: 1 + 24 + 1.
+    assert len(hours) == 26
+    assert list(hours)[0] == "2024-02-28 23:00" and list(hours)[-1] == "2024-03-01 00:00"
+    # 23:59:59.999 is still in 23:00; midnight starts its own hour.
+    assert {h: n for h, n in hours.items() if n} == {
+        "2024-02-28 23:00": 1,
+        "2024-02-29 00:00": 1,
+        "2024-02-29 12:00": 1,
+        "2024-03-01 00:00": 1,
+    }
+    assert [r["from_2_5"] for r in rows if r["events"]] == [0, 1, 0, 0]  # 2.5 at 00:00
+    assert [r["from_4_5"] for r in rows if r["events"]] == [0, 0, 1, 0]  # 4.5 at 12:00
+
+
+@pytest.mark.req("REQ-DASH-002")
 def test_events_per_iso_week_and_month(dash):
     dash.set_filter(time_bucket="week")
     weeks = [(r["period"].date().isoformat(), r["events"]) for r in dash.query("over_time")]
@@ -145,6 +164,37 @@ def test_top_countries_with_unknown_and_ties_in_order(dash):
     assert rows == [("United States", 4), ("Japan", 1), ("Mexico", 1), ("Unknown", 1)]
     dash.set_filter(top_n=2)
     assert [r["country"] for r in dash.query("top_countries")] == ["United States", "Japan"]
+
+
+LEVEL_KEYS = ("below_2_5", "from_2_5", "from_4_5", "from_6", "no_magnitude")
+
+
+@pytest.mark.req("REQ-DASH-023")
+def test_the_top_countries_and_regions_count_each_magnitude_level(dash):
+    dash.set_filter()
+
+    def levels(name, *place):
+        return {
+            tuple(r[p] for p in place): tuple(r[k] for k in LEVEL_KEYS) for r in dash.query(name)
+        }
+
+    # United States: 2.49, -0.43 and the 1.0 quarry blast below 2.5, and 2.5 (the deleted 3.0
+    # is left out); Japan 5.2 and Mexico 4.5 in 4.5 to 6; Unknown without a magnitude.
+    assert levels("top_countries", "country") == {
+        ("United States",): (3, 1, 0, 0, 0),
+        ("Japan",): (0, 0, 1, 0, 0),
+        ("Mexico",): (0, 0, 1, 0, 0),
+        ("Unknown",): (0, 0, 0, 0, 1),
+    }
+    assert levels("top_regions", "region", "country") == {
+        ("Alaska", "United States"): (2, 1, 0, 0, 0),
+        ("Baja California", "Mexico"): (0, 0, 1, 0, 0),
+        ("California", "United States"): (1, 0, 0, 0, 0),
+        ("Unknown", "Japan"): (0, 0, 1, 0, 0),
+        ("Unknown", "Unknown"): (0, 0, 0, 0, 1),
+    }
+    for name in ("top_countries", "top_regions"):
+        assert all(sum(r[k] for k in LEVEL_KEYS) == r["events"] for r in dash.query(name))
 
 
 @pytest.mark.req("REQ-DASH-004")
@@ -258,7 +308,7 @@ def test_filter_options_list_every_value(dash):
     assert dash.query("countries") == [
         {"country": "Japan", "events": 1},
         {"country": "Mexico", "events": 1},
-        {"country": "United States", "events": 5},  # the deleted event too: options, not counts
+        {"country": "United States", "events": 4},  # not the deleted event, left out
         {"country": "Unknown", "events": 1},
     ]
     assert [r["region"] for r in dash.query("regions")] == [
@@ -269,10 +319,46 @@ def test_filter_options_list_every_value(dash):
     ]
     dash.set_filter(country="United States")
     assert [r["region"] for r in dash.query("regions")] == ["Alaska", "California"]
+    # Under the chosen country: the United States' 3 earthquakes and its quarry blast.
     assert dash.query("event_types") == [
-        {"event_type": "earthquake", "events": 7},
+        {"event_type": "earthquake", "events": 3},
         {"event_type": "quarry blast", "events": 1},
     ]
+
+
+@pytest.mark.req("REQ-DASH-024")
+def test_each_menu_counts_under_the_rest_of_the_filter(dash):
+    def counts(name, key, **filters):
+        dash.set_filter(**filters)
+        return {r[key]: r["events"] for r in dash.query(name)}
+
+    # 29 February: events 2 (Alaska, 2.5) and 3 (Baja California, Mexico, 4.5). Every option
+    # stays listed, at 0 when nothing matches.
+    leap = {"start_time": at("2024-02-29"), "end_time": at("2024-03-01")}
+    assert counts("countries", "country", **leap) == {
+        "Japan": 0, "Mexico": 1, "United States": 1, "Unknown": 0,
+    }  # fmt: skip
+    assert counts("event_types", "event_type", **leap) == {"earthquake": 2, "quarry blast": 0}
+    # A menu's own choice leaves its counts alone; the others' choices apply.
+    assert counts("countries", "country", country="Mexico", **leap) == {
+        "Japan": 0, "Mexico": 1, "United States": 1, "Unknown": 0,
+    }  # fmt: skip
+    assert counts("event_types", "event_type", country="Mexico") == {
+        "earthquake": 1, "quarry blast": 0,
+    }  # fmt: skip
+    assert counts("event_types", "event_type", event_type="quarry blast") == {
+        "earthquake": 6, "quarry blast": 1,
+    }  # fmt: skip
+    # The regions of the chosen country, counted under the magnitude band and deletions.
+    assert counts("regions", "region", country="United States", min_magnitude=2.5) == {
+        "Alaska": 1, "California": 0,
+    }  # fmt: skip
+    assert counts("regions", "region", country="United States", include_deleted=True) == {
+        "Alaska": 4, "California": 1,
+    }  # fmt: skip
+    # The type menu keeps its order (most common over all events) whatever the counts.
+    dash.set_filter(event_type="quarry blast", start_time=at("2024-04-01"))
+    assert [r["event_type"] for r in dash.query("event_types")] == ["earthquake", "quarry blast"]
 
 
 @pytest.mark.req("REQ-DASH-015")
