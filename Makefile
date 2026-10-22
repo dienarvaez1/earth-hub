@@ -1,4 +1,4 @@
-.PHONY: help install up down reset ingest ingest-once ingest-logs ingest-stop api api-dev api-stop kafka-ui kafka-ui-stop backfill catchup-once catchup-now reconcile-usgs consume reconcile reconcile-direct mode mode-direct mode-full direct-once direct-run direct-runs export-r2 export-r2-runs r2-ls r2-count r2-get dashboard-install dashboard-build dashboard-dev dashboard-deploy trigger-token test-dashboard check-db-outage lint format test test-integration test-e2e test-disruptive test-performance load load-ui test-all regression flake-check traceability release smoke smoke-restart migrate coverage
+.PHONY: help install up down reset ingest ingest-once ingest-logs ingest-stop api api-dev api-stop kafka-ui kafka-ui-stop backfill catchup-once catchup-now reconcile-usgs consume reconcile reconcile-direct mode mode-direct mode-full to-full to-direct backfill-full direct-once direct-run direct-runs export-r2 export-r2-runs r2-ls r2-count r2-get dashboard-install dashboard-build dashboard-dev dashboard-deploy trigger-token test-dashboard check-db-outage lint format test test-integration test-e2e test-disruptive test-performance load load-ui test-all regression flake-check traceability release smoke smoke-restart migrate coverage
 
 help: ## List the available commands
 	@grep -E '^[a-z0-9-]+:.*## ' $(MAKEFILE_LIST) | awk -F ':.*## ' '{printf "  %-17s %s\n", $$1, $$2}'
@@ -113,6 +113,16 @@ mode-full: ## Hand over to full mode: replay direct mode's log into Kafka, check
 	uv run python -m earth_hub.ingestion.catchup --once
 	uv run python -m earth_hub.usgs_reconcile --wait 300 || { echo "Full mode is on; the check against USGS found differences it cannot explain (above)"; exit 1; }
 	@echo "Full mode: the poller and catch-up are running again"
+
+to-full: ## Direct mode to full mode in one command: checks, make mode-full, consumers caught up, make reconcile (DRY_RUN=1 lists the steps)
+	uv run python scripts/modes.py $(if $(DRY_RUN),--dry-run) to-full
+
+to-direct: ## Full mode to direct mode in one command: consumers caught up, make reconcile, make mode-direct, make down (DRY_RUN=1 lists the steps)
+	uv run python scripts/modes.py $(if $(DRY_RUN),--dry-run) to-direct
+
+backfill-full: ## Backfill in full mode in one command: make ingest, make backfill, consumers caught up, make reconcile, make export-r2: START=2026-01-01 [END=...] [DRY_RUN=1]
+	@test -n "$(START)" || (echo "usage: make backfill-full START=2026-01-01 [END=2026-06-01]"; exit 1)
+	uv run python scripts/modes.py $(if $(DRY_RUN),--dry-run) backfill $(START) $(END)
 
 catchup-now: ## Catch up with USGS now, in the mode that writes the bucket: day feed, month feed, deletions
 	@if uv run python -m earth_hub.direct.handover status | grep -q '^direct (active)'; then \
