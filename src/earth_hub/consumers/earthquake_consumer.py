@@ -137,13 +137,23 @@ class EarthquakeConsumer:
 
     def _lag(self) -> dict:
         """Messages left to read on each assigned partition: the end offset minus this
-        consumer's position. None when Kafka cannot say (no assignment yet, or a fake)."""
+        consumer's position. None when Kafka cannot say (no assignment yet, or a fake).
+        A partition read nothing since assignment has no position: the group's committed
+        offset stands in for it, and the first offset only when nothing was committed (DEF-051)."""
         try:
             positions = self._consumer.position(self._consumer.assignment())
+            unknown = [tp for tp in positions if tp.offset < 0]
+            committed = {
+                (tp.topic, tp.partition): tp.offset
+                for tp in (self._consumer.committed(unknown, timeout=5) if unknown else [])
+            }
             lag = {}
             for tp in positions:
                 low, high = self._consumer.get_watermark_offsets(tp, timeout=5, cached=False)
-                lag[f"{tp.topic}[{tp.partition}]"] = high - (tp.offset if tp.offset >= 0 else low)
+                offset = tp.offset
+                if offset < 0:
+                    offset = committed.get((tp.topic, tp.partition), -1)
+                lag[f"{tp.topic}[{tp.partition}]"] = high - (offset if offset >= 0 else low)
         except (AttributeError, KafkaException, TypeError):
             return {"lag": None}
         return {"lag": sum(lag.values()) if lag else None, "lag_by_partition": lag}
