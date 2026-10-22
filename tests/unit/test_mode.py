@@ -129,11 +129,27 @@ def deleted_checked_recently(s3) -> None:
     s3.put_object(Bucket=BUCKET, Key="_state/direct.json", Body=json.dumps(state))
 
 
+def keys(s3) -> list[str]:
+    return [o["Key"] for o in s3.list_objects_v2(Bucket=BUCKET).get("Contents", [])]
+
+
+def audit_records(s3) -> list[dict]:
+    return [
+        json.loads(s3.get_object(Bucket=BUCKET, Key=k)["Body"].read())
+        for k in sorted(keys(s3))
+        if k.startswith("audit/direct/")
+    ]
+
+
 @pytest.mark.req("REQ-MODE-012")
 def test_direct_once_refuses_a_bucket_in_full_mode(direct_main, s3, capsys):
     assert direct_main(["once"]) == 2
     assert "in full mode, not direct" in capsys.readouterr().err
-    assert s3.list_objects_v2(Bucket=BUCKET)["KeyCount"] == 0
+    # Nothing written but the execution's audit record, which says why.
+    (record,) = audit_records(s3)
+    assert keys(s3) == [f"audit/direct/{record['started_at'][:10]}/{record['run_id']}.json"]
+    assert (record["status"], record["mode"]) == ("failed", "full")
+    assert "in full mode, not direct" in record["reason"]
 
 
 @pytest.mark.req("REQ-MODE-012")
@@ -185,10 +201,13 @@ def test_a_long_running_direct_process_is_told_when_a_handover_freezes_the_bucke
 def test_a_scheduled_round_skips_a_bucket_not_in_direct_mode(direct_main, s3, capsys, marker):
     if marker is not None:
         s3.put_object(Bucket=BUCKET, Key=mode.MODE_KEY, Body=marker.body())
-    before = s3.list_objects_v2(Bucket=BUCKET)["KeyCount"]
+    before = keys(s3)
     assert direct_main(["once", "--skip-unless-direct"]) == 0
     assert "direct: skipped: the bucket is in" in capsys.readouterr().out
-    assert s3.list_objects_v2(Bucket=BUCKET)["KeyCount"] == before
+    (record,) = audit_records(s3)  # the only object written
+    assert [k for k in keys(s3) if not k.startswith("audit/")] == before
+    assert record["status"] == "skipped" and record["parts"] == {}
+    assert record["mode"] == ("full" if marker is None else "direct, handing-over")
 
 
 @pytest.mark.req("REQ-MODE-014")
@@ -228,3 +247,77 @@ def test_missing_settings_still_fail_a_scheduled_round(direct_main, monkeypatch,
     monkeypatch.setattr("earth_hub.export.bucket.make_s3_client", missing)
     assert direct_main(["once", "--skip-unless-direct"]) == 2
     assert "set R2_BUCKET" in capsys.readouterr().err
+
+
+@pytest.mark.req("REQ-MODE-015")
+def test_each_execution_leaves_its_audit_record(direct_main, s3, monkeypatch, capsys):
+    """started_by, the mode, the command, the counts by part, the log's sequence numbers."""
+    for name in ("GITHUB_ACTIONS", "GITHUB_EVENT_NAME", "EARTH_HUB_STARTED_BY", "GITHUB_SHA"):
+        monkeypatch.delenv(name, raising=False)
+    start_direct(s3)
+    assert direct_main(["once", "--all"]) == 0
+    (record,) = audit_records(s3)
+    assert record["command"] == "python -m earth_hub.direct once --all"
+    assert (record["started_by"], record["mode"], record["status"]) == (
+        "local",
+        "direct",
+        "succeeded",
+    )
+    assert record["parts"]["feed"]["messages"] == 1
+    assert record["parts"]["feed"]["outcomes"] == {"applied": 1}
+    assert record["parts"]["feed"]["rows_written"] == 1 and record["parts"]["feed"]["rounds"] == 1
+    assert record["log_seq"] == {"first": 1, "last": 1}
+    assert record["finished_at"] >= record["started_at"] and record["elapsed_s"] >= 0
+    assert record["errors"] == [] and record["errata"] == [] and record["reason"] is None
+    assert record["github_run"] is None
+
+
+@pytest.mark.req("REQ-MODE-015")
+def test_a_scheduled_round_on_github_says_who_started_it(direct_main, s3, monkeypatch):
+    start_direct(s3)
+    deleted_checked_recently(s3)
+    monkeypatch.setenv("GITHUB_ACTIONS", "true")
+    monkeypatch.setenv("GITHUB_EVENT_NAME", "workflow_dispatch")
+    monkeypatch.setenv("EARTH_HUB_STARTED_BY", "cloudflare-trigger")
+    monkeypatch.setenv("GITHUB_REPOSITORY", "dienarvaez1/earth-hub")
+    monkeypatch.setenv("GITHUB_RUN_ID", "123")
+    monkeypatch.setenv("GITHUB_SHA", "abcdef0123")
+    assert direct_main(["once", "--skip-unless-direct"]) == 0
+    (record,) = audit_records(s3)
+    assert record["started_by"] == "cloudflare-trigger"
+    assert record["github_run"] == "https://github.com/dienarvaez1/earth-hub/actions/runs/123"
+    assert record["git_commit"] == "abcdef0"
+
+
+@pytest.mark.req("REQ-MODE-015")
+def test_a_failed_round_records_the_errors_logged(direct_main, s3, monkeypatch):
+    from earth_hub.ingestion.usgs_client import FeedUnavailable, UsgsClient
+
+    start_direct(s3)
+    deleted_checked_recently(s3)
+    fetch = UsgsClient.fetch
+
+    def day_feed_unavailable(self, *args, **kwargs):
+        if "all_month" in self.url:
+            return fetch(self, *args, **kwargs)
+        raise FeedUnavailable("USGS answered 503")
+
+    monkeypatch.setattr(UsgsClient, "fetch", day_feed_unavailable)
+    assert direct_main(["once"]) == 1
+    (record,) = audit_records(s3)
+    assert (record["status"], record["reason"]) == ("failed", "the poller round failed")
+    assert any("feed unavailable" in e and "503" in e for e in record["errors"])
+
+
+@pytest.mark.req("REQ-MODE-015")
+def test_a_crash_is_recorded_and_still_raised(direct_main, s3, monkeypatch):
+    start_direct(s3)
+
+    def broken(self):
+        raise RuntimeError("disk full")
+
+    monkeypatch.setattr("earth_hub.ingestion.poller.Poller.run_round", broken)
+    with pytest.raises(RuntimeError, match="disk full"):
+        direct_main(["once"])
+    (record,) = audit_records(s3)
+    assert (record["status"], record["reason"]) == ("failed", "RuntimeError: disk full")

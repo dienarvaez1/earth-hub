@@ -14,6 +14,9 @@ PostgreSQL, only R2 credentials. Runs only while the bucket's marker says `direc
 `--skip-unless-direct` (the schedule in .github/workflows/direct.yml): a bucket not in direct
 mode, before or during the run, is a skip (exit 0) rather than an error, so the schedule stays
 quiet while full mode or a handover has the bucket. Missing settings still fail.
+
+Each execution leaves an audit record in the bucket (audit.py): who started it, the mode,
+what its rounds did and how it ended. Only missing R2 settings leave none.
 """
 
 import argparse
@@ -23,6 +26,7 @@ import sys
 import threading
 from datetime import UTC, datetime, timedelta
 
+from earth_hub.direct import audit as audit_trail
 from earth_hub.direct.runner import BucketProgress, DirectPublisher, DirectRunner
 from earth_hub.export import mode
 
@@ -32,10 +36,6 @@ logger = logging.getLogger(__spec__.name)  # the module name, also under `python
 def main(argv: list[str] | None = None) -> int:
     from earth_hub.config import get_settings
     from earth_hub.export.bucket import Bucket, MissingSettings, make_s3_client
-    from earth_hub.ingestion.catchup import CatchUp
-    from earth_hub.ingestion.fdsn import FdsnClient
-    from earth_hub.ingestion.poller import Poller
-    from earth_hub.ingestion.usgs_client import UsgsClient, make_http_client
     from earth_hub.logging_config import configure_logging
 
     parser = argparse.ArgumentParser(description="Run direct mode: USGS straight to R2.")
@@ -55,19 +55,58 @@ def main(argv: list[str] | None = None) -> int:
     settings = get_settings()
     try:
         bucket = Bucket(make_s3_client(settings), settings.r2_bucket)
+    except MissingSettings as exc:
+        print(f"direct: {exc}", file=sys.stderr)
+        return 2
+    command = " ".join(["python -m earth_hub.direct", *(sys.argv[1:] if argv is None else argv)])
+    audit = audit_trail.Audit(
+        bucket,
+        command=command,
+        started_by=audit_trail.started_by(args.command),
+        github_run=audit_trail.github_run(),
+        git_commit=audit_trail.git_commit(),
+        heartbeat=audit_trail.HEARTBEAT if args.command == "run" else None,
+    )
+    try:
+        current = mode.read(bucket)
+        marker = (
+            current.mode if current.state == mode.ACTIVE else f"{current.mode}, {current.state}"
+        )
+    except Exception:
+        marker = None  # the run reports what went wrong
+    audit.start(marker)
+    root = logging.getLogger()
+    root.addHandler(audit)
+    try:
+        code, status, reason = _execute(args, settings, bucket, audit)
+    except BaseException as exc:
+        audit.finish("failed", f"{type(exc).__name__}: {exc}"[:500])
+        raise
+    finally:
+        root.removeHandler(audit)
+    audit.finish(status, reason)
+    return code
+
+
+def _execute(args, settings, bucket, audit) -> tuple[int, str, str | None]:
+    """Runs the command: its exit code, and the audit's status and reason."""
+    from earth_hub.ingestion.catchup import CatchUp
+    from earth_hub.ingestion.fdsn import FdsnClient
+    from earth_hub.ingestion.poller import Poller
+    from earth_hub.ingestion.usgs_client import UsgsClient, make_http_client
+
+    try:
         mode.require(bucket, mode.DIRECT)
     except mode.WrongMode as exc:
         if args.skip_unless_direct:
             print(f"direct: skipped: {exc}")
-            return 0
+            return 0, "skipped", str(exc)
         print(f"direct: {exc}", file=sys.stderr)
-        return 2
-    except MissingSettings as exc:
-        print(f"direct: {exc}", file=sys.stderr)
-        return 2
+        return 2, "failed", str(exc)
 
     stopping = threading.Event()
     runner = DirectRunner(bucket, workers=settings.export_workers)
+    runner.on_round = audit.round
     state = runner.sent_state()
     progress = BucketProgress(runner)
     with (
@@ -93,10 +132,11 @@ def main(argv: list[str] | None = None) -> int:
             result = poller.run_round()
             print(f"direct: poller {result.status}, {result.published} events processed")
             if stopping.is_set():  # a handover froze the bucket during the round
+                left = "the bucket left direct mode during the run"
                 if args.skip_unless_direct:
-                    print("direct: skipped: the bucket left direct mode during the run")
-                    return 0
-                return 1
+                    print(f"direct: skipped: {left}")
+                    return 0, "skipped", left
+                return 1, "failed", left
             now = datetime.now(UTC)
             for name, interval, job in (
                 ("catchup", settings.catchup_interval_seconds, catchup.catch_up),
@@ -105,7 +145,9 @@ def main(argv: list[str] | None = None) -> int:
                 last = progress.checkpoint(name)
                 if args.all or last is None or now - last >= timedelta(seconds=interval):
                     print(f"direct: {name}: {job()} events processed")
-            return 0 if result.status != "failed" else 1
+            if result.status == "failed":
+                return 1, "failed", "the poller round failed"
+            return 0, "succeeded", None
 
         def stop(*_):
             poller.stop_event.set()
@@ -119,7 +161,9 @@ def main(argv: list[str] | None = None) -> int:
         threading.Thread(target=lambda: (stopping.wait(), stop()), daemon=True).start()
         poller.run_forever()
         side.join(timeout=30)
-    return 0
+    if stopping.is_set():
+        return 0, "succeeded", "stopped: the bucket left direct mode"
+    return 0, "succeeded", None
 
 
 if __name__ == "__main__":

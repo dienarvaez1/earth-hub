@@ -1,4 +1,4 @@
-.PHONY: help install up down reset ingest ingest-once ingest-logs ingest-stop api api-dev api-stop kafka-ui kafka-ui-stop backfill catchup-once catchup-now reconcile-usgs consume reconcile reconcile-direct mode mode-direct mode-full direct-once direct-run export-r2 export-r2-runs r2-ls r2-count r2-get dashboard-install dashboard-build dashboard-dev dashboard-deploy trigger-token test-dashboard check-db-outage lint format test test-integration test-e2e test-disruptive test-performance load load-ui test-all regression flake-check traceability release smoke smoke-restart migrate coverage
+.PHONY: help install up down reset ingest ingest-once ingest-logs ingest-stop api api-dev api-stop kafka-ui kafka-ui-stop backfill catchup-once catchup-now reconcile-usgs consume reconcile reconcile-direct mode mode-direct mode-full direct-once direct-run direct-runs export-r2 export-r2-runs r2-ls r2-count r2-get dashboard-install dashboard-build dashboard-dev dashboard-deploy trigger-token test-dashboard check-db-outage lint format test test-integration test-e2e test-disruptive test-performance load load-ui test-all regression flake-check traceability release smoke smoke-restart migrate coverage
 
 help: ## List the available commands
 	@grep -E '^[a-z0-9-]+:.*## ' $(MAKEFILE_LIST) | awk -F ':.*## ' '{printf "  %-17s %s\n", $$1, $$2}'
@@ -129,6 +129,9 @@ direct-once: ## Direct mode: one poller round, and catch-up if due, straight to 
 
 direct-run: ## Direct mode: the poller and catch-up straight to R2, until stopped
 	uv run python -m earth_hub.direct run
+
+direct-runs: ## Direct mode's latest executions from its audit trail (read-only): make direct-runs [LIMIT=20]
+	uv run python -m earth_hub.direct.audit $(if $(LIMIT),--limit $(LIMIT))
 
 check-db-outage: ## Stop PostgreSQL mid-stream and check nothing is lost (disruptive)
 	uv run pytest tests/disruptive --run-disruptive -k database_outage
