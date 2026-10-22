@@ -27,9 +27,10 @@ function interval(bucket: string): "day" | "monday" | "month" {
   return bucket === "week" ? "monday" : bucket === "day" ? "day" : "month";
 }
 
-export type TimeStyle = "stacked" | "lines" | "trend";
+export type TimeStyle = "areas" | "stacked" | "lines" | "trend";
 
 const STYLE_LABELS: Record<TimeStyle, string> = {
+  areas: "stacked by magnitude level",
   stacked: "split by magnitude level",
   lines: "one line per magnitude level",
   trend: "per magnitude level, with each level's linear trend",
@@ -37,13 +38,16 @@ const STYLE_LABELS: Record<TimeStyle, string> = {
 
 export function overTime(figure: HTMLElement, rows: Row[], bucket: string, style: TimeStyle): void {
   const order = LEVELS.map((l) => l.label);
+  // The stacks, from the baseline up: the strongest level in front, Below 2.5 the farthest,
+  // and No magnitude (only with All) on top.
+  const stack = [...LEVELS.slice(0, 4).reverse(), ...LEVELS.slice(4)].map((l) => l.label);
   const point = (r: Row, l: (typeof LEVELS)[number]) => ({
     period: new Date(r.period as number),
     level: l.label,
     events: r[l.key] as number,
   });
-  // Stacked: one segment per period and level with events, bottom to top in LEVELS' order.
-  // Lines and trends: every period of each level that has events at all, zeros included.
+  // Columns: one segment per period and level with events. Areas, lines and trends: every
+  // period of each level that has events at all, zeros included.
   const shown = LEVELS.filter((l) => rows.some((r) => (r[l.key] as number) > 0));
   const data =
     style === "stacked"
@@ -51,8 +55,25 @@ export function overTime(figure: HTMLElement, rows: Row[], bucket: string, style
       : rows.flatMap((r) => shown.map((l) => point(r, l)));
   const xy = { x: "period", y: "events" };
   const marks: Record<TimeStyle, () => Plot.Markish[]> = {
+    areas: () => [
+      // The tip names the level once, as Magnitude (the series channel would repeat it).
+      Plot.areaY(data, {
+        ...xy,
+        fill: "level",
+        order: stack,
+        curve: "linear",
+        tip: { format: { z: false } },
+      }),
+      // A single period has no area to draw: a column stands for it.
+      Plot.rectY(rows.length === 1 ? data : [], {
+        ...xy,
+        fill: "level",
+        order: stack,
+        interval: interval(bucket),
+      }),
+    ],
     stacked: () => [
-      Plot.rectY(data, { ...xy, fill: "level", order, interval: interval(bucket), tip: true }),
+      Plot.rectY(data, { ...xy, fill: "level", order: stack, interval: interval(bucket), tip: true }),
     ],
     lines: () => [
       // The crosshair, in the text color so it follows the theme.

@@ -284,7 +284,7 @@ async function render(db: Db, map: EventMap): Promise<void> {
   fillRegions(regionOptions);
   showSummary(summary);
   await map.show(points);
-  const style = (new FormData(form).get("chart_style") ?? "stacked") as charts.TimeStyle;
+  const style = (new FormData(form).get("chart_style") ?? "areas") as charts.TimeStyle;
   charts.overTime($("#chart-time"), time, filter.time_bucket, style);
   charts.magnitudes($("#chart-magnitude"), bins);
   charts.depthAgainstMagnitude($("#chart-depth"), points);

@@ -87,6 +87,7 @@ def test_the_page_shows_the_snapshot(dash):
 
 def test_the_charts_are_drawn_from_the_results(dash):
     page = dash.page
+    dash.after_update(lambda: page.select_option("select[name=chart_style]", "stacked"))
     status = dash.after_update(lambda: page.select_option("select[name=time_bucket]", "day"))
     assert status["error"] is None
     # One segment per day and magnitude level with events: 6 events, 28 Feb to 10 Mar.
@@ -485,6 +486,7 @@ LEVELS = [
 @pytest.mark.parametrize("bucket", ["day", "month"])
 def test_time_bars_are_split_by_magnitude_level(dash, expected, bucket):
     page = dash.page
+    dash.after_update(lambda: page.select_option("select[name=chart_style]", "stacked"))
     dash.after_update(lambda: page.select_option("select[name=time_bucket]", bucket))
     expected.set_filter(
         event_type="earthquake", start_time=datetime(2021, 4, 2), time_bucket=bucket
@@ -686,7 +688,7 @@ def options(page, name):
 
 
 @pytest.mark.req("REQ-DASH-022")
-def test_events_over_time_as_lines_or_trendlines_in_the_legend_colors(dash, expected):
+def test_events_over_time_as_areas_lines_or_trendlines_in_the_legend_colors(dash, expected):
     page = dash.page
     expected.set_filter(event_type="earthquake", start_time=datetime(2021, 4, 2))
     rows = expected.query("over_time")
@@ -700,7 +702,16 @@ def test_events_over_time_as_lines_or_trendlines_in_the_legend_colors(dash, expe
             "ps => ps.map(p => p.getAttribute('stroke') ?? p.parentElement.getAttribute('stroke'))",
         )
 
-    assert page.input_value("select[name=chart_style]") == "stacked"
+    # Stacked areas by default: from the baseline up 4.5 to 6, 2.5 to 4.5, Below 2.5, then No
+    # magnitude, so each layer's top is at or above the one below it (6 and above: no events).
+    assert page.input_value("select[name=chart_style]") == "areas"
+    areas = page.eval_on_selector_all(
+        '#chart-time g[aria-label="area"] path',
+        "ps => ps.map(p => [p.getAttribute('fill'), p.getBBox().y])",
+    )
+    assert sorted(fill for fill, _ in areas) == sorted(colors)
+    top = dict(areas)  # SVG y grows downwards
+    assert top["#e31a1c"] > top["#fd8d3c"] > top["#fed976"] >= top["#a8a29e"]
     dash.after_update(lambda: page.select_option("select[name=chart_style]", "lines"))
     assert sorted(strokes("line")) == sorted(colors)  # one line per level
     assert page.query_selector('#chart-time g[aria-label="rect"]') is None
@@ -717,4 +728,4 @@ def test_events_over_time_as_lines_or_trendlines_in_the_legend_colors(dash, expe
     assert [label for _, label, _ in LEVELS] == [s for s in swatches if s]
     page.click("button[type=reset]")
     page.wait_for_function("window.__earthHub.summary.events === 0")
-    assert page.input_value("select[name=chart_style]") == "stacked"
+    assert page.input_value("select[name=chart_style]") == "areas"
