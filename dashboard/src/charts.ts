@@ -23,8 +23,15 @@ function draw(figure: HTMLElement, rows: Row[], chart: (width: number) => Elemen
 }
 
 // Plot's own interval names; ISO weeks start on Monday, like the SQL's.
-function interval(bucket: string): "day" | "monday" | "month" {
-  return bucket === "week" ? "monday" : bucket === "day" ? "day" : "month";
+function interval(bucket: string): "hour" | "day" | "monday" | "month" {
+  return bucket === "week" ? "monday" : bucket === "month" ? "month" : (bucket as "hour" | "day");
+}
+
+// Hours in UTC on the 24-hour clock, like the rest of the page; midnight shows the day.
+function hourTick(moment: Date): string {
+  const hour = moment.getUTCHours();
+  if (hour !== 0) return `${String(hour).padStart(2, "0")}:00`;
+  return moment.toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
 }
 
 export type TimeStyle = "areas" | "stacked" | "lines" | "trend";
@@ -97,7 +104,7 @@ export function overTime(figure: HTMLElement, rows: Row[], bucket: string, style
         width,
         height: 260,
         marginLeft: 50,
-        x: { type: "utc", label: null },
+        x: { type: "utc", label: null, ...(bucket === "hour" ? { tickFormat: hourTick } : {}) },
         y: { label: `Events per ${bucket}`, grid: true },
         color: {
           domain: order,

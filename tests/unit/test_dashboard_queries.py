@@ -68,6 +68,25 @@ def test_events_per_day_in_utc_with_empty_days(dash):
 
 
 @pytest.mark.req("REQ-DASH-002")
+def test_events_per_hour_in_utc_with_empty_hours(dash):
+    dash.set_filter(time_bucket="hour", start_time=at("2024-02-28"), end_time=at("2024-03-02"))
+    rows = dash.query("over_time")
+    hours = {r["period"].isoformat(sep=" ")[:16]: r["events"] for r in rows}
+    # 28 February 23:00 to 1 March 00:00, every hour listed: 1 + 24 + 1.
+    assert len(hours) == 26
+    assert list(hours)[0] == "2024-02-28 23:00" and list(hours)[-1] == "2024-03-01 00:00"
+    # 23:59:59.999 is still in 23:00; midnight starts its own hour.
+    assert {h: n for h, n in hours.items() if n} == {
+        "2024-02-28 23:00": 1,
+        "2024-02-29 00:00": 1,
+        "2024-02-29 12:00": 1,
+        "2024-03-01 00:00": 1,
+    }
+    assert [r["from_2_5"] for r in rows if r["events"]] == [0, 1, 0, 0]  # 2.5 at 00:00
+    assert [r["from_4_5"] for r in rows if r["events"]] == [0, 0, 1, 0]  # 4.5 at 12:00
+
+
+@pytest.mark.req("REQ-DASH-002")
 def test_events_per_iso_week_and_month(dash):
     dash.set_filter(time_bucket="week")
     weeks = [(r["period"].date().isoformat(), r["events"]) for r in dash.query("over_time")]

@@ -167,7 +167,7 @@ The dashboard's SQL lives in `dashboard/queries/`; the page runs it in the brows
 | ID | Requirement |
 | --- | --- |
 | REQ-DASH-001 | Filters select events by time (start inclusive, end exclusive, UTC), magnitude (minimum inclusive, maximum exclusive, like the legend's bands; a bound leaves out events without a magnitude), country and region (missing ones shown and selected as `Unknown`) and event type; deleted events are left out unless included; invalid filter values are rejected |
-| REQ-DASH-002 | Events are counted per day, ISO week (from Monday) or month in UTC, with the highest magnitude per period, from the first period with an event to the last, empty periods listed with 0 |
+| REQ-DASH-002 | Events are counted per hour, day, ISO week (from Monday) or month in UTC, with the highest magnitude per period, from the first period with an event to the last, empty periods listed with 0 |
 | REQ-DASH-003 | Magnitudes are counted in bins of 0.5 holding `bin_start <= magnitude < bin_end`, empty bins between the lowest and highest listed with 0, events without a magnitude left out |
 | REQ-DASH-004 | The top countries and regions are ranked by number of events, ties in alphabetical order, limited to the requested number |
 | REQ-DASH-005 | The summary (counts, highest magnitude and its place, first and last event, countries, deletions), the significant events (the latest, or the largest with equal magnitudes newest first) and the map points are computed from the filtered events; no events give empty results and a zero summary |

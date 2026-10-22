@@ -20,9 +20,9 @@ export type Period = keyof typeof PERIODS;
 export const DEFAULT_PERIOD: Period = "today";
 
 /** The chart's grouping each preset starts with; Custom keeps the current one. */
-export const BUCKET: Record<Exclude<Period, "custom">, "day" | "week" | "month"> = {
-  today: "day",
-  yesterday: "day",
+export const BUCKET: Record<Exclude<Period, "custom">, "hour" | "day" | "week" | "month"> = {
+  today: "hour",
+  yesterday: "hour",
   this_week: "day",
   last_week: "day",
   this_month: "day",

@@ -1,4 +1,4 @@
--- Events per day, week (ISO, from Monday) or month, in UTC, from the first period with an
+-- Events per hour, day, week (ISO, from Monday) or month, in UTC, from the first period with an
 -- event to the last; periods without events are listed with 0. Each period's events are also
 -- counted by magnitude level, the bands of the map's legend: below 2.5, 2.5 to 4.5, 4.5 to 6,
 -- 6 and above (each band includes its lower edge), and no magnitude; the levels add up to
@@ -21,6 +21,7 @@ periods AS (
         min(period),
         max(period),
         CASE (SELECT time_bucket FROM f)
+            WHEN 'hour' THEN INTERVAL 1 HOUR
             WHEN 'day' THEN INTERVAL 1 DAY
             WHEN 'week' THEN INTERVAL 7 DAY
             ELSE INTERVAL 1 MONTH

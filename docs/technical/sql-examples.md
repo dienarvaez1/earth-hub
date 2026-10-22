@@ -184,7 +184,7 @@ The page runs every report unchanged. All filters live in one `filter` table, se
 | `setup.sql` | Creates the `filter` table and the `events` and `filtered` views | |
 | `set_filter.sql` | Sets every filter at once (11 parameters, in order) | |
 | `summary.sql` | The headline numbers: events, strongest, first and last, countries, tsunami flags | yes |
-| `over_time.sql` | Events per day, ISO week or month, empty periods included, split by magnitude level | yes |
+| `over_time.sql` | Events per hour, day, ISO week or month, empty periods included, split by magnitude level | yes |
 | `magnitude_bins.sql` | Events per half-unit of magnitude, empty bins included | yes |
 | `map_points.sql` | One point per event, for the map and the depth chart | yes |
 | `top_countries.sql`, `top_regions.sql` | The `top_n` countries and regions by events | yes |

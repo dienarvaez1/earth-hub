@@ -14,7 +14,7 @@ CREATE OR REPLACE TABLE filter (
     region VARCHAR,
     event_type VARCHAR,
     include_deleted BOOLEAN NOT NULL,
-    time_bucket VARCHAR NOT NULL CHECK (time_bucket IN ('day', 'week', 'month')),
+    time_bucket VARCHAR NOT NULL CHECK (time_bucket IN ('hour', 'day', 'week', 'month')),
     top_n INTEGER NOT NULL CHECK (top_n > 0),
     significant_magnitude DOUBLE NOT NULL
 );

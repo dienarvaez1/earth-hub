@@ -44,6 +44,11 @@ def as_page(value):
         {"include_deleted": True, "time_bucket": "day"},
         {"time_bucket": "week", "top_n": 2},
         {"start_time": "2024-02-29 00:00:00", "end_time": "2024-03-01 00:00:00"},
+        {
+            "time_bucket": "hour",
+            "start_time": "2024-02-28 00:00:00",
+            "end_time": "2024-03-02 00:00:00",
+        },
         {"min_magnitude": 2.5, "max_magnitude": 5.0},
         {"country": "United States", "region": "Alaska"},
         {"country": "Unknown"},
@@ -297,7 +302,7 @@ def test_the_table_sorts_by_each_column_header(browser_page, large_server):
 @pytest.mark.parametrize(
     ("period", "events", "first", "bucket"),
     [
-        ("today", 1, "2024-03-10T23:00:00", "day"),  # the whole UTC day, 23:00 included
+        ("today", 1, "2024-03-10T23:00:00", "hour"),  # the whole UTC day, 23:00 included
         ("this_week", 2, "2024-03-04T06:00:00", "day"),  # from Monday
         ("this_month", 3, "2024-03-01T00:00:00", "day"),
         ("last_3_months", 6, "2024-02-28T23:59:59.999", "week"),  # from 10 December
@@ -328,7 +333,7 @@ LAST_OF_28 = "2024-02-28T23:59:59.999"
     ("period", "now", "events", "first", "last", "bucket"),
     [
         # 29 February: not event 1 (the day before) nor 4 (1 March, 00:00).
-        ("yesterday", "2024-03-01T12:00", 2, "2024-02-29T00:00:00", "2024-02-29T12:00:00", "day"),
+        ("yesterday", "2024-03-01T12:00", 2, "2024-02-29T00:00:00", "2024-02-29T12:00:00", "hour"),
         # From Wednesday 6 March: Monday 26 February to Sunday 3 March, not 5 (Monday 4 March).
         ("last_week", "2024-03-06T12:00", 4, LAST_OF_28, "2024-03-01T00:00:00", "day"),
         # February of a leap year, through the 29th, not 4 (1 March, 00:00).
@@ -359,7 +364,7 @@ def test_today_is_the_default(browser_page, server):
     page = browser_page.page
     assert page.input_value("select[name=period]") == "today"
     assert browser_page.status()["summary"]["events"] == 2  # events 2 and 3
-    assert page.input_value("select[name=time_bucket]") == "day"
+    assert page.input_value("select[name=time_bucket]") == "hour"
 
 
 @pytest.mark.req("REQ-DASH-010")
