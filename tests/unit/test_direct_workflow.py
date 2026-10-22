@@ -1,6 +1,8 @@
 """Direct mode on a schedule (.github/workflows/direct.yml, docs/technical/ci.md)."""
 
+import json
 import re
+import sys
 from pathlib import Path
 
 import pytest
@@ -11,8 +13,12 @@ from earth_hub.config import Settings
 REPO = Path(__file__).resolve().parents[2]
 WORKFLOWS = REPO / ".github" / "workflows"
 WORKFLOW = WORKFLOWS / "direct.yml"
-ROUND_CRON = "2,17,32,47 * * * *"  # every 15 minutes, off the top of the hour
+ROUND_CRON = "17 * * * *"  # the dashboard Worker's trigger: every hour, off the top of it
 RECONCILE_CRON = "41 5 * * *"
+
+sys.path.insert(0, str(REPO / "scripts"))
+from dashboard_config import render  # noqa: E402
+
 R2_SETTINGS = {"R2_ACCOUNT_ID", "R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY", "R2_BUCKET"}
 
 
@@ -29,22 +35,42 @@ def run_lines(job: dict) -> str:
 def test_it_runs_only_on_its_schedule_or_by_hand(workflow):
     triggers = workflow[True]  # YAML 1.1 reads the key `on` as true
     assert set(triggers) == {"schedule", "workflow_dispatch"}  # never branch code
-    assert [entry["cron"] for entry in triggers["schedule"]] == [ROUND_CRON, RECONCILE_CRON]
-    assert triggers["workflow_dispatch"]["inputs"]["job"]["options"] == ["round", "reconcile"]
+    # Only the reconcile is GitHub's to schedule: the rounds come from the Worker (DEF-052).
+    assert [entry["cron"] for entry in triggers["schedule"]] == [RECONCILE_CRON]
+    job = triggers["workflow_dispatch"]["inputs"]["job"]
+    assert job["options"] == ["round", "reconcile"] and job["default"] == "round"
 
 
 @pytest.mark.req("REQ-CI-005")
-def test_each_job_runs_on_its_own_schedule_with_the_skip_flag(workflow):
+def test_each_job_runs_when_asked_with_the_skip_flag(workflow):
     jobs = workflow["jobs"]
     assert set(jobs) == {"round", "reconcile"}
-    for name, cron, command in (
-        ("round", ROUND_CRON, "python -m earth_hub.direct once --skip-unless-direct"),
-        ("reconcile", RECONCILE_CRON, "python -m earth_hub.direct.reconcile --skip-unless-direct"),
+    assert jobs["round"]["if"] == "inputs.job == 'round'"  # the trigger's dispatch, or by hand
+    assert jobs["reconcile"]["if"] == (
+        f"github.event.schedule == '{RECONCILE_CRON}' || inputs.job == 'reconcile'"
+    )
+    for name, command in (
+        ("round", "python -m earth_hub.direct once --skip-unless-direct"),
+        ("reconcile", "python -m earth_hub.direct.reconcile --skip-unless-direct"),
     ):
-        job = jobs[name]
-        assert job["if"] == f"github.event.schedule == '{cron}' || inputs.job == '{name}'"
-        assert command in run_lines(job)
-        assert "set -o pipefail" in run_lines(job)  # tee must not hide a failure
+        assert command in run_lines(jobs[name])
+        assert "set -o pipefail" in run_lines(jobs[name])  # tee must not hide a failure
+
+
+@pytest.mark.req("REQ-CI-006")
+def test_the_worker_triggers_a_round_every_hour():
+    text = render("earth-hub-test")
+    lines = [line for line in text.splitlines() if not line.strip().startswith("//")]
+    config = json.loads("\n".join(lines))  # the template's comments are whole lines
+    assert config["triggers"] == {"crons": [ROUND_CRON]}
+    assert config["vars"] == {
+        "GITHUB_API": "https://api.github.com",
+        "GITHUB_REPO": "dienarvaez1/earth-hub",
+    }
+    assert "GITHUB_TOKEN" not in json.dumps(config)  # a secret, never in the configuration
+    source = (REPO / "dashboard" / "src" / "worker.ts").read_text()
+    assert 'const WORKFLOW = "direct.yml";' in source
+    assert 'const DISPATCH = { ref: "main", inputs: { job: "round" } };' in source
 
 
 @pytest.mark.req("REQ-REC-003")

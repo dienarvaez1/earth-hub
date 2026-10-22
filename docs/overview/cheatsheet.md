@@ -169,7 +169,7 @@ Only while `make mode` says `full`. These write PostgreSQL, or the bucket throug
 
 ### Direct mode: no machine needed
 
-Only while `make mode` says `direct`. The 15-minute schedule does this by itself; the rest is for running or checking it by hand.
+Only while `make mode` says `direct`. The hourly rounds (a Cloudflare cron trigger starting `direct.yml`) do this by itself; the rest is for running or checking it by hand.
 
 | Skill | Command | What it does |
 | --- | --- | --- |

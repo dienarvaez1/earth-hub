@@ -8,8 +8,9 @@ argument-hint: "[status | direct | full | usgs [DAYS] | catchup | once | run | r
 
 Run from the repository root. One marker in the bucket, `_state/mode.json`, says which mode writes it
 (docs/technical/architecture.md#switching-modes). Full mode: poller → Kafka → consumer → PostgreSQL → API →
-`make export-r2`. Direct mode: poller → validate → R2, with the 15-minute workflow `.github/workflows/direct.yml`
-(docs/technical/ci.md#direct-mode-on-a-schedule) keeping the dashboard current while no machine runs.
+`make export-r2`. Direct mode: poller → validate → R2, with the workflow `.github/workflows/direct.yml`
+(docs/technical/ci.md#direct-mode-on-a-schedule), its rounds started every hour by the dashboard Worker's
+cron trigger, keeping the dashboard current while no machine runs.
 
 | Argument | Command | Writes |
 | --- | --- | --- |

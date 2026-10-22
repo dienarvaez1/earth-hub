@@ -76,13 +76,14 @@ class LocalDashboard:
         self.put("analytics/earthquakes.parquet", parquet, "application/vnd.apache.parquet")
         self.put("analytics/meta.json", meta_path, "application/json")
 
-    def start(self) -> None:
+    def start(self, *options: str) -> None:
+        """`options`: more for `wrangler dev`, e.g. `--test-scheduled` or `--var NAME:value`."""
         self.process = subprocess.Popen(
             [
                 "npx", "--no-install", "wrangler", "dev", "-c", str(self.config),
                 "--local", "--persist-to", str(self.state),
                 "--ip", "127.0.0.1", "--port", str(self.port),
-                "--show-interactive-dev-session=false",
+                "--show-interactive-dev-session=false", *options,
             ],
             cwd=DASHBOARD,
             env=ENV,

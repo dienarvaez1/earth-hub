@@ -1,7 +1,9 @@
 # Direct mode on a schedule (docs/technical/ci.md#direct-mode-on-a-schedule): USGS straight to
 # R2 with no machine of ours running.
 #
-# round      every 15 minutes: one poller round, and catch-up if due (make direct-once)
+# round      every hour, started by the dashboard Worker's cron trigger (dashboard/src/worker.ts:
+#            GitHub's own schedule fired late or not at all, DEF-052), or by hand: one poller
+#            round, and catch-up if due (make direct-once)
 # reconcile  every day: direct mode's bucket invariants (make reconcile-direct), then the bucket
 #            against USGS (make reconcile-usgs), failing if no round has written for 2 hours:
 #            the alarm for a schedule GitHub stopped running (a failed run e-mails). Read-only.
@@ -19,8 +21,7 @@ name: Direct mode
 
 on:
   schedule:
-    - cron: "2,17,32,47 * * * *" # round, off the busy top of the hour
-    - cron: "41 5 * * *" # reconcile
+    - cron: "41 5 * * *" # reconcile; rounds come from the Worker's trigger
   workflow_dispatch:
     inputs:
       job:
@@ -48,7 +49,7 @@ env:
 jobs:
   round:
     name: Direct round
-    if: github.event.schedule == '2,17,32,47 * * * *' || inputs.job == 'round'
+    if: inputs.job == 'round'
     environment: r2
     runs-on: ubuntu-24.04
     timeout-minutes: 20

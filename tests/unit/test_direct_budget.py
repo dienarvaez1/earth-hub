@@ -109,16 +109,22 @@ def test_direct_mode_stays_well_inside_the_free_operations(
 
 @pytest.mark.req("REQ-MODE-007")
 def test_the_schedule_makes_fewer_rounds_than_the_load_measured_above():
-    """.github/workflows/direct.yml: a feed round every 15 minutes and catch-up about every
-    hour, so its operations are within what the test above allows."""
+    """The dashboard Worker's trigger (dashboard/wrangler.template.jsonc) starts a feed round
+    every hour, and catch-up runs about every hour, so their operations are within what the
+    test above allows; so would a round every 15 minutes."""
+    import json
+    import sys
     from pathlib import Path
 
-    import yaml
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
+    from dashboard_config import render
 
-    workflow = Path(__file__).resolve().parents[2] / ".github" / "workflows" / "direct.yml"
-    crons = [entry["cron"] for entry in yaml.safe_load(workflow.read_text())[True]["schedule"]]
-    minutes, *rest = crons[0].split()
+    lines = [
+        line for line in render("earth-hub-test").splitlines() if not line.strip().startswith("//")
+    ]
+    (cron,) = json.loads("\n".join(lines))["triggers"]["crons"]
+    minutes, *rest = cron.split()
     assert rest == ["*"] * 4  # the same minutes every hour
     rounds_per_day = 24 * len(minutes.split(","))
-    assert rounds_per_day == 96 and rounds_per_day <= FEED_ROUNDS_PER_DAY
+    assert rounds_per_day == 24 and 96 <= FEED_ROUNDS_PER_DAY
     assert 24 <= CATCHUP_PASSES_PER_DAY  # catch-up is due about hourly (CATCHUP_INTERVAL_SECONDS)

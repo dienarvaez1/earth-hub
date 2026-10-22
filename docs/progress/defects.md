@@ -70,6 +70,7 @@ Priority is how urgently it had to be fixed: **P1** before anything else, **P2**
 | DEF-047 | 8 | Medium | Reading the handover while recovering from DEF-046 | After a failed check, the next `make mode-full` took a new `replay_from` (the topic's end), so it did not see the entries the failed attempt had sent and would have sent all of them again, adding a duplicate `raw_events` row for each. An attempt now keeps a `replay_from` left by an earlier one; an end-to-end test retries after a failed check and finds nothing sent twice | #30 |
 | DEF-048 | 8 | Medium | Watching the first export of the 2025 backfill (about 2 hours) | The exporter took the bucket's lock for 2 hours and never renewed it, so an export lasting longer left the lock to expire mid-run: a second export could then take it and both would write the bucket at once. The lock is now taken for 30 minutes and renewed every 5 while the run lasts, and a run that finds its lock taken over stops before writing more; tests run an export past any lock time and take its lock over midway | #30 |
 | DEF-051 | 8 | Low | Running `/eh-status` and `/eh-kafka` on the backfill consumer group | The consumer's summary line reported 87,021 messages of lag on `earthquakes.backfill[2]` for a day while the broker reported 0. A partition the consumer has read nothing from since assignment has no position, and the lag fell back to the partition's first offset, so an idle partition counted as wholly unread. It now falls back to the group's committed offset, and to the first offset only when nothing was committed; the lag test has a partition of each kind | #38 |
+| DEF-052 | 8 | Medium | Checking the bucket's freshness with `/eh-status` | GitHub's schedule did not keep time: while the repository was private, the hourly direct rounds ran about one slot in five, and on 21–22 October none ran for over 8 hours, the 15-minute schedule merged in #38 included, so the dashboard went stale while every run started by hand succeeded. The rounds are now started every hour by the dashboard Worker's Cloudflare cron trigger, which asks GitHub to run the workflow; the daily reconcile stays on GitHub's schedule as the alarm. The trigger is tested under `wrangler dev --test-scheduled` against a local stand-in for GitHub | — |
 
 ## By how they were found
 
@@ -77,13 +78,13 @@ Priority is how urgently it had to be fixed: **P1** before anything else, **P2**
 | --- | --- |
 | Property-based contract testing (Schemathesis) | 6: DEF-013 to DEF-018 |
 | Code and design review | 10: DEF-003, DEF-005, DEF-009, DEF-010, DEF-035, DEF-037, DEF-038, DEF-039, DEF-045, DEF-047 |
-| Running against the live service | 14: DEF-021, DEF-023, DEF-026, DEF-027, DEF-030, DEF-034, DEF-036, DEF-042, DEF-043, DEF-044, DEF-046, DEF-048, DEF-049, DEF-051 |
+| Running against the live service | 15: DEF-021, DEF-023, DEF-026, DEF-027, DEF-030, DEF-034, DEF-036, DEF-042, DEF-043, DEF-044, DEF-046, DEF-048, DEF-049, DEF-051, DEF-052 |
 | Ordinary test runs | 13: DEF-002, DEF-011, DEF-012, DEF-022, DEF-024, DEF-028, DEF-029, DEF-031, DEF-032, DEF-033, DEF-040, DEF-041, DEF-050 |
 | Running tests repeatedly, or all together | 3: DEF-004, DEF-006, DEF-019 |
 | Fault injection (stopping services) | 2: DEF-001, DEF-020 |
 | Checking the test tooling itself | 3: DEF-007, DEF-008, DEF-025 |
 
-Four of the 51 only ever showed up **intermittently** (DEF-004, DEF-017, DEF-019, DEF-050), and five were **defects in test tooling** that made results untrustworthy (DEF-007, DEF-008, DEF-025, DEF-028, DEF-029). Both groups are why the regression suite includes `make flake-check` and why test scripts are themselves checked.
+Four of the 52 only ever showed up **intermittently** (DEF-004, DEF-017, DEF-019, DEF-050), and five were **defects in test tooling** that made results untrustworthy (DEF-007, DEF-008, DEF-025, DEF-028, DEF-029). Both groups are why the regression suite includes `make flake-check` and why test scripts are themselves checked.
 
 ## Template
 

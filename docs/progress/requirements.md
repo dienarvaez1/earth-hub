@@ -245,7 +245,8 @@ The scenarios from Milestone 5 of the plan, verified through the API on the whol
 | REQ-CI-002 | Each run keeps its reports (JUnit, coverage, traceability matrix, regression summary) as artifacts for 30 days and shows the regression summary on the run's page |
 | REQ-CI-003 | A layer left out with `regression.py --skip` is reported as skipped and does not fail the run; requirements covered only by its tests are listed as not run; any layer that runs and fails, or a requirement left without a passing test otherwise, still fails it |
 | REQ-CI-004 | The workflow's actions are pinned to commit SHAs and its token can only read the repository |
-| REQ-CI-005 | A second workflow runs direct mode every 15 minutes and its reconciliation every day, only from `main`'s schedule or by hand: one run at a time, never cancelled, catch-up intervals shorter than the schedule, actions pinned to commit SHAs, a read-only token, and R2 credentials from an `r2` environment, given only to the step that runs the command; no other workflow uses secrets |
+| REQ-CI-005 | A second workflow runs direct mode's rounds when asked (by the dashboard Worker's trigger, REQ-CI-006, or by hand) and its reconciliation every day on `main`'s schedule or by hand: one run at a time, never cancelled, catch-up intervals shorter than the schedule, actions pinned to commit SHAs, a read-only token, and R2 credentials from an `r2` environment, given only to the step that runs the command; no other workflow uses secrets |
+| REQ-CI-006 | The dashboard Worker's cron trigger starts one direct round every hour (at :17) by asking GitHub to run `direct.yml`'s round on `main`, with a token kept as a Worker secret, never in the configuration; without a token it asks nothing, and a refusal fails the trigger (DEF-052) |
 
 ## Documentation
 
