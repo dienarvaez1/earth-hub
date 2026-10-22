@@ -92,7 +92,6 @@ def test_the_page_shows_the_snapshot(dash):
 
 def test_the_charts_are_drawn_from_the_results(dash):
     page = dash.page
-    dash.after_update(lambda: page.select_option("select[name=chart_style]", "stacked"))
     status = dash.after_update(lambda: page.select_option("select[name=time_bucket]", "day"))
     assert status["error"] is None
     # One segment per day and magnitude level with events: 6 events, 28 Feb to 10 Mar.
@@ -118,7 +117,7 @@ def test_the_form_filters_the_page(dash):
     regions = page.eval_on_selector_all("select[name=region] option", "os => os.map(o => o.value)")
     assert regions == ["", "Baja California"]
 
-    page.click("button[type=reset]")  # back to Today, 2 April: only event 8, a quarry blast
+    page.click("button[type=reset]")  # back to This week, 1-2 April: only 8, a quarry blast
     page.wait_for_function("window.__earthHub.summary.events === 0")
     dash.after_update(lambda: page.select_option("select[name=period]", "last_3_years"))
 
@@ -303,7 +302,7 @@ def test_the_table_sorts_by_each_column_header(browser_page, large_server):
     ("period", "events", "first", "bucket"),
     [
         ("today", 1, "2024-03-10T23:00:00", "hour"),  # the whole UTC day, 23:00 included
-        ("this_week", 2, "2024-03-04T06:00:00", "day"),  # from Monday
+        ("this_week", 2, "2024-03-04T06:00:00", "hour"),  # from Monday
         ("this_month", 3, "2024-03-01T00:00:00", "day"),
         ("last_3_months", 6, "2024-02-28T23:59:59.999", "week"),  # from 10 December
         ("this_year", 6, "2024-02-28T23:59:59.999", "week"),
@@ -313,7 +312,7 @@ def test_the_table_sorts_by_each_column_header(browser_page, large_server):
 def test_each_preset_selects_its_days(browser_page, server, period, events, first, bucket):
     browser_page.open(server.url, now="2024-03-10T12:00:00+00:00")
     page = browser_page.page
-    if period != "today":
+    if period != "this_week":  # the default
         browser_page.after_update(lambda: page.select_option("select[name=period]", period))
     summary = browser_page.status()["summary"]
     assert summary["events"] == events
@@ -359,12 +358,15 @@ def test_the_previous_periods_end_before_today(
 
 
 @pytest.mark.req("REQ-DASH-010")
-def test_today_is_the_default(browser_page, server):
+def test_this_week_is_the_default(browser_page, server):
     browser_page.open(server.url, now="2024-02-29T08:00:00+00:00")
     page = browser_page.page
-    assert page.input_value("select[name=period]") == "today"
-    assert browser_page.status()["summary"]["events"] == 2  # events 2 and 3
+    assert page.input_value("select[name=period]") == "this_week"
+    # From Monday 26 February: events 1, 2 and 3.
+    assert browser_page.status()["summary"]["events"] == 3
     assert page.input_value("select[name=time_bucket]") == "hour"
+    assert page.input_value("select[name=chart_style]") == "stacked"
+    assert page.input_value("select[name=magnitude]") == ""
 
 
 @pytest.mark.req("REQ-DASH-010")
@@ -399,7 +401,7 @@ def test_earthquakes_are_the_default_type(dash):
     dash.after_update(lambda: page.select_option("select[name=event_type]", "quarry blast"))
     assert dash.status()["summary"]["events"] == 1
     page.click("button[type=reset]")
-    page.wait_for_function("window.__earthHub.summary.events === 0")  # Today, 2 April
+    page.wait_for_function("window.__earthHub.summary.events === 0")  # This week, 1-2 April
     assert page.input_value("select[name=event_type]") == "earthquake"
 
 
@@ -491,7 +493,6 @@ LEVELS = [
 @pytest.mark.parametrize("bucket", ["day", "month"])
 def test_time_bars_are_split_by_magnitude_level(dash, expected, bucket):
     page = dash.page
-    dash.after_update(lambda: page.select_option("select[name=chart_style]", "stacked"))
     dash.after_update(lambda: page.select_option("select[name=time_bucket]", bucket))
     expected.set_filter(
         event_type="earthquake", start_time=datetime(2021, 4, 2), time_bucket=bucket
@@ -542,47 +543,29 @@ def test_the_magnitude_bands_are_the_legends(dash):
     )
     assert options == [
         ["", "All"],
-        ["2.5:", "2.5 and above"],
         [":2.5", "Below 2.5"],
         ["2.5:4.5", "2.5 to 4.5"],
         ["4.5:6", "4.5 to 6"],
         ["6:", "6 and above"],
     ]
-    bands = options[2:]
-    assert [label for _, label in bands] == [label for _, label, _ in LEVELS[:4]]
+    assert [label for _, label in options[1:]] == [label for _, label, _ in LEVELS[:4]]
     assert [b for _, _, b in LEVELS[:4]] == [c for _, c in STOPS]  # the legend's colors
+    assert page.input_value("select[name=magnitude]") == ""  # All by default
 
     def events():
         return dash.status()["summary"]["events"]
 
-    everything = events()  # the fixture picks All
+    everything = events()
     counts = {}
     for value, _ in options[1:]:
         dash.after_update(lambda value=value: page.select_option("select[name=magnitude]", value))
         counts[value] = events()
     # Each band includes its lower edge: 2.49 and -0.43; 2.5; 4.5 and 5.2; none.
-    assert counts == {"2.5:": 3, ":2.5": 2, "2.5:4.5": 1, "4.5:6": 2, "6:": 0}
-    assert counts["2.5:"] == counts["2.5:4.5"] + counts["4.5:6"] + counts["6:"]
-    # All also keeps the one without a magnitude.
-    assert everything == sum(counts[value] for value, _ in bands) + 1
-
-
-@pytest.mark.req("REQ-DASH-020")
-def test_the_page_starts_on_magnitude_2_5_and_above(browser_page, server):
-    browser_page.open(
-        server.url, now="2024-04-02T12:00:00+00:00", period="last_3_years", magnitude=None
-    )
-    page = browser_page.page
-    assert page.input_value("select[name=magnitude]") == "2.5:"
-    # 2.5, 4.5 and 5.2: the earthquakes below 2.5 and the one without a magnitude are left out.
-    assert browser_page.status()["summary"]["events"] == 3
-    assert browser_page.status()["mapFeatures"] == 3
-    browser_page.after_update(lambda: page.select_option("select[name=magnitude]", ""))
-    assert browser_page.status()["summary"]["events"] == 6
+    assert counts == {":2.5": 2, "2.5:4.5": 1, "4.5:6": 2, "6:": 0}
+    assert everything == sum(counts.values()) + 1  # All also keeps the one without a magnitude
     page.click("button[type=reset]")
     page.wait_for_function("window.__earthHub.summary.events === 0")
-    assert page.input_value("select[name=magnitude]") == "2.5:"
-    assert browser_page.errors == [] and browser_page.blocked == []
+    assert page.input_value("select[name=magnitude]") == ""
 
 
 @pytest.mark.req("REQ-DASH-020")
@@ -707,9 +690,11 @@ def test_events_over_time_as_areas_lines_or_trendlines_in_the_legend_colors(dash
             "ps => ps.map(p => p.getAttribute('stroke') ?? p.parentElement.getAttribute('stroke'))",
         )
 
-    # Stacked areas by default: from the baseline up 4.5 to 6, 2.5 to 4.5, Below 2.5, then No
-    # magnitude, so each layer's top is at or above the one below it (6 and above: no events).
-    assert page.input_value("select[name=chart_style]") == "areas"
+    # Stacked columns by default. Stacked areas: from the baseline up 4.5 to 6, 2.5 to 4.5,
+    # Below 2.5, then No magnitude, so each layer's top is at or above the one below it (6 and
+    # above: no events).
+    assert page.input_value("select[name=chart_style]") == "stacked"
+    dash.after_update(lambda: page.select_option("select[name=chart_style]", "areas"))
     areas = page.eval_on_selector_all(
         '#chart-time g[aria-label="area"] path',
         "ps => ps.map(p => [p.getAttribute('fill'), p.getBBox().y])",
@@ -733,4 +718,4 @@ def test_events_over_time_as_areas_lines_or_trendlines_in_the_legend_colors(dash
     assert [label for _, label, _ in LEVELS] == [s for s in swatches if s]
     page.click("button[type=reset]")
     page.wait_for_function("window.__earthHub.summary.events === 0")
-    assert page.input_value("select[name=chart_style]") == "areas"
+    assert page.input_value("select[name=chart_style]") == "stacked"

@@ -93,17 +93,8 @@ class Browser:
         page.on("pageerror", lambda e: self.errors.append(str(e)))
         self.blocked = route_offline(page)
 
-    def open(
-        self,
-        url: str,
-        *,
-        now: str | None = None,
-        period: str | None = None,
-        magnitude: str | None = "",
-    ) -> None:
-        """Open the page; `now` fixes its clock (UTC, ISO 8601), `period` picks a preset and
-        `magnitude` a band: All by default, since the test datasets are mostly small events
-        (the page starts on 2.5 and above); None keeps the page's own."""
+    def open(self, url: str, *, now: str | None = None, period: str | None = None) -> None:
+        """Open the page; `now` fixes its clock (UTC, ISO 8601), `period` picks a preset."""
         if now is not None:
             self.page.clock.set_fixed_time(datetime.fromisoformat(now))
         self.page.goto(url)
@@ -111,13 +102,8 @@ class Browser:
             "window.__earthHub && (window.__earthHub.ready || window.__earthHub.error)",
             timeout=60_000,
         )
-        if self.status()["error"] is not None:
-            return
-        if period is not None:
+        if period is not None and self.status()["error"] is None:
             self.after_update(lambda: self.page.select_option("select[name=period]", period))
-        band = "select[name=magnitude]"
-        if magnitude is not None and self.page.input_value(band) != magnitude:
-            self.after_update(lambda: self.page.select_option(band, magnitude))
 
     def status(self) -> dict:
         return self.page.evaluate("window.__earthHub")

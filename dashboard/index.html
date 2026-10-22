@@ -28,9 +28,9 @@
           <legend>Time (UTC)</legend>
           <label>Period
             <select name="period">
-              <option value="today" selected>Today</option>
+              <option value="today">Today</option>
               <option value="yesterday">Yesterday</option>
-              <option value="this_week">This week</option>
+              <option value="this_week" selected>This week</option>
               <option value="last_week">Last week</option>
               <option value="this_month">This month</option>
               <option value="last_month">Last month</option>
@@ -47,13 +47,10 @@
         <fieldset>
           <legend>Magnitude</legend>
           <!-- The bands of the map's legend, as "min:max": min inclusive, max exclusive, an
-               empty side no limit. A band leaves out events without a magnitude; All keeps them.
-               2.5 and above is the default, as on USGS's map: below it, counts follow how
-               dense the seismic networks are more than how many earthquakes there are. -->
+               empty side no limit. A band leaves out events without a magnitude; All keeps them. -->
           <label>Band
             <select name="magnitude">
-              <option value="">All</option>
-              <option value="2.5:" selected>2.5 and above</option>
+              <option value="" selected>All</option>
               <option value=":2.5">Below 2.5</option>
               <option value="2.5:4.5">2.5 to 4.5</option>
               <option value="4.5:6">4.5 to 6</option>
@@ -91,8 +88,8 @@
           <div class="panel-controls">
             <label>Style
               <select name="chart_style" form="filters">
-                <option value="areas" selected>Stacked areas</option>
-                <option value="stacked">Stacked columns</option>
+                <option value="stacked" selected>Stacked columns</option>
+                <option value="areas">Stacked areas</option>
                 <option value="lines">Lines</option>
                 <option value="trend">Trendlines</option>
               </select>

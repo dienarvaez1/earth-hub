@@ -17,13 +17,13 @@ export const PERIODS = {
 } as const;
 
 export type Period = keyof typeof PERIODS;
-export const DEFAULT_PERIOD: Period = "today";
+export const DEFAULT_PERIOD: Period = "this_week";
 
 /** The chart's grouping each preset starts with; Custom keeps the current one. */
 export const BUCKET: Record<Exclude<Period, "custom">, "hour" | "day" | "week" | "month"> = {
   today: "hour",
   yesterday: "hour",
-  this_week: "day",
+  this_week: "hour",
   last_week: "day",
   this_month: "day",
   last_month: "day",
