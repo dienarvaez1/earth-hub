@@ -180,6 +180,13 @@ def test_an_event_is_looked_up_by_any_of_its_ids_deletions_included(feature_temp
     assert lookup("nope") is None
 
 
+@pytest.mark.req("REQ-DQ-PROP-002")
+def test_an_upper_case_deletion_at_usgs_is_a_deletion(feature_template):
+    """DEF-049: the Pacific Tsunami Warning Center writes its statuses in upper case."""
+    gone = event_at(feature_template, "pt1", NOW, status="DELETED")
+    assert u.from_feature(gone).deleted
+
+
 # --- the command, in direct mode -------------------------------------------------------------
 
 

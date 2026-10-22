@@ -30,7 +30,7 @@ The poller does not apply these rules. It publishes every feature it can route (
 | `TIME-003` | `updated` is representable and not earlier than the event time | `updated` 1 ms before `time` |
 | `MAG-001` | If present, magnitude is a number between −2 and 10.5 | `11.0`, `"4.5"` |
 | `PROP-001` | `type` is a non-empty string | missing `type` |
-| `PROP-002` | `status` is `automatic`, `reviewed` or `deleted` | `"manual"` |
+| `PROP-002` | `status` is `automatic`, `reviewed` or `deleted`, in any letter case; it is stored in lower case (DEF-049) | `"manual"` |
 | `PROP-003` | Optional fields have the right type when present: `felt` and `sig` integers; `cdi` and `mmi` finite numbers; `tsunami` 0 or 1; `magType`, `place`, `alert`, `net`, `url` and `title` strings | `"felt": "3"` |
 
 ## Deliberately accepted

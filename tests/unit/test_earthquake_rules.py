@@ -255,10 +255,30 @@ def test_missing_type_is_prop_001(envelope, value):
 
 
 @pytest.mark.req("REQ-DQ-PROP-002")
-@pytest.mark.parametrize("status", [None, "manual", "REVIEWED"])
+@pytest.mark.parametrize("status", [None, "manual", "", 3])
 def test_unknown_status_is_prop_002(envelope, status):
     envelope["payload"]["properties"]["status"] = status
     assert rejected_rules(envelope) == ["PROP-002"]
+
+
+@pytest.mark.req("REQ-DQ-PROP-002")
+@pytest.mark.parametrize(
+    ("status", "stored"),
+    [("REVIEWED", "reviewed"), ("Automatic", "automatic"), ("DELETED", "deleted")],
+)
+def test_status_in_any_case_is_stored_in_lower_case(envelope, status, stored):
+    """pt26293000 said `REVIEWED` and was rejected (DEF-049)."""
+    envelope["payload"]["properties"]["status"] = status
+    event = validate(envelope, now=NOW)
+    assert event.fields["review_status"] == stored
+    assert event.deleted == (stored == "deleted")
+
+
+@pytest.mark.req("REQ-DQ-PROP-002")
+def test_an_upper_case_deletion_is_a_deletion_for_its_placeholders(envelope):
+    props = envelope["payload"]["properties"]
+    props.update(status="DELETED", mag=-5)
+    assert validate(envelope, now=NOW).fields["magnitude"] is None
 
 
 @pytest.mark.req("REQ-DQ-ACC-001")
