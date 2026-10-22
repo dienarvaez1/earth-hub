@@ -160,7 +160,7 @@ The same bucket can be written without Docker: [direct mode](../technical/archit
 ```bash
 make mode                # full (active): this machine's export writes the bucket
 make mode-direct         # hand over: stops the poller and catch-up, exports, switches, catches up, checks against USGS
-make direct-once         # one round from this machine (or let the 15-minute schedule run)
+make direct-once         # one round from this machine (or let the hourly rounds run)
 make reconcile-direct    # the bucket's state agrees with itself
 make reconcile-usgs      # and with USGS: every difference pending, or flagged
 make catchup-now         # catch up now, without waiting for the schedule

@@ -31,7 +31,7 @@ As of 2026-10-20. The plan below is the original, with Milestone 7 revised; the 
 | Load test of the API with Locust, after 8 | Done | #26 |
 | Reconciliation with USGS, catching up after each switch | Done | #32 |
 
-Current numbers: 170 requirements, all covered by a passing test; 51 defects, all fixed; about 985 tests in the full regression.
+Current numbers: 171 requirements, all covered by a passing test; 52 defects, all fixed; about 985 tests in the full regression.
 
 ## 1. Project vision
 

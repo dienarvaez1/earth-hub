@@ -23,7 +23,7 @@ and ask the user to confirm, even if they typed `/eh-stop reset`. Afterwards, re
 In direct mode (`make -s mode`), also say that the handover back (`make mode-full`) replays only what direct
 mode processed since the last handover into this database: after a reset it would have nothing to replay onto.
 
-Stopping everything is safe in direct mode: the 15-minute GitHub Actions schedule keeps the bucket and the
+Stopping everything is safe in direct mode: the hourly direct rounds on GitHub Actions keep the bucket and the
 dashboard current without Docker (`/eh-mode`). In full mode, the dashboard then stops updating.
 
 A dashboard started with `make dashboard-dev` runs in the foreground or as a background task: stop that task.

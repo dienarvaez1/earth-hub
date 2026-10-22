@@ -8,7 +8,8 @@ A second workflow, `.github/workflows/direct.yml`, is not a check: it runs [dire
 %%{init: {"flowchart": {"rankSpacing": 30, "nodeSpacing": 50}}}%%
 flowchart TB
     pr["pull request,<br/>push to main"] --> ci["ci.yml<br/>lint, unit, regression<br/>(no secrets)"]
-    cron["every 15 min,<br/>daily at 05:41 UTC,<br/>or by hand"] --> direct["direct.yml<br/>round / reconcile<br/>(r2 environment)"]
+    trigger["dashboard Worker's<br/>cron trigger, hourly"] -- round --> direct["direct.yml<br/>round / reconcile<br/>(r2 environment)"]
+    cron["daily at 05:41 UTC,<br/>or by hand"] --> direct
     direct --> check{"_state/mode.json<br/>direct (active)?"}
     check -- yes --> r2[("R2 bucket:<br/>rows, snapshot, log")]
     check -- "no: full or<br/>handing-over" --> skip["skip, succeed"]
@@ -54,19 +55,33 @@ A ruleset on `main` requires both checks before a merge, and blocks force pushes
 
 | Job | When | Runs |
 | --- | --- | --- |
-| **Direct round** (`round`) | every 15 minutes, at :02, :17, :32 and :47 | `python -m earth_hub.direct once --skip-unless-direct`: one poller round, and catch-up if due (`make direct-once`) |
+| **Direct round** (`round`) | every hour at :17, started by the dashboard Worker's [cron trigger](#the-trigger) | `python -m earth_hub.direct once --skip-unless-direct`: one poller round, and catch-up if due (`make direct-once`) |
 | **Direct reconcile** (`reconcile`) | every day, at 05:41 UTC | `python -m earth_hub.direct.reconcile --skip-unless-direct` (`make reconcile-direct`), then `python -m earth_hub.usgs_reconcile --skip-unless-direct --max-age-hours 2` ([against USGS](architecture.md#reconciliation-with-usgs)); either failing fails the run |
 
 Both also run by hand: **Actions → Direct mode → Run workflow**, or `gh workflow run direct.yml -f job=round` (`job=reconcile`); `gh run list --workflow direct.yml` lists the runs. Each run's page shows the command's summary lines.
 
 - **The mode marker switches it.** While the bucket is not in direct mode (full mode, or a handover running), both jobs skip and succeed: `make mode-full` pauses the schedule, `make mode-direct` resumes it. A handover that freezes the bucket during a round makes it skip too, without catch-up. Missing R2 settings still fail the run.
 - **One direct process.** The schedule and a `make direct-run` elsewhere would both poll and take turns writing; stop `make direct-run` while the schedule is on. Runs never overlap (`concurrency`, never cancelled), and a run stops after 20 minutes; a round cut off is finished by the next, and its lock expires after 15.
-- **Catch-up about every hour.** The workflow sets `CATCHUP_INTERVAL_SECONDS=3000` and `DELETED_CHECK_INTERVAL_SECONDS=82800`, a little early because GitHub starts scheduled runs late, unevenly: the first round after that runs them.
-- **Secrets.** R2 credentials (`R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET`) are secrets of the `r2` environment, which only `main` can use, given only to the step that runs the command; `USGS_CONTACT` is a repository variable, the repository's address. Use an R2 token for this workflow only (Object Read & Write on the bucket), so it can be revoked alone. Set them with `gh secret set <NAME> --env r2`, which reads the value from the terminal. The workflow has no pull request or push trigger, pull requests from forks never get secrets, and a workflow run from any other branch cannot use the environment.
-- **Freshness.** New events reach the bucket up to about 15 minutes after USGS publishes them (a minute with `make direct-run`); none are lost, as the day feed lists the last 24 hours. GitHub may delay or drop scheduled runs when busy.
-- **Cost.** $0: about 1–1½ minutes a run with uv's cache, and minutes are free for a public repository. R2 operations are fewer than with `make direct-run`: 96 feed rounds a day instead of about 437 (`tests/unit/test_direct_budget.py`).
-- **Failures** e-mail whoever last changed the schedule, as GitHub does for scheduled workflows.
-- **A schedule that stops running.** GitHub sometimes drops scheduled runs: while the repository was private and the schedule hourly, it ran about one slot in five. Four slots an hour leave room for that. Nothing is lost while it misses runs (the day feed covers 24 hours, catch-up 30 days), but the dashboard goes stale, so the daily reconcile fails if no direct round has written for 2 hours.
-- **60 days without activity.** GitHub switches off a public repository's scheduled workflows after 60 days with no activity in it; a push, or **Actions → Direct mode → Enable workflow**, turns them back on.
+- **Catch-up about every hour.** The workflow sets `CATCHUP_INTERVAL_SECONDS=3000` and `DELETED_CHECK_INTERVAL_SECONDS=82800`, a little early because runs start a little late, unevenly: the first round after that runs them.
+- **Secrets.** R2 credentials (`R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET`) are given only to the step that runs the command; `USGS_CONTACT` is a repository variable, the repository's address. Use an R2 token for this workflow only (Object Read & Write on the bucket), so it can be revoked alone. While the repository is private they are repository secrets (`gh secret set <NAME>`): GitHub Free has no environments for private repositories, and the jobs' `r2` environment holds none. Once it is public, move them to the `r2` environment, which only `main` can use (`gh secret set <NAME> --env r2`, which reads the value from the terminal). The workflow has no pull request or push trigger, pull requests from forks never get secrets, and a workflow run from any other branch cannot use the environment.
+- **Freshness.** New events reach the bucket up to about an hour after USGS publishes them (a minute with `make direct-run`); none are lost, as the day feed lists the last 24 hours.
+- **Cost.** Each run takes about 1–1½ minutes with uv's cache. While the repository is private, GitHub Free includes 2,000 Actions minutes a month, shared with CI: hourly rounds use about 720 to 1,440 of them, which is why the trigger runs hourly; Actions minutes are free for a public repository, where it can run every 15 minutes. The Cloudflare trigger is free (the Workers Free plan has 5 cron triggers). R2 operations are fewer than with `make direct-run`: 24 feed rounds a day instead of about 437 (`tests/unit/test_direct_budget.py`).
+- **Failures** of the reconcile e-mail whoever last changed the workflow's schedule, as GitHub does for scheduled workflows; a failed round shows in **Actions**, a trigger GitHub refused in the Worker's logs on Cloudflare (**Workers → earth-hub → Logs**).
+- **GitHub's schedule did not keep time** (DEF-052): while the repository was private it ran about one hourly slot in five, and on 21–22 October it ran none for over 8 hours, the 15-minute schedule included. Nothing is lost while rounds are missed (the day feed covers 24 hours, catch-up 30 days), but the dashboard goes stale. So the rounds are started from Cloudflare, whose cron triggers fire on time; the daily reconcile stays on GitHub's schedule and fails if no direct round has written for 2 hours.
+- **60 days without activity.** GitHub switches off a public repository's scheduled workflows after 60 days with no activity in it, here the daily reconcile; a push, or **Actions → Direct mode → Enable workflow**, turns it back on.
+
+### The trigger
+
+The dashboard's Worker (`dashboard/src/worker.ts`) has a cron trigger, `17 * * * *` in `dashboard/wrangler.template.jsonc`: every hour it asks GitHub's API to run `direct.yml`'s round on `main` (`POST /repos/dienarvaez1/earth-hub/actions/workflows/direct.yml/dispatches`, `{"ref": "main", "inputs": {"job": "round"}}`). Its scheduled handler cannot be reached over HTTP, so the page still exposes only its two files. Without a token it starts nothing and says so in its log; a refusal fails the trigger. `tests/dashboard/test_dashboard_trigger.py` runs it under `wrangler dev --test-scheduled` against a local stand-in for GitHub (REQ-CI-006).
+
+To set it up, once, then again before the token expires: run `make trigger-token` in a terminal (`scripts/trigger_token.py`), then `make dashboard-deploy` the first time.
+
+1. It opens GitHub's form for a fine-grained token with its name, description and **Actions: Read and write** filled in; you pick repository access (only `earth-hub`) and the expiry, and note the date: rounds stop when it passes.
+2. It reads the token without showing it and checks it can see `direct.yml` (a read, which starts nothing): a token GitHub refuses, or one without access to the repository, is not stored.
+3. It stores it as the Worker's `GITHUB_TOKEN` secret through `wrangler secret put`'s standard input: never printed, written to a file or put on a command line.
+
+By hand, the same: create the token in **Settings → Developer settings → Fine-grained tokens**, then `cd dashboard && npx wrangler secret put GITHUB_TOKEN`, which reads it from the terminal.
+
+To run every 15 minutes once the repository is public, change the cron to `2,17,32,47 * * * *` and deploy.
 
 **With Claude Code:** `/eh-mode schedule` runs a round now, `/eh-mode runs` lists the recent runs, and `/eh-mode` says whether the schedule writes (direct mode) or skips (full mode).

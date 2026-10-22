@@ -22,7 +22,7 @@ flowchart TB
         api["api (FastAPI, read-only),<br/>read by make export-r2"]
     end
 
-    direct["<b>direct mode</b><br/>GitHub Actions, every 15 min:<br/>poller + catch-up<br/>+ validation + ledger<br/>over BucketStore"]
+    direct["<b>direct mode</b><br/>GitHub Actions, hourly<br/>(Cloudflare cron trigger):<br/>poller + catch-up<br/>+ validation + ledger<br/>over BucketStore"]
 
     subgraph cloud["Cloudflare"]
         r2[("R2 bucket<br/>_state/mode.json<br/>says who writes")]
@@ -236,7 +236,7 @@ stateDiagram-v2
     handing_over --> direct: a check failed
     state "handing-over" as handing_over
     note left of full: exporter writes,<br/>schedule skips
-    note right of direct: direct rounds write<br/>(every 15 min on GitHub Actions),<br/>exporter refuses
+    note right of direct: direct rounds write<br/>(hourly on GitHub Actions),<br/>exporter refuses
 ```
 
 While the marker says `handing-over`, neither mode writes. The handover to direct mode needs no such state: it holds the bucket's lock, so no export can run, and changes the marker from `full` to `direct` in one conditional write. If anything fails before that write, the marker still says `full`.
@@ -275,7 +275,7 @@ sequenceDiagram
     H->>R: marker: direct (active), from this sequence number
     H->>R: release the lock
     Note over M,R: on any failure: marker still full,<br/>make restarts poller and catch-up
-    Note over R: the 15-minute schedule (or make direct-run) writes from now on
+    Note over R: the hourly rounds (or make direct-run) write from now on
 ```
 
 It needs full mode idle: the poller and catch-up stopped, every message stored, `make reconcile` clean. It exports, then writes direct mode's state from PostgreSQL and Kafka: the ID map from `earthquake_ids`, with each record's `id` as its creation number; the poller's 26-hour state from `earthquakes.raw`, as a restarted poller rebuilds it; and catch-up's checkpoints. Then the marker says `direct`, with the log's sequence number at that moment.

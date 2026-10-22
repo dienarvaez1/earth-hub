@@ -1,10 +1,21 @@
 // The dashboard's Worker. Static files (the page) are served by Cloudflare before this
 // runs; the Worker only answers /data/*, reading the snapshot from R2 through a binding,
 // so the bucket stays private and the page holds no credentials.
+//
+// It also starts direct mode's rounds on its cron trigger (wrangler.template.jsonc): GitHub's
+// own schedule fires late and skips runs (DEF-052), Cloudflare's runs on time. The handler is
+// not reachable over HTTP.
 
 interface Env {
   SNAPSHOTS: R2Bucket;
+  GITHUB_API: string; // https://api.github.com; tests point it at a local stand-in
+  GITHUB_REPO: string; // owner/name
+  GITHUB_TOKEN?: string; // a secret: fine-grained, Actions read and write on this repository
 }
+
+// The workflow and the job a trigger runs (.github/workflows/direct.yml).
+const WORKFLOW = "direct.yml";
+const DISPATCH = { ref: "main", inputs: { job: "round" } };
 
 // Public paths and the only objects they can reach: nothing else in the bucket is exposed.
 const OBJECTS: Record<string, string> = {
@@ -25,7 +36,37 @@ export default {
     response.headers.set("X-Robots-Tag", ROBOTS);
     return response;
   },
+
+  async scheduled(_controller: ScheduledController, env: Env): Promise<void> {
+    await startRound(env);
+  },
 } satisfies ExportedHandler<Env>;
+
+/** Asks GitHub to run one direct round. Without a token it only says so; a refusal throws,
+ * so Cloudflare records the trigger as failed. */
+async function startRound(env: Env): Promise<void> {
+  if (!env.GITHUB_TOKEN) {
+    console.warn("trigger: GITHUB_TOKEN is not set, no direct round started");
+    return;
+  }
+  const url = `${env.GITHUB_API}/repos/${env.GITHUB_REPO}/actions/workflows/${WORKFLOW}/dispatches`;
+  const response = await fetch(url, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${env.GITHUB_TOKEN}`,
+      Accept: "application/vnd.github+json",
+      "Content-Type": "application/json",
+      "User-Agent": "earth-hub-trigger",
+      "X-GitHub-Api-Version": "2022-11-28",
+    },
+    body: JSON.stringify(DISPATCH),
+  });
+  if (!response.ok) {
+    const detail = (await response.text()).slice(0, 300);
+    throw new Error(`trigger: GitHub answered ${response.status}: ${detail}`);
+  }
+  console.log("trigger: direct round started");
+}
 
 async function serve(request: Request, env: Env): Promise<Response> {
   const key = OBJECTS[new URL(request.url).pathname];

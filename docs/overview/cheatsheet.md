@@ -169,7 +169,7 @@ Only while `make mode` says `full`. These write PostgreSQL, or the bucket throug
 
 ### Direct mode: no machine needed
 
-Only while `make mode` says `direct`. The 15-minute schedule does this by itself; the rest is for running or checking it by hand.
+Only while `make mode` says `direct`. The hourly rounds (a Cloudflare cron trigger starting `direct.yml`) do this by itself; the rest is for running or checking it by hand.
 
 | Skill | Command | What it does |
 | --- | --- | --- |
@@ -198,6 +198,7 @@ Only while `make mode` says `direct`. The 15-minute schedule does this by itself
 | `/eh-dashboard deploy` | `make dashboard-deploy` ⚠ | Publishes to Cloudflare Workers |
 | `/eh-dashboard deployments` | `cd dashboard && npx --no-install wrangler deployments list 2>&1 \| grep -v '@'` | Past deploys and their versions |
 | | `make dashboard-install` | Once: Node dependencies and the test browser |
+| | `make trigger-token` ⚠ | The hourly trigger's GitHub token: opens GitHub's form, checks the token you paste (never shown), stores it on the Worker; run it in a terminal, again before the token expires ([CI](../technical/ci.md#the-trigger)) |
 
 ## 11. Containers and logs: watching it run
 
