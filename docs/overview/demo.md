@@ -151,11 +151,13 @@ make dashboard-install && make dashboard-dev     # http://127.0.0.1:8787, over t
 
 **With Claude Code:** `/eh-export` (a dry run), `/eh-export run`, `/eh-dashboard dev`, `/eh-dashboard test`; `/eh-dashboard` checks the live page.
 
+The page opens on This week, per hour: try the period, the magnitude band and the place menus (their counts follow the other choices), the chart's Style (columns, areas, lines, trendlines), and the top countries and regions, each bar split by magnitude.
+
 Without an account, `make test-dashboard` runs the page in Chromium against a simulated R2, offline. It compares the browser's answers with Python's on every report. The page's queries, with results, are in [the SQL examples](../technical/sql-examples.md#dashboard-reports).
 
 ## 8. Direct mode (optional)
 
-The same bucket can be written without Docker: [direct mode](../technical/architecture.md#direct-mode) runs the poller and the consumer's rules straight to R2, and GitHub Actions runs it every hour. The handovers write the real bucket, so try them only on your own:
+The same bucket can be written without Docker: [direct mode](../technical/architecture.md#direct-mode) runs the poller and the consumer's rules straight to R2, and GitHub Actions runs it every hour, started by the dashboard Worker's Cloudflare cron trigger. The handovers write the real bucket, so try them only on your own:
 
 ```bash
 make mode                # full (active): this machine's export writes the bucket
@@ -163,12 +165,13 @@ make mode-direct         # hand over: stops the poller and catch-up, exports, sw
 make direct-once         # one round from this machine (or let the hourly rounds run)
 make reconcile-direct    # the bucket's state agrees with itself
 make reconcile-usgs      # and with USGS: every difference pending, or flagged
-make catchup-now         # catch up now, without waiting for the schedule
+make catchup-now         # catch up now, without waiting for the next hourly round
+make direct-runs         # the audit trail: each run, who started it, what it processed
 make mode-full           # replay direct mode's log into Kafka and PostgreSQL, check, switch back
 make reconcile           # and full mode has every event direct mode processed
 ```
 
-**With Claude Code:** `/eh-mode`, `/eh-mode direct`, `/eh-mode once`, `/eh-mode usgs`, `/eh-mode catchup`, `/eh-mode full`.
+**With Claude Code:** `/eh-mode`, `/eh-mode direct`, `/eh-mode once`, `/eh-mode usgs`, `/eh-mode catchup`, `/eh-mode runs`, `/eh-mode full`; `/eh-dashboard trigger` checks the hourly trigger.
 
 ## 9. Clean up
 

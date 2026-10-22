@@ -56,6 +56,7 @@ A ruleset on `main` requires both checks before a merge, and blocks force pushes
 | Job | When | Runs |
 | --- | --- | --- |
 | **Direct round** (`round`) | every hour at :17, started by the dashboard Worker's [cron trigger](#the-trigger) | `python -m earth_hub.direct once --skip-unless-direct`: one poller round, and catch-up if due (`make direct-once`) |
+| **Trigger token** (`token`) | once a day, when the trigger passes the days its token has left | Fails within 14 days of the expiry, so GitHub e-mails the token's owner ([the reminder](#the-trigger)); no secrets |
 | **Direct reconcile** (`reconcile`) | every day, at 05:41 UTC | `python -m earth_hub.direct.reconcile --skip-unless-direct` (`make reconcile-direct`), then `python -m earth_hub.usgs_reconcile --skip-unless-direct --max-age-hours 2` ([against USGS](architecture.md#reconciliation-with-usgs)); either failing fails the run |
 
 Both also run by hand: **Actions → Direct mode → Run workflow**, or `gh workflow run direct.yml -f job=round` (`job=reconcile`); `gh run list --workflow direct.yml` lists the runs. Each run's page shows the command's summary lines.

@@ -1,7 +1,7 @@
 ---
 name: eh-r2
-description: Look inside Earth-Hub's Cloudflare R2 bucket, read-only — list keys under a prefix, count objects and bytes, print an object (a row, a run record, the snapshot's meta.json, the gunzipped manifest), save the Parquet snapshot, or list past export runs. Use for /eh-r2, "what's in the bucket", "show the last export run", "how many rows are in R2", "download the snapshot".
-argument-hint: "[ls [PREFIX] | count [earthquakes/ | PREFIX [full]] | get KEY | snapshot | runs]"
+description: Look inside Earth-Hub's Cloudflare R2 bucket, read-only — list keys under a prefix, count objects and bytes, print an object (a row, a run record, an audit record, the snapshot's meta.json, the gunzipped manifest), save the Parquet snapshot, list past export runs, or list direct mode's executions (its audit trail). Use for /eh-r2, "what's in the bucket", "show the last export run", "how many rows are in R2", "download the snapshot".
+argument-hint: "[ls [PREFIX] | count [earthquakes/ | PREFIX [full]] | get KEY | snapshot | runs | audit]"
 ---
 
 # R2 bucket (read-only)
@@ -18,13 +18,15 @@ settings are missing (the message names them).
 | `get KEY` | `make -s r2-get KEY=<KEY>`, e.g. `analytics/meta.json`, `earthquakes/<key>.json` (a record's key: the USGS ID it was created with), `runs/<run>.json`, `_state/earthquakes-manifest.json.gz` (printed gunzipped; summarize the manifest, it's large) |
 | `snapshot` | `make -s r2-get KEY=analytics/earthquakes.parquet OUT=/tmp/earthquakes.parquet` (~7.5 MB), then e.g. `uv run python -c "import duckdb; print(duckdb.sql(\"SELECT count(*), max(magnitude) FROM '/tmp/earthquakes.parquet'\"))"` |
 | `runs` | `make -s export-r2-runs` (the latest export runs and their counts) |
+| `audit` | `make -s direct-runs [LIMIT=20]` (direct mode's latest executions: status, who started each, mode, messages by part, elapsed), and one in full with `make -s r2-get KEY=audit/direct/<day>/<run_id>.json` |
 
 What's in the bucket (`docs/technical/architecture.md`, Export to R2): `earthquakes/<key>.json` (one per row, named by its key),
 `_state/earthquakes-manifest.json.gz` (SHA-256 per row), `_state/lock.json` (only during a run),
 `runs/<run_id>.json`, `analytics/earthquakes.parquet` and `analytics/meta.json` (the dashboard's snapshot).
 Direct mode's state (architecture, Direct mode): `_state/mode.json` (which mode writes the bucket; `make mode`),
 `_state/ids.json.gz` (the ID map), `_state/direct.json` (last sequence number, poller and catch-up state),
-`_state/direct-pending.json` (only while a round writes), and `log/<date>/<first>-<last>.ndjson` (every
+`_state/direct-pending.json` (only while a round writes), `audit/direct/<date>/<run_id>.json` (one record per
+direct-mode execution: who started it, its status, counts and errors; `make direct-runs`), and `log/<date>/<first>-<last>.ndjson` (every
 message processed, in order, one folder per UTC day: today's newest with `make -s r2-ls PREFIX=log/$(date -u +%F)/ LIMIT=0 | tail -3`
 (empty until the day's first round: then the previous day's folder); listings are in key
 order, oldest first, so never take the newest from a `LIMIT`ed listing of `log/`).

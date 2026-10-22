@@ -45,6 +45,7 @@ Milestone 8 ([architecture](../technical/architecture.md#direct-mode)).
 - **Two third parties:** the DuckDB-WASM engine comes from jsDelivr, since its 35 MB file is over a Worker's limit, and the map tiles from OpenFreeMap. If either is unavailable, the page or its map is too. Both see visitors' IP addresses.
 - **DuckDB-WASM is a development release** (`1.33.1-dev65.0`), because the newest stable one fails in current Chromium (DEF-032). The browser tests compare its answers with Python's DuckDB on every report.
 - **Tested in Chromium only.** Firefox and Safari aren't covered by the automated tests.
+- **Counts by place follow seismic networks.** The United States records earthquakes too small to feel, most of the world only from about magnitude 4.5, so the top countries and regions say more about network density than about how often the ground shakes; a note under each ranking says so, and a magnitude band from 2.5 up compares places more fairly.
 - **The first map takes about 4 seconds** on a cold visit, mostly the browser compiling DuckDB's engine. At 1,000,000 rows, a filter change takes about 0.9 s.
 
 ## Scale and deployment

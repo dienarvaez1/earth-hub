@@ -1,6 +1,6 @@
 ---
 name: eh-mode
-description: Earth-Hub's two modes and who writes the R2 bucket — show the mode, hand over from full mode (Docker, Kafka, PostgreSQL) to direct mode (R2 only) and back, run direct mode locally, check direct mode's bucket state, or run and list the hourly GitHub Actions schedule that keeps the dashboard current with no machine on. Use for /eh-mode, "which mode are we in", "switch to direct mode", "go back to full mode", "can I close my laptop", "is the schedule running", "run a direct round".
+description: Earth-Hub's two modes and who writes the R2 bucket — show the mode, hand over from full mode (Docker, Kafka, PostgreSQL) to direct mode (R2 only) and back, run direct mode locally, check direct mode's bucket state, or run a round on GitHub Actions and list direct mode's executions (its audit trail, the hourly rounds a Cloudflare cron trigger starts, which keep the dashboard current with no machine on). Use for /eh-mode, "which mode are we in", "switch to direct mode", "go back to full mode", "can I close my laptop", "is the schedule running", "run a direct round".
 argument-hint: "[status | direct | full | usgs [DAYS] | catchup | once | run | reconcile [deep] | schedule | runs]  (default: status)"
 ---
 
@@ -14,9 +14,9 @@ cron trigger, keeping the dashboard current while no machine runs.
 
 | Argument | Command | Writes |
 | --- | --- | --- |
-| `status` (default) | `make -s mode`, `gh run list --workflow direct.yml --limit 5` | no |
+| `status` (default) | `make -s mode`, `make -s direct-runs LIMIT=5` | no |
 | `direct` | `make mode-direct` ⚠ (stops poller and catch-up, exports, hands over; ~1 min) | bucket, stops services |
-| `full` | `make mode-full` ⚠ (replays direct mode's log into Kafka, checks, switches back; pauses the schedule) | bucket, Kafka, PostgreSQL |
+| `full` | `make mode-full` ⚠ (replays direct mode's log into Kafka, checks, switches back; the hourly rounds then skip) | bucket, Kafka, PostgreSQL |
 | `usgs [DAYS]` | `make reconcile-usgs [DAYS=3]`: the mode writing the bucket against USGS, every difference pending (explained) or not | no |
 | `catchup` | `make catchup-now` ⚠ (in either mode: day feed, month feed and deletions, whether due or not) | bucket, or Kafka in full mode |
 | `once` | `make direct-once` ⚠ (one poller round, and catch-up if due) | bucket |
@@ -36,14 +36,19 @@ cron trigger, keeping the dashboard current while no machine runs.
 - `mode-full` needs the consumers and the API (it starts them); `mode-direct` needs full mode idle and
   `make reconcile` clean. A failed `mode-direct` resumes full mode; a failed `mode-full` leaves the bucket in
   direct mode, and running it again is safe (it sends only the log entries not yet replayed).
-- A failed scheduled run: `gh run view <id> --log-failed`. Empty R2 values in its `env:` block mean the
-  `r2` environment's secrets are empty: the user sets them (`gh secret set -f <file> --env r2` with the four `R2_*` lines).
+- A failed run: its audit record (`make -s direct-runs`, then `make -s r2-get KEY=audit/direct/<day>/<run_id>.json`:
+  `reason`, `errors`, `errata`), and on GitHub `gh run view <id> --log-failed`. Empty R2 values in its `env:` block
+  mean the workflow's secrets are empty: the user sets them (`gh secret set <NAME>` for the four `R2_*` settings, as
+  repository secrets while the repository is private; `--env r2` once it is public).
+- **The rounds come from the dashboard Worker's cron trigger**, hourly at :17 (docs/technical/ci.md#the-trigger);
+  GitHub's own schedule keeps only the daily reconcile. A failed `Trigger token` run means the trigger's GitHub token
+  expires within 14 days: the user runs `make trigger-token` in a terminal (never run it for them).
 - Filter lines with `@` from `gh` output before showing it.
 
 ## Report
 
-The mode and since when, whether the schedule is active (direct mode) or paused (full mode), and the last
-scheduled run's result. After a handover: the command's last lines and `make -s mode`. After a round: the
+The mode and since when, whether the hourly rounds write (direct mode) or skip (full mode), and the latest
+executions from `make direct-runs` (status, who started them, what they processed). After a handover: the command's last lines and `make -s mode`. After a round: the
 new sequence number and time, `make -s r2-get KEY=_state/direct.json | jq -c '{seq, written_at}'`, today's newest log files,
 `make -s r2-ls PREFIX=log/$(date -u +%F)/ LIMIT=0 | tail -3` (the previous day's folder if empty), and the dashboard's run
 (`/eh-dashboard`). In direct mode, say the computer can be closed; in full mode, that the dashboard updates

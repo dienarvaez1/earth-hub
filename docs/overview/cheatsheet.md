@@ -21,10 +21,10 @@ Commands that **call live services or change state** are marked ⚠. The skills 
 | `/eh-db [counts\|outcomes\|rejected\|event ID\|merged\|latest\|strongest\|SQL]` | Read-only SQL on PostgreSQL | `psql` in the database container |
 | `/eh-api [health\|list\|event\|stats\|hourly\|magnitude\|export]` | Calls the REST API (served from PostgreSQL) | `curl` on `/api/v1/…` |
 | `/eh-export [dry\|run\|verify\|runs]` | Copies PostgreSQL's table to R2 through the API, and the dashboard's snapshot | `make export-r2` |
-| `/eh-r2 [ls\|count\|get\|snapshot\|runs]` | Looks inside the R2 bucket, read-only | `make r2-ls`, `make r2-get` |
-| `/eh-mode [status\|direct\|full\|usgs\|catchup\|once\|run\|reconcile\|schedule\|runs]` | The mode, the handovers, the check against USGS and catching up, direct mode by hand or on GitHub's hourly schedule | `make mode`, `make mode-direct`, `make mode-full`, `gh workflow run direct.yml`, `make reconcile-usgs`, `make catchup-now` |
-| `/eh-dashboard [check\|dev\|build\|test\|deployments\|deploy]` | The live page and its data, a local server, tests, deploys | `make dashboard-dev`, `make dashboard-deploy` |
-| `/eh-status [reconcile]` | Health of every service, consumer lag, newest event, API, last export, the mode and the schedule's last runs | `docker compose ps`, `make reconcile`, `make reconcile-usgs`, `make mode`, `gh run list --workflow direct.yml` |
+| `/eh-r2 [ls\|count\|get\|snapshot\|runs\|audit]` | Looks inside the R2 bucket, read-only, direct mode's audit trail included | `make r2-ls`, `make r2-get`, `make direct-runs` |
+| `/eh-mode [status\|direct\|full\|usgs\|catchup\|once\|run\|reconcile\|schedule\|runs]` | The mode, the handovers, the check against USGS and catching up, direct mode by hand or on GitHub Actions, and its executions (the audit trail of the hourly rounds the Cloudflare trigger starts) | `make mode`, `make mode-direct`, `make mode-full`, `gh workflow run direct.yml`, `make direct-runs`, `make reconcile-usgs`, `make catchup-now` |
+| `/eh-dashboard [check\|dev\|build\|test\|deployments\|deploy\|trigger]` | The live page and its data, a local server, tests, deploys, and the Worker's hourly trigger | `make dashboard-dev`, `make dashboard-deploy`, `wrangler secret list` |
+| `/eh-status [reconcile]` | Health of every service, consumer lag, newest event, API, last export, the mode and direct mode's latest executions | `docker compose ps`, `make reconcile`, `make reconcile-usgs`, `make mode`, `make direct-runs` |
 | `/eh-logs [service\|ID\|errors\|rejected\|summary]` | Reads the JSON logs with `jq`, follows one event | `docker compose logs … \| jq` |
 | `/eh-test [layer\|regression\|flake\|REQ-…\|keyword]` | Runs the tests by layer, or everything | `make test`, `make regression` |
 | `/eh-stop [pipeline\|api\|ui\|all\|reset]` | Stops services, keeping data (or wipes it, after asking) | `make ingest-stop`, `make down`, `make reset` |
@@ -139,6 +139,7 @@ Full mode only: in direct mode the exporter refuses, and direct rounds write the
 | `/eh-r2 snapshot` | `make r2-get KEY=analytics/earthquakes.parquet OUT=/tmp/earthquakes.parquet` | Saves the dashboard's Parquet snapshot |
 | `/eh-r2 ls log/` | `make r2-ls PREFIX=log/$(date -u +%F)/ LIMIT=0 \| tail -3` | Direct mode's newest log files, today's (UTC): every message it processed |
 | `/eh-r2 get _state/mode.json` | `make r2-get KEY=_state/mode.json` | The mode marker itself (`make mode` says it in one line) |
+| `/eh-r2 audit` | `make direct-runs` and `make r2-get KEY=audit/direct/<day>/<run_id>.json` | Direct mode's executions, one line each, and one record in full (`audit/direct/`) |
 
 ## 9. Modes: full and direct
 
@@ -173,15 +174,14 @@ Only while `make mode` says `direct`. The hourly rounds (a Cloudflare cron trigg
 
 | Skill | Command | What it does |
 | --- | --- | --- |
-| `/eh-mode runs` | `gh run list --workflow direct.yml` | The schedule's recent runs; `gh run view <id> --log-failed` for a failure |
-| `/eh-mode schedule` | `gh workflow run direct.yml -f job=round` ⚠ | A scheduled round now (also `-f job=reconcile`) |
+| `/eh-mode schedule` | `gh workflow run direct.yml -f job=round` ⚠ | A round on GitHub Actions now (also `-f job=reconcile`); `gh run list --workflow direct.yml` lists the GitHub runs, `gh run view <id> --log-failed` shows a failure |
 | `/eh-mode once` | `make direct-once` ⚠ | One direct round from your machine (and catch-up if due) |
 | `/eh-mode run` | `make direct-run` ⚠ | Direct mode from your machine until Ctrl-C: a round a minute instead of an hour. Not while the schedule is on |
 | `/eh-mode runs` | `make direct-runs [LIMIT=20]` | Direct mode's audit trail: each execution's status, who started it (Cloudflare trigger, GitHub schedule or by hand, `direct-run`, local), the mode, messages by part and outcome, elapsed time (read-only) |
 | `/eh-mode catchup` | `make catchup-now` ⚠ | Catch up now: a direct round with the day feed, the month feed and the deletions, whether due or not |
 | `/eh-mode reconcile` | `make reconcile-direct [DEEP=1]` | Rows, manifest, snapshot, ID map and log agree, read-only ([direct mode](../technical/architecture.md#direct-mode)) |
 | `/eh-r2 count` | `make r2-get KEY=analytics/meta.json \| jq '{run_id, written_at, rows}'` | Rows in the bucket now (PostgreSQL falls behind until `make mode-full`) |
-| | `gh secret set -f <file> --env r2` ⚠ | The workflow's four `R2_*` secrets, in its `r2` environment, from a file of `NAME=value` lines (empty values make every run fail) |
+| | `gh secret set -f <file>` ⚠ | The workflow's four `R2_*` secrets, from a file of `NAME=value` lines: repository secrets while the repository is private, `--env r2` once it is public (empty values make every run fail) |
 
 **Before closing the computer:** `make mode` says `direct (active)`, and no `make direct-run` is left running. **Back at it:** `make mode-full` brings PostgreSQL and the API up to date.
 
@@ -198,6 +198,7 @@ Only while `make mode` says `direct`. The hourly rounds (a Cloudflare cron trigg
 | `/eh-dashboard test` | `make test-dashboard` | The page in Chromium, against a simulated R2 |
 | `/eh-dashboard deploy` | `make dashboard-deploy` ⚠ | Publishes to Cloudflare Workers |
 | `/eh-dashboard deployments` | `cd dashboard && npx --no-install wrangler deployments list 2>&1 \| grep -v '@'` | Past deploys and their versions |
+| `/eh-dashboard trigger` | `cd dashboard && npx --no-install wrangler secret list` and `make direct-runs LIMIT=3` | The hourly trigger: its token stored (never shown), and the latest rounds it started |
 | | `make dashboard-install` | Once: Node dependencies and the test browser |
 | | `make trigger-token` ⚠ | The hourly trigger's GitHub token: opens GitHub's form, checks the token you paste (never shown), stores it on the Worker, prints its expiry; run it in a terminal, again before the token expires: GitHub e-mails you from 14 days before ([CI](../technical/ci.md#the-trigger)) |
 

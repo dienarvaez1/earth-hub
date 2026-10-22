@@ -22,7 +22,8 @@ Testing effort follows what would hurt most if it failed.
 | Bad source data stored or served | High | 16 validation rules with boundary tests, plus database `CHECK` constraints as a second line of defense |
 | API inputs crashing the service | Medium | Validation tests and property-based contract testing (Schemathesis) |
 | Tests that pass for the wrong reason | High | Mutation spot checks; repeated and combined runs; tests of the test tooling |
-| Secrets leaking into logs or output | High | Negative tests that read whole outputs with dependencies stopped |
+| Secrets leaking into logs or output | High | Negative tests that read whole outputs with dependencies stopped; the trigger's token setup checked never to print, save or pass the token on a command line |
+| Direct mode silently not running | High | The Cloudflare trigger tested under `wrangler dev --test-scheduled` against a local stand-in for GitHub; the daily reconcile fails after 2 hours without a round; an e-mailed reminder before the trigger's token expires; an audit record per execution, whose failures are tested never to stop a round |
 
 ## Test levels
 
@@ -132,6 +133,7 @@ The [requirements](requirements.md) list it, grouped by area.
 | 7 | CI and tests of the workflow file; documentation tested: examples replayed, schema and links checked |
 | Load test, after 8 | Locust's browser and analyst users against the API over 140,000 events: no failures, and each endpoint's p95 within 2.5 times its measured baseline (`make load`, `make load-ui`) |
 | 8 | The ledger checked alone; parity of the two stores on random streams and every persistence defect scenario (identical buckets, byte for byte), and end to end from the same mock USGS services; a direct round interrupted at each of its writes; the R2 operations budget; `make reconcile-direct` against each broken invariant; round trips full → direct → full on real Kafka and PostgreSQL against a database that stayed in full mode, a gap in the log, a rule broken in one mode, and a replay interrupted and run again; switching back and forth twice while the feed changes, during the handovers too, with every event checked at its latest version after each switch |
+| After 8 | The dashboard's menus, rankings and hourly counts on hand-worked data and in Chromium; the Cloudflare trigger against a local stand-in for GitHub, at the hour of the token check and at others; the workflow's token check run with bash as GitHub runs it, junk input included; the audit trail on moto, for every way an execution starts and ends |
 
 Claude Code writes and runs the tests, and the project owner approves each milestone's proposal and reviews each pull request before merging (see the README, *How Claude Code was used*).
 
