@@ -4,6 +4,8 @@
 # round      every hour, started by the dashboard Worker's cron trigger (dashboard/src/worker.ts:
 #            GitHub's own schedule fired late or not at all, DEF-052), or by hand: one poller
 #            round, and catch-up if due (make direct-once)
+# token      once a day, when the trigger passes the days its GitHub token has left: fails within
+#            14 days, so GitHub e-mails the token's owner to run make trigger-token. No secrets.
 # reconcile  every day: direct mode's bucket invariants (make reconcile-direct), then the bucket
 #            against USGS (make reconcile-usgs), failing if no round has written for 2 hours:
 #            the alarm for a schedule GitHub stopped running (a failed run e-mails). Read-only.
@@ -29,6 +31,10 @@ on:
         type: choice
         options: [round, reconcile]
         default: round
+      token_days_left:
+        description: Days until the trigger's GitHub token expires (the trigger sets it once a day)
+        type: string
+        default: ""
 
 permissions:
   contents: read
@@ -112,3 +118,23 @@ jobs:
         if: always()
         # The lines that are not JSON log records: the command's own summary.
         run: grep -v '^{' output.txt >> "$GITHUB_STEP_SUMMARY" || echo "no summary written" >> "$GITHUB_STEP_SUMMARY"
+
+  token:
+    name: Trigger token
+    if: inputs.token_days_left != ''
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Days until the trigger's token expires
+        env:
+          DAYS_LEFT: ${{ inputs.token_days_left }}
+        run: |
+          case "$DAYS_LEFT" in
+            # Not echoed back: an input could carry workflow commands.
+            '' | *[!0-9-]* | ?*-*) echo "::error::token_days_left is not a number of days"; exit 1 ;;
+          esac
+          if [ "$DAYS_LEFT" -le 14 ]; then
+            echo "::error title=Renew the trigger's token::The dashboard trigger's GitHub token expires in $DAYS_LEFT days: run make trigger-token (docs/technical/ci.md#the-trigger)."
+            exit 1
+          fi
+          echo "The trigger's GitHub token expires in $DAYS_LEFT days."

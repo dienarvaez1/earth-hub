@@ -247,6 +247,7 @@ The scenarios from Milestone 5 of the plan, verified through the API on the whol
 | REQ-CI-004 | The workflow's actions are pinned to commit SHAs and its token can only read the repository |
 | REQ-CI-005 | A second workflow runs direct mode's rounds when asked (by the dashboard Worker's trigger, REQ-CI-006, or by hand) and its reconciliation every day on `main`'s schedule or by hand: one run at a time, never cancelled, catch-up intervals shorter than the schedule, actions pinned to commit SHAs, a read-only token, and R2 credentials from an `r2` environment, given only to the step that runs the command; no other workflow uses secrets |
 | REQ-CI-006 | The dashboard Worker's cron trigger starts one direct round every hour (at :17) by asking GitHub to run `direct.yml`'s round on `main`, with a token kept as a Worker secret, never in the configuration; without a token it asks nothing, and a refusal fails the trigger (DEF-052) |
+| REQ-CI-007 | Once a day (the 08:17 UTC trigger) the Worker reads the token's expiry from GitHub's reply and passes the days left to the workflow; its token job, with no secrets, fails within 14 days, so GitHub e-mails the token's owner to run `make trigger-token`, while the round still runs; the Worker logs a warning too, and `make trigger-token` prints the new token's expiry |
 
 ## Documentation
 

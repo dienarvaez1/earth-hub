@@ -79,9 +79,12 @@ To set it up, once, then again before the token expires: run `make trigger-token
 1. It opens GitHub's form for a fine-grained token with its name, description and **Actions: Read and write** filled in; you pick repository access (only `earth-hub`) and the expiry, and note the date: rounds stop when it passes.
 2. It reads the token without showing it and checks it can see `direct.yml` (a read, which starts nothing): a token GitHub refuses, or one without access to the repository, is not stored.
 3. It stores it as the Worker's `GITHUB_TOKEN` secret through `wrangler secret put`'s standard input: never printed, written to a file or put on a command line.
+4. It prints the expiry GitHub states for the token.
 
 By hand, the same: create the token in **Settings → Developer settings → Fine-grained tokens**, then `cd dashboard && npx wrangler secret put GITHUB_TOKEN`, which reads it from the terminal.
 
 To run every 15 minutes once the repository is public, change the cron to `2,17,32,47 * * * *` and deploy.
+
+**The reminder to renew it** (REQ-CI-007). GitHub states a token's expiry on every reply to it (`GitHub-Authentication-Token-Expiration`). Once a day, the 08:17 UTC trigger reads it (a read of the workflow, which starts nothing) and passes the days left with the round, as the input `token_days_left`. The workflow's **Trigger token** job, which has no secrets, fails when 14 days or fewer are left, with *"The dashboard trigger's GitHub token expires in N days: run make trigger-token"*; GitHub e-mails a failed run to whoever started it, the token's owner (check **Settings → Notifications → Actions**: failed workflows, e-mail). The round runs as usual, and the Worker logs the same warning. After `make trigger-token`, the next day's check passes. Until then it adds a minute of Actions time a day; the job is skipped, at no cost, on the other runs.
 
 **With Claude Code:** `/eh-mode schedule` runs a round now, `/eh-mode runs` lists the recent runs, and `/eh-mode` says whether the schedule writes (direct mode) or skips (full mode).

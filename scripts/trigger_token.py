@@ -5,8 +5,9 @@
 Run it in a terminal. It opens GitHub's form for a fine-grained token with its fields filled
 in (you pick the repository and the expiry), reads the token without echoing it, checks that
 it can see this repository's Actions, and stores it as the dashboard Worker's GITHUB_TOKEN
-secret through wrangler's standard input. The token is never printed, written to a file or
-put on a command line. Run it again to replace the token before it expires.
+secret through wrangler's standard input, then prints its expiry. The token is never printed,
+written to a file or put on a command line. Run it again to replace the token before it
+expires: from 14 days before, the trigger's daily check fails and GitHub e-mails you.
 """
 
 import getpass
@@ -46,8 +47,9 @@ def token_form(repo: str) -> str:
     return f"https://github.com/settings/personal-access-tokens/new?{urlencode(fields)}"
 
 
-def check(token: str, repo: str, api: str, client: httpx.Client) -> str | None:
-    """None when the token can see the workflow; otherwise what to fix. Starts nothing."""
+def check(token: str, repo: str, api: str, client: httpx.Client) -> tuple[str | None, str | None]:
+    """What to fix (None when the token can see the workflow), and the token's expiry as GitHub
+    states it (None when it never expires). Starts nothing."""
     try:
         response = client.get(
             f"{api}/repos/{repo}/actions/workflows/{WORKFLOW}",
@@ -59,17 +61,18 @@ def check(token: str, repo: str, api: str, client: httpx.Client) -> str | None:
             timeout=30,
         )
     except httpx.HTTPError as error:
-        return f"could not reach GitHub ({type(error).__name__}); try again"
+        return f"could not reach GitHub ({type(error).__name__}); try again", None
+    expiry = response.headers.get("GitHub-Authentication-Token-Expiration")
     if response.status_code == 200:
-        return None
+        return None, expiry
     if response.status_code == 401:
-        return "GitHub does not accept this token: copy it again, whole"
+        return "GitHub does not accept this token: copy it again, whole", None
     if response.status_code in (403, 404):
         return (
             f"the token cannot see {repo}'s Actions: give it access to that repository and "
             "Actions: Read and write"
-        )
-    return f"GitHub answered {response.status_code}; try again"
+        ), None
+    return f"GitHub answered {response.status_code}; try again", None
 
 
 def store(token: str, run: Callable[..., subprocess.CompletedProcess]) -> str | None:
@@ -109,7 +112,7 @@ def main(
     if not token.startswith("github_pat_"):
         print("   That does not look like a fine-grained token (github_pat_...); checking anyway.")
     print("3. Checking that it can see the workflow (this starts nothing)...")
-    problem = check(token, repo, api, client or httpx.Client())
+    problem, expiry = check(token, repo, api, client or httpx.Client())
     if problem is not None:
         print(f"   Not stored: {problem}.")
         return 1
@@ -122,6 +125,11 @@ def main(
     print(
         f"   Stored. `cd dashboard && npx wrangler secret list` lists {SECRET} (never its value)."
     )
+    if expiry is None:
+        print("   GitHub states no expiry for it: it never expires.")
+    else:
+        print(f"   It expires {expiry}. From 14 days before, the trigger's daily check fails")
+        print("   and GitHub e-mails you to run this again.")
     print("The next trigger uses it. If the trigger is not deployed yet: make dashboard-deploy.")
     return 0
 
