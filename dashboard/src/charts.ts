@@ -27,16 +27,47 @@ function interval(bucket: string): "day" | "monday" | "month" {
   return bucket === "week" ? "monday" : bucket === "day" ? "day" : "month";
 }
 
-export function overTime(figure: HTMLElement, rows: Row[], bucket: string): void {
-  // One segment per period and level with events, stacked bottom to top in LEVELS' order.
+export type TimeStyle = "stacked" | "lines" | "trend";
+
+const STYLE_LABELS: Record<TimeStyle, string> = {
+  stacked: "split by magnitude level",
+  lines: "one line per magnitude level",
+  trend: "per magnitude level, with each level's linear trend",
+};
+
+export function overTime(figure: HTMLElement, rows: Row[], bucket: string, style: TimeStyle): void {
   const order = LEVELS.map((l) => l.label);
-  const data = rows.flatMap((r) =>
-    LEVELS.filter((l) => (r[l.key] as number) > 0).map((l) => ({
-      period: new Date(r.period as number),
-      level: l.label,
-      events: r[l.key] as number,
-    })),
-  );
+  const point = (r: Row, l: (typeof LEVELS)[number]) => ({
+    period: new Date(r.period as number),
+    level: l.label,
+    events: r[l.key] as number,
+  });
+  // Stacked: one segment per period and level with events, bottom to top in LEVELS' order.
+  // Lines and trends: every period of each level that has events at all, zeros included.
+  const shown = LEVELS.filter((l) => rows.some((r) => (r[l.key] as number) > 0));
+  const data =
+    style === "stacked"
+      ? rows.flatMap((r) => LEVELS.filter((l) => (r[l.key] as number) > 0).map((l) => point(r, l)))
+      : rows.flatMap((r) => shown.map((l) => point(r, l)));
+  const xy = { x: "period", y: "events" };
+  const marks: Record<TimeStyle, () => Plot.Markish[]> = {
+    stacked: () => [
+      Plot.rectY(data, { ...xy, fill: "level", order, interval: interval(bucket), tip: true }),
+    ],
+    lines: () => [
+      // The crosshair, in the text color so it follows the theme.
+      Plot.ruleX(data, Plot.pointerX({ x: "period", stroke: "currentColor", strokeOpacity: 0.35 })),
+      Plot.lineY(data, { ...xy, z: "level", stroke: "level", strokeWidth: 2, curve: "linear" }),
+      // A single period has no line to draw: a dot stands for it.
+      Plot.dot(rows.length === 1 ? data : [], { ...xy, fill: "level", r: 4 }),
+      Plot.tip(data, Plot.pointerX({ ...xy, stroke: "level" })),
+    ],
+    trend: () => [
+      Plot.dot(data, { ...xy, fill: "level", r: 3, fillOpacity: 0.6, tip: true }),
+      // Least squares per level; a single period gives no line.
+      Plot.linearRegressionY(data, { ...xy, stroke: "level", strokeWidth: 2, ci: 0 }),
+    ],
+  };
   draw(
     figure,
     rows,
@@ -53,19 +84,9 @@ export function overTime(figure: HTMLElement, rows: Row[], bucket: string): void
           legend: true,
           label: "Magnitude",
         },
-        marks: [
-          Plot.rectY(data, {
-            x: "period",
-            y: "events",
-            fill: "level",
-            order,
-            interval: interval(bucket),
-            tip: true,
-          }),
-          Plot.ruleY([0]),
-        ],
+        marks: [...marks[style](), Plot.ruleY([0])],
       }),
-    `Events per ${bucket}, split by magnitude level`,
+    `Events per ${bucket}, ${STYLE_LABELS[style]}`,
   );
 }
 

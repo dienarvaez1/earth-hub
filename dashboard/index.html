@@ -88,13 +88,22 @@
       <section class="panel">
         <div class="panel-head">
           <h2>Events over time</h2>
-          <label>Per
-            <select name="time_bucket" form="filters">
-              <option value="day" selected>day</option>
-              <option value="week">week</option>
-              <option value="month">month</option>
-            </select>
-          </label>
+          <div class="panel-controls">
+            <label>Style
+              <select name="chart_style" form="filters">
+                <option value="stacked" selected>Stacked columns</option>
+                <option value="lines">Lines</option>
+                <option value="trend">Trendlines</option>
+              </select>
+            </label>
+            <label>Per
+              <select name="time_bucket" form="filters">
+                <option value="day" selected>day</option>
+                <option value="week">week</option>
+                <option value="month">month</option>
+              </select>
+            </label>
+          </div>
         </div>
         <figure id="chart-time"></figure>
       </section>

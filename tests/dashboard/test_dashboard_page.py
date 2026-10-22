@@ -683,3 +683,38 @@ def options(page, name):
     return page.eval_on_selector_all(
         f"select[name={name}] option", "os => os.map(o => [o.value, o.textContent])"
     )
+
+
+@pytest.mark.req("REQ-DASH-022")
+def test_events_over_time_as_lines_or_trendlines_in_the_legend_colors(dash, expected):
+    page = dash.page
+    expected.set_filter(event_type="earthquake", start_time=datetime(2021, 4, 2))
+    rows = expected.query("over_time")
+    # The levels with events in the range, in the legend's order and colors.
+    colors = [color for key, _, color in LEVELS if any(r[key] > 0 for r in rows)]
+    assert len(rows) >= 2 and colors == ["#fed976", "#fd8d3c", "#e31a1c", "#a8a29e"]
+
+    def strokes(mark):
+        return page.eval_on_selector_all(
+            f'#chart-time g[aria-label="{mark}"] path',
+            "ps => ps.map(p => p.getAttribute('stroke') ?? p.parentElement.getAttribute('stroke'))",
+        )
+
+    assert page.input_value("select[name=chart_style]") == "stacked"
+    dash.after_update(lambda: page.select_option("select[name=chart_style]", "lines"))
+    assert sorted(strokes("line")) == sorted(colors)  # one line per level
+    assert page.query_selector('#chart-time g[aria-label="rect"]') is None
+    dash.after_update(lambda: page.select_option("select[name=chart_style]", "trend"))
+    assert sorted(strokes("linear-regression")) == sorted(colors)  # one trend per level
+    dots = page.query_selector_all('#chart-time g[aria-label="dot"] circle')
+    assert len(dots) == len(rows) * len(colors)  # every period of every level, zeros too
+    svg = page.query_selector("#chart-time svg[role=img]")
+    assert "trend" in svg.get_attribute("aria-label")
+    # The chart's legend stays, in the map legend's colors.
+    swatches = page.eval_on_selector_all(
+        "#chart-time [class*=swatch] > :is(span, div)", "els => els.map(e => e.textContent.trim())"
+    )
+    assert [label for _, label, _ in LEVELS] == [s for s in swatches if s]
+    page.click("button[type=reset]")
+    page.wait_for_function("window.__earthHub.summary.events === 0")
+    assert page.input_value("select[name=chart_style]") == "stacked"
