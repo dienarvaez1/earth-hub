@@ -166,6 +166,37 @@ def test_top_countries_with_unknown_and_ties_in_order(dash):
     assert [r["country"] for r in dash.query("top_countries")] == ["United States", "Japan"]
 
 
+LEVEL_KEYS = ("below_2_5", "from_2_5", "from_4_5", "from_6", "no_magnitude")
+
+
+@pytest.mark.req("REQ-DASH-023")
+def test_the_top_countries_and_regions_count_each_magnitude_level(dash):
+    dash.set_filter()
+
+    def levels(name, *place):
+        return {
+            tuple(r[p] for p in place): tuple(r[k] for k in LEVEL_KEYS) for r in dash.query(name)
+        }
+
+    # United States: 2.49, -0.43 and the 1.0 quarry blast below 2.5, and 2.5 (the deleted 3.0
+    # is left out); Japan 5.2 and Mexico 4.5 in 4.5 to 6; Unknown without a magnitude.
+    assert levels("top_countries", "country") == {
+        ("United States",): (3, 1, 0, 0, 0),
+        ("Japan",): (0, 0, 1, 0, 0),
+        ("Mexico",): (0, 0, 1, 0, 0),
+        ("Unknown",): (0, 0, 0, 0, 1),
+    }
+    assert levels("top_regions", "region", "country") == {
+        ("Alaska", "United States"): (2, 1, 0, 0, 0),
+        ("Baja California", "Mexico"): (0, 0, 1, 0, 0),
+        ("California", "United States"): (1, 0, 0, 0, 0),
+        ("Unknown", "Japan"): (0, 0, 1, 0, 0),
+        ("Unknown", "Unknown"): (0, 0, 0, 0, 1),
+    }
+    for name in ("top_countries", "top_regions"):
+        assert all(sum(r[k] for k in LEVEL_KEYS) == r["events"] for r in dash.query(name))
+
+
 @pytest.mark.req("REQ-DASH-004")
 def test_top_regions_with_their_country(dash):
     dash.set_filter()

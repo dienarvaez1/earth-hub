@@ -3,8 +3,6 @@ import * as Plot from "@observablehq/plot";
 import { LEVELS, colorAt } from "./colors";
 import type { Row } from "./db";
 
-const ACCENT = "#c2410c";
-
 function draw(figure: HTMLElement, rows: Row[], chart: (width: number) => Element, label: string) {
   figure.replaceChildren();
   if (rows.length === 0) {
@@ -34,6 +32,18 @@ function hourTick(moment: Date): string {
   return moment.toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
 }
 
+// The magnitude levels' stacking order, from the baseline (or the left) on: the strongest level
+// in front, Below 2.5 the farthest, and No magnitude (only with All) last.
+const STACK = [...LEVELS.slice(0, 4).reverse(), ...LEVELS.slice(4)].map((l) => l.label);
+
+// The color scale of the magnitude levels, with the chart's own legend.
+const LEVEL_COLORS = {
+  domain: LEVELS.map((l) => l.label),
+  range: LEVELS.map((l) => l.color),
+  legend: true,
+  label: "Magnitude",
+};
+
 export type TimeStyle = "areas" | "stacked" | "lines" | "trend";
 
 const STYLE_LABELS: Record<TimeStyle, string> = {
@@ -44,10 +54,7 @@ const STYLE_LABELS: Record<TimeStyle, string> = {
 };
 
 export function overTime(figure: HTMLElement, rows: Row[], bucket: string, style: TimeStyle): void {
-  const order = LEVELS.map((l) => l.label);
-  // The stacks, from the baseline up: the strongest level in front, Below 2.5 the farthest,
-  // and No magnitude (only with All) on top.
-  const stack = [...LEVELS.slice(0, 4).reverse(), ...LEVELS.slice(4)].map((l) => l.label);
+  const stack = STACK;
   const point = (r: Row, l: (typeof LEVELS)[number]) => ({
     period: new Date(r.period as number),
     level: l.label,
@@ -106,12 +113,7 @@ export function overTime(figure: HTMLElement, rows: Row[], bucket: string, style
         marginLeft: 50,
         x: { type: "utc", label: null, ...(bucket === "hour" ? { tickFormat: hourTick } : {}) },
         y: { label: `Events per ${bucket}`, grid: true },
-        color: {
-          domain: order,
-          range: LEVELS.map((l) => l.color),
-          legend: true,
-          label: "Magnitude",
-        },
+        color: LEVEL_COLORS,
         marks: [...marks[style](), Plot.ruleY([0])],
       }),
     `Events per ${bucket}, ${STYLE_LABELS[style]}`,
@@ -165,22 +167,70 @@ export function depthAgainstMagnitude(figure: HTMLElement, points: Row[]): void 
   );
 }
 
-export function topBars(figure: HTMLElement, rows: Row[], name: (r: Row) => string, label: string): void {
-  const data = rows.map((r) => ({ name: name(r), events: r.events }));
+/** The top countries or regions: each bar's length is its share of all the events in the
+ * bars shown (they add up to 100%), split by magnitude level in the legend's colors, with its
+ * number of events at its end. */
+export function topBars(
+  figure: HTMLElement,
+  rows: Row[],
+  name: (r: Row) => string,
+  label: string,
+  place: "country" | "region",
+): void {
+  const total = rows.reduce((sum, r) => sum + (r.events as number), 0);
+  const percent = (events: number) => (100 * events) / total;
+  const bars = rows.map((r) => ({
+    name: name(r),
+    events: r.events as number,
+    share: percent(r.events as number),
+  }));
+  const segments = rows.flatMap((r) =>
+    LEVELS.filter((l) => (r[l.key] as number) > 0).map((l) => ({
+      name: name(r),
+      level: l.label,
+      events: r[l.key] as number,
+      share: percent(r[l.key] as number),
+    })),
+  );
+  const asPercent = (share: number) => `${share.toFixed(1)}%`;
+  const Place = place === "country" ? "Country" : "Region";
+  const places = place === "country" ? "countries" : "regions";
   draw(
     figure,
     rows,
     (width) =>
       Plot.plot({
         width,
-        height: Math.max(80, data.length * 24 + 30),
+        height: Math.max(80, bars.length * 24 + 30),
         marginLeft: 150,
         marginRight: 60, // room for the count after the longest bar
-        x: { label: "Events", grid: true },
-        y: { label: null, domain: data.map((d) => d.name) },
+        x: { label: `% of the events in these ${places}`, grid: true, tickFormat: (s: number) => `${s}%` },
+        y: { label: null, domain: bars.map((d) => d.name) },
+        color: LEVEL_COLORS,
         marks: [
-          Plot.barX(data, { x: "events", y: "name", fill: ACCENT }),
-          Plot.text(data, { x: "events", y: "name", text: (d: { events: number }) => d.events.toLocaleString("en-US"), dx: 4, textAnchor: "start" }),
+          Plot.barX(segments, {
+            x: "share",
+            y: "name",
+            fill: "level",
+            order: STACK,
+            channels: { [Place]: "name", Events: "events" },
+            tip: {
+              format: {
+                [Place]: true,
+                fill: true,
+                x: asPercent,
+                Events: (n: number) => n.toLocaleString("en-US"),
+                y: false,
+              },
+            },
+          }),
+          Plot.text(bars, {
+            x: "share",
+            y: "name",
+            text: (d: { events: number }) => d.events.toLocaleString("en-US"),
+            dx: 4,
+            textAnchor: "start",
+          }),
         ],
       }),
     label,

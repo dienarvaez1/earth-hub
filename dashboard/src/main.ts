@@ -288,12 +288,19 @@ async function render(db: Db, map: EventMap): Promise<void> {
   charts.overTime($("#chart-time"), time, filter.time_bucket, style);
   charts.magnitudes($("#chart-magnitude"), bins);
   charts.depthAgainstMagnitude($("#chart-depth"), points);
-  charts.topBars($("#chart-countries"), countries, (r) => String(r.country), "Top countries by number of events");
+  charts.topBars(
+    $("#chart-countries"),
+    countries,
+    (r) => String(r.country),
+    "Top countries by share of their events, split by magnitude level",
+    "country",
+  );
   charts.topBars(
     $("#chart-regions"),
     regions,
     (r) => (r.country === "Unknown" ? String(r.region) : `${r.region}, ${r.country}`),
-    "Top regions by number of events",
+    "Top regions by share of their events, split by magnitude level",
+    "region",
   );
   showSignificant(significant);
 

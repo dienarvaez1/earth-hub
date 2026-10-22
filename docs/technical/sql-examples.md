@@ -187,7 +187,7 @@ The page runs every report unchanged. All filters live in one `filter` table, se
 | `over_time.sql` | Events per hour, day, ISO week or month, empty periods included, split by magnitude level | yes |
 | `magnitude_bins.sql` | Events per half-unit of magnitude, empty bins included | yes |
 | `map_points.sql` | One point per event, for the map and the depth chart | yes |
-| `top_countries.sql`, `top_regions.sql` | The `top_n` countries and regions by events | yes |
+| `top_countries.sql`, `top_regions.sql` | The `top_n` countries and regions by events, split by magnitude level | yes |
 | `significant.sql`, `largest.sql` | The latest and the strongest `top_n` events at or above `significant_magnitude` | yes |
 | `countries.sql`, `regions.sql`, `event_types.sql` | The options of the filter's menus | no (regions: by the chosen country) |
 | `date_range.sql` | The first and last event, the custom calendar's limits | no |
@@ -286,26 +286,26 @@ Per ISO week, from Monday. Weeks without events are listed with 0, so a chart's 
 
 ### Where
 
-`top_countries.sql`: events without a country are grouped as `Unknown`, and ties are in alphabetical order.
+`top_countries.sql`: events without a country are grouped as `Unknown`, and ties are in alphabetical order. Each country's events are also counted by magnitude level, as in `over_time.sql`: the page draws each bar as its share of the events in the bars shown, split by level.
 
 <!-- replay: dashboard top_countries -->
 
-| country | events | max_magnitude |
-| --- | --- | --- |
-| United States | 4 | 2.5 |
-| Japan | 1 | 5.2 |
-| Mexico | 1 | 4.5 |
-| Unknown | 1 | NULL |
+| country | events | max_magnitude | below_2_5 | from_2_5 | from_4_5 | from_6 | no_magnitude |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| United States | 4 | 2.5 | 3 | 1 | 0 | 0 | 0 |
+| Japan | 1 | 5.2 | 0 | 0 | 1 | 0 | 0 |
+| Mexico | 1 | 4.5 | 0 | 0 | 1 | 0 | 0 |
+| Unknown | 1 | NULL | 0 | 0 | 0 | 0 | 1 |
 
 `top_regions.sql`, here with `top_n = 3`. A region is shown with its country, since names repeat across countries.
 
 <!-- replay: dashboard top_regions top_n=3 -->
 
-| region | country | events | max_magnitude |
-| --- | --- | --- | --- |
-| Alaska | United States | 3 | 2.5 |
-| Baja California | Mexico | 1 | 4.5 |
-| California | United States | 1 | -0.43 |
+| region | country | events | max_magnitude | below_2_5 | from_2_5 | from_4_5 | from_6 | no_magnitude |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Alaska | United States | 3 | 2.5 | 2 | 1 | 0 | 0 | 0 |
+| Baja California | Mexico | 1 | 4.5 | 0 | 0 | 1 | 0 | 0 |
+| California | United States | 1 | -0.43 | 1 | 0 | 0 | 0 | 0 |
 
 ### The events to look at
 

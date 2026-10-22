@@ -97,8 +97,9 @@ def test_the_charts_are_drawn_from_the_results(dash):
     # One segment per day and magnitude level with events: 6 events, 28 Feb to 10 Mar.
     assert len(page.query_selector_all('#chart-time g[aria-label="rect"] rect')) == 6
     assert len(page.query_selector_all('#chart-magnitude g[aria-label="rect"] rect')) == 12
+    # One segment per country and magnitude level with events: the United States has two.
     countries = page.query_selector_all('#chart-countries g[aria-label="bar"] rect')
-    assert len(countries) == 4
+    assert len(countries) == 5
     for figure in ("time", "magnitude", "depth", "countries", "regions"):
         svg = page.query_selector(f"#chart-{figure} svg[role=img]")
         assert svg is not None and svg.get_attribute("aria-label"), figure
@@ -719,3 +720,37 @@ def test_events_over_time_as_areas_lines_or_trendlines_in_the_legend_colors(dash
     page.click("button[type=reset]")
     page.wait_for_function("window.__earthHub.summary.events === 0")
     assert page.input_value("select[name=chart_style]") == "stacked"
+
+
+@pytest.mark.req("REQ-DASH-023")
+def test_the_top_bars_are_shares_split_by_magnitude_level(dash):
+    page = dash.page
+
+    def segments(figure):
+        return page.eval_on_selector_all(
+            f'#chart-{figure} g[aria-label="bar"] rect',
+            "rs => rs.map(r => [r.getAttribute('fill'), r.getBBox().width])",
+        )
+
+    # Earthquakes only, 6 in all: the United States 3 (2.49, -0.43 below 2.5; 2.5), Japan 5.2,
+    # Mexico 4.5 and one without a country or magnitude.
+    fills = sorted(fill for fill, _ in segments("countries"))
+    assert fills == sorted(["#fed976", "#fd8d3c", "#e31a1c", "#e31a1c", "#a8a29e"])
+    widths = [w for _, w in segments("countries")]
+    unit = min(widths)  # one event: 1/6 of the events
+    assert sorted(round(w / unit, 2) for w in widths) == [1, 1, 1, 1, 2]
+    # The axis is in percent, and each bar ends with its number of events.
+    ticks = page.eval_on_selector_all(
+        '#chart-countries g[aria-label="x-axis tick label"] text',
+        "ts => ts.map(t => t.textContent)",
+    )
+    assert ticks and all(t.endswith("%") for t in ticks)
+    labels = page.eval_on_selector_all(
+        '#chart-countries g[aria-label="text"] text', "ts => ts.map(t => t.textContent)"
+    )
+    assert labels == ["3", "1", "1", "1"]
+    swatches = page.eval_on_selector_all(
+        "#chart-regions [class*=swatch] > :is(span, div)",
+        "els => els.map(e => e.textContent.trim())",
+    )
+    assert [label for _, label, _ in LEVELS] == [s for s in swatches if s]
