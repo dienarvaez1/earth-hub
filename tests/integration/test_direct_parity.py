@@ -206,7 +206,7 @@ def test_revisions_id_changes_and_three_way_merges(modes, make_envelope, make_fe
     modes.compare()
     # The preferred ID changes: us2 is now reported as us2b, listing both.
     modes.batch([e(feature(make_feature, "us2b", ["us2b", "us2"], updated=UPDATED + 90_000))])
-    # Three reports turn out to be one event, in one message; the oldest record survives.
+    # Three reports turn out to be one event, in one message; the smallest key, ak1, survives.
     modes.batch(
         [e(feature(make_feature, "ci3", ["ci3", "us2b", "ak1"], updated=UPDATED + 120_000))]
     )
@@ -220,6 +220,33 @@ def test_revisions_id_changes_and_three_way_merges(modes, make_envelope, make_fe
         ]
     )
     modes.compare()
+
+
+@pytest.mark.req("REQ-MODE-001", "REQ-PER-006")
+def test_a_merge_keeps_the_smallest_key_even_when_created_last(modes, make_envelope, make_feature):
+    """DEF-050: full mode can create records in another order than the feed's, so the survivor
+    is never the first record created, in either store."""
+    e = make_envelope
+    modes.batch([e(feature(make_feature, "us7", mag=4.0))])
+    modes.batch([e(feature(make_feature, "ak7", mag=3.0, updated=UPDATED + 5))])
+    modes.batch([e(feature(make_feature, "us7", ["us7", "ak7"], updated=UPDATED + 10))])
+    # Within one batch, three created in reverse key order, then one message merges them.
+    modes.batch(
+        [
+            e(feature(make_feature, "nc9")),
+            e(feature(make_feature, "nc8", updated=UPDATED + 1)),
+            e(feature(make_feature, "nc7", updated=UPDATED + 2)),
+            e(feature(make_feature, "nc9", ["nc9", "nc8", "nc7"], updated=UPDATED + 3)),
+        ]
+    )
+    modes.compare()
+    keys = sorted(r.key for r in rows_of(modes.db))
+    assert keys == ["ak7", "nc7"]
+
+
+def rows_of(db):
+    with db.connect() as conn:
+        return conn.execute(select(Earthquake.key)).all()
 
 
 @pytest.mark.req("REQ-MODE-001")

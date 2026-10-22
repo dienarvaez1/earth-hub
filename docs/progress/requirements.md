@@ -83,7 +83,7 @@ One requirement per rule in [data-quality-rules.md](../technical/data-quality-ru
 | REQ-PER-003 | A message with the same `updated` time as the stored event is a `duplicate` and changes nothing |
 | REQ-PER-004 | A newer revision updates the event; an older one is `stale` and changes nothing |
 | REQ-PER-005 | An event stays one record when USGS changes its preferred ID, and its former IDs still find it |
-| REQ-PER-006 | Records that turn out to be one event are merged into the oldest, keeping the newest data and every ID |
+| REQ-PER-006 | Records that turn out to be one event are merged into the one with the smallest key, whatever order they were created in, keeping the newest data and every ID (DEF-050) |
 | REQ-PER-007 | The Kafka offset is committed only after the database commit; a crash between the two causes no duplicates |
 | REQ-PER-008 | During a database outage the consumer retries the same message until PostgreSQL is back, and never rejects it for that reason |
 | REQ-PER-009 | A message that fails 3 times for an unexpected reason is stored as `error` with the exception, and the partition moves on |
