@@ -5,8 +5,11 @@ writes the result (database/repository.py for PostgreSQL).
 
 The rules, the same whatever the store:
 - An event matches the records of any of its IDs. None: a new record. More than one: they turn
-  out to be one event, and are merged into the oldest record, which takes the data of the
-  newest one (by `updated`), the sum of their revision counts and the earliest `first_seen_at`.
+  out to be one event, and are merged into the record with the smallest key, which takes the
+  data of the newest one (by `updated`; the smallest key of equal ones), the sum of their
+  revision counts and the earliest `first_seen_at`. Keys, never the order records were
+  created in, so the survivor is the same whatever order messages arrive in: full mode reads
+  Kafka's partitions in no fixed order between them (DEF-050).
 - Whether the event then replaces the stored revision is decided by `revisions.compare` only.
 - IDs are identity facts: every ID of an event is recorded, even when its data is older.
 """
@@ -65,11 +68,6 @@ class Merge:
     preferred_event_id: str  # of the newest of the merged records, for the log
 
 
-def creation_order(key: Key) -> tuple:
-    """Records stored before this ledger come first, in their own order; then new ones."""
-    return (1, key.n) if isinstance(key, NewKey) else (0, key)
-
-
 @dataclass
 class Ledger:
     records: dict[Key, Record]
@@ -82,7 +80,7 @@ class Ledger:
 
     def apply(self, event: ValidEvent, now: datetime) -> Step:
         matched = {self.event_of[i] for i in event.ids if i in self.event_of}
-        keys = sorted(matched, key=creation_order)
+        keys = sorted(matched, key=lambda k: self.records[k].key)
         if not keys:
             key = NewKey(len(self.created))
             self.created.append(key)
@@ -130,8 +128,8 @@ class Ledger:
         return key
 
     def _merge(self, survivor: Key, others: list[Key]) -> None:
-        merged = [survivor, *others]
-        # The first of equal `updated` times wins: the oldest record.
+        merged = [survivor, *others]  # by key
+        # The first of equal `updated` times wins: the smallest key.
         newest = max(merged, key=lambda k: self.records[k].source_updated_ms)
         total = sum(self.records[k].revision_count for k in merged)
         first_seen = min(self.records[k].first_seen_at for k in merged)
