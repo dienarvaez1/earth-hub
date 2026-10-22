@@ -71,8 +71,21 @@ def test_the_worker_triggers_a_round_every_hour():
     }
     assert "GITHUB_TOKEN" not in json.dumps(config)  # a secret, never in the configuration
     source = (REPO / "dashboard" / "src" / "worker.ts").read_text()
-    for constant in ('WORKFLOW = "direct.yml"', 'REF = "main"', 'JOB = "round"'):
+    for constant in (
+        'WORKFLOW = "direct.yml"',
+        'REF = "main"',
+        'JOB = "round"',
+        'STARTED_BY = "cloudflare-trigger"',
+    ):
         assert f"const {constant};" in source
+
+
+@pytest.mark.req("REQ-MODE-015")
+def test_the_round_passes_on_who_asked_for_it(workflow):
+    started_by = workflow[True]["workflow_dispatch"]["inputs"]["started_by"]
+    assert started_by["type"] == "string" and started_by["default"] == ""
+    (step,) = [s for s in workflow["jobs"]["round"]["steps"] if "secrets." in str(s.get("env"))]
+    assert step["env"]["EARTH_HUB_STARTED_BY"] == "${{ inputs.started_by }}"  # never in run:
 
 
 @pytest.mark.req("REQ-REC-003")

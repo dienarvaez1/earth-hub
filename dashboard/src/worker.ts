@@ -17,6 +17,8 @@ interface Env {
 const WORKFLOW = "direct.yml";
 const REF = "main";
 const JOB = "round";
+// Who asked for the round, for its audit record (src/earth_hub/direct/audit.py).
+const STARTED_BY = "cloudflare-trigger";
 
 // Once a day, the trigger at this UTC hour also passes how many days the token has left;
 // within REMIND_DAYS the workflow's token job fails, and GitHub e-mails its owner.
@@ -57,7 +59,7 @@ async function startRound(env: Env, now: Date): Promise<void> {
     console.warn("trigger: GITHUB_TOKEN is not set, no direct round started");
     return;
   }
-  const inputs: Record<string, string> = { job: JOB };
+  const inputs: Record<string, string> = { job: JOB, started_by: STARTED_BY };
   if (now.getUTCHours() === CHECK_HOUR_UTC) {
     const days = await tokenDaysLeft(env, now);
     if (days !== null) {

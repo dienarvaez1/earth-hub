@@ -59,6 +59,7 @@ class Outcome:
     key: str | None = None  # the record, as it was when this message was processed
     rule: str | None = None
     reason: str | None = None
+    source: str | None = None  # the message's part: feed, catchup or deleted
 
 
 class DirectRunner:
@@ -81,6 +82,9 @@ class DirectRunner:
         # The poller and catch-up share one runner, from two threads; its cache is not
         # safe to share, so they take turns.
         self._turn = threading.RLock()
+        # Told of each round that wrote, after it did (the execution's audit record, audit.py):
+        # (source, outcomes, rows written, rows removed). Its failures never fail the round.
+        self.on_round: Callable[[str, list[Outcome], int, int], None] | None = None
 
     @_one_at_a_time
     def process(
@@ -106,6 +110,11 @@ class DirectRunner:
             self.state.begin(pending)
             self.state.apply(pending)
         self._log(outcomes, source, run_id, pending, time.monotonic() - started)
+        if self.on_round is not None:
+            try:
+                self.on_round(source, outcomes, len(pending["rows"]), len(pending["removed"]))
+            except Exception:
+                logger.warning("could not record the round in the audit", exc_info=True)
         return outcomes
 
     # Catch-up and the poller's state.
@@ -200,14 +209,15 @@ class DirectRunner:
             # The record as it was then. A key is one of its record's USGS IDs, so the ID map
             # gives where it is now (raw_events.earthquake_id in full mode, moved by merges).
             at_the_time = None if k is None else key_of[numbers[k]]
-            outcomes.append(Outcome(seq, outcome, at_the_time, rule, reason))
+            part = _source(envelope) or source
+            outcomes.append(Outcome(seq, outcome, at_the_time, rule, reason, part))
             lines.append(
                 {
                     "seq": seq,
                     "run_id": run_id,
                     "processed_at": iso(now),
                     # The envelope's (feed, catchup, deleted), else the round's.
-                    "source": _source(envelope) or source,
+                    "source": part,
                     "outcome": outcome,
                     "rule": rule,
                     "reason": reason,

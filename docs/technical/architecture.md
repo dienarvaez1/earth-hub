@@ -193,6 +193,7 @@ Milestone 8: the same pipeline without Docker, Kafka or PostgreSQL. The real pol
 | `_state/mode.json` | Which mode writes the bucket (`full` or `direct`), and the log's sequence number at the last handover. No marker means full mode |
 | `_state/direct.json` | The last sequence number, the poller's 26-hour state (rebuilt from `earthquakes.raw` in full mode) and catch-up's checkpoints |
 | `_state/direct-pending.json` | A round's writes, while they are being made |
+| `audit/direct/<date>/<run_id>.json` | One record per execution of direct mode (`direct/audit.py`): the command; who started it (`cloudflare-trigger`, `github-schedule`, `github-manual`, `direct-run`, `local`); the mode when it started; its status (running, succeeded, failed, skipped; `interrupted` when a `running` record has not been saved for 30 minutes); start, end and elapsed seconds; messages by part (feed, catchup, deleted) and outcome, rows written and removed; the log's sequence numbers; the errors logged and the rejected messages. Written at the start and the end (and every 10 minutes for `run`); a failure to write it never fails a round. `make direct-runs` lists the latest |
 | `log/<date>/<first>-<last>.ndjson` | Every message processed, in order: sequence number, processing time, source, outcome, rule, reason, record key and envelope (`raw_events`) |
 
 ```mermaid

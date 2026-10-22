@@ -35,6 +35,10 @@ on:
         description: Days until the trigger's GitHub token expires (the trigger sets it once a day)
         type: string
         default: ""
+      started_by:
+        description: Who asks for the run, for its audit record (the trigger sets cloudflare-trigger)
+        type: string
+        default: ""
 
 permissions:
   contents: read
@@ -76,6 +80,7 @@ jobs:
           R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
           R2_BUCKET: ${{ secrets.R2_BUCKET }}
           USGS_CONTACT: ${{ vars.USGS_CONTACT }}
+          EARTH_HUB_STARTED_BY: ${{ inputs.started_by }} # the audit record's started_by
         run: |
           set -o pipefail
           uv run python -m earth_hub.direct once --skip-unless-direct | tee output.txt

@@ -23,7 +23,7 @@ cron trigger, keeping the dashboard current while no machine runs.
 | `run` | `make direct-run` ⚠ (until stopped; run it in the background) | bucket |
 | `reconcile` | `make reconcile-direct` (`deep`: `make reconcile-direct DEEP=1`, one read per row) | no |
 | `schedule` | `gh workflow run direct.yml -f job=round` ⚠, then wait for `gh run list --workflow direct.yml --limit 1` | bucket |
-| `runs` | `gh run list --workflow direct.yml --limit 10` | no |
+| `runs` | `make -s direct-runs LIMIT=10` (the audit trail: every execution, who started it, what it did), then `gh run list --workflow direct.yml --limit 5` | no |
 
 - **After a switch, `direct` and `full` catch up and run the USGS check by themselves**; a check that finds an
   unexplained difference fails the command, but the switch stands. Report the check's table.

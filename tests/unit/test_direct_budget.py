@@ -19,6 +19,9 @@ FREE_CLASS_A = 1_000_000
 FREE_CLASS_B = 10_000_000
 FEED_ROUNDS_PER_DAY = 437
 CATCHUP_PASSES_PER_DAY = 24
+# Audit records (direct/audit.py): make direct-run's every HEARTBEAT, and a start and an end for
+# each of 24 executions a day: more than either does alone.
+AUDIT_PUTS_PER_DAY = 24 * 60 // 10 + 2 * 24
 LOAD_FACTOR = 3
 DAYS = 31
 
@@ -91,13 +94,20 @@ def test_direct_mode_stays_well_inside_the_free_operations(
     month_a = (
         LOAD_FACTOR
         * DAYS
-        * (FEED_ROUNDS_PER_DAY * per_round_a + CATCHUP_PASSES_PER_DAY * catchup[0])
+        * (
+            FEED_ROUNDS_PER_DAY * per_round_a
+            + CATCHUP_PASSES_PER_DAY * catchup[0]
+            + AUDIT_PUTS_PER_DAY
+        )
     )
     month_b = (
         LOAD_FACTOR
         * DAYS
         * (FEED_ROUNDS_PER_DAY * per_round_b + CATCHUP_PASSES_PER_DAY * catchup[1])
     )
+    from earth_hub.direct.audit import HEARTBEAT
+
+    assert AUDIT_PUTS_PER_DAY >= 86400 // HEARTBEAT.total_seconds() + 2 * 24
     print(f"per live round: A {per_round_a}, B {per_round_b}; per catch-up pass: {catchup}")
     print(f"a month at {LOAD_FACTOR}x: A {month_a:,}, B {month_b:,}")
     # About 10 writes a live round: the lock, the redo record, the rows, the ID map, the

@@ -98,7 +98,10 @@ def test_each_trigger_asks_github_for_one_round_on_main(with_token, github):
     assert fire(with_token).status_code == 200
     (request,) = github.requests
     assert request["path"] == DISPATCHES
-    assert request["body"] == {"ref": "main", "inputs": {"job": "round"}}
+    assert request["body"] == {
+        "ref": "main",
+        "inputs": {"job": "round", "started_by": "cloudflare-trigger"},
+    }
     headers = {k.lower(): v for k, v in request["headers"].items()}
     assert headers["authorization"] == "Bearer t0ken"
     assert headers["accept"] == "application/vnd.github+json"
@@ -128,7 +131,8 @@ def test_once_a_day_the_trigger_passes_the_days_the_token_has_left(
     check, dispatch = github.requests
     assert check["method"] == "GET" and check["path"] == WORKFLOW  # starts nothing
     assert check["headers"]["Authorization"] == "Bearer t0ken"
-    inputs = {"job": "round"} | ({"token_days_left": days} if days else {})
+    inputs = {"job": "round", "started_by": "cloudflare-trigger"}
+    inputs |= {"token_days_left": days} if days else {}
     assert dispatch["path"] == DISPATCHES and dispatch["body"]["inputs"] == inputs
 
 
@@ -141,7 +145,8 @@ def test_the_other_hours_only_start_the_round(with_token, github):
     finally:
         github.expiry = None
     (dispatch,) = github.requests
-    assert dispatch["method"] == "POST" and dispatch["body"]["inputs"] == {"job": "round"}
+    assert dispatch["method"] == "POST"
+    assert dispatch["body"]["inputs"] == {"job": "round", "started_by": "cloudflare-trigger"}
 
 
 def test_a_refusal_fails_the_trigger(with_token, github):
