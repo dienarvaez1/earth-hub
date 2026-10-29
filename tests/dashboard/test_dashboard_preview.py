@@ -73,6 +73,27 @@ def test_the_footer_shows_the_build_and_links_to_it_on_github(dash):
     assert link.get_attribute("rel") == "noopener"
 
 
+@pytest.mark.req("REQ-DASH-033")
+def test_the_footer_credits_usgs_and_says_what_the_data_is_not(dash):
+    usgs = dash.page.locator("footer #disclaimer a#usgs")
+    assert usgs.is_visible() and usgs.inner_text() == "U.S. Geological Survey"
+    assert usgs.get_attribute("href") == "https://earthquake.usgs.gov/"
+    live = dash.page.locator("footer #disclaimer a#usgs-live")
+    assert live.get_attribute("href") == "https://earthquake.usgs.gov/earthquakes/map/"
+    text = " ".join(dash.page.inner_text("footer #disclaimer").split())
+    for phrase in (
+        "Earthquake data courtesy of the U.S. Geological Survey (USGS).",
+        "for research purposes",
+        "not affiliated with or endorsed by USGS",
+        "not a complete or exact copy of its service",
+        "missing or inaccurate if any part of this system fails",
+        "derived by Earth-Hub",
+        "Provided as is, without warranty.",
+        "Not for emergency or safety decisions",
+    ):
+        assert phrase in text, phrase
+
+
 @pytest.mark.req("REQ-DASH-016")
 def test_a_package_without_a_license_text_fails_the_build(built, tmp_path):
     result = subprocess.run(

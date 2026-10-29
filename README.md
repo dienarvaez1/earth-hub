@@ -49,7 +49,7 @@ stateDiagram-v2
 
 | | |
 | --- | --- |
-| **Requirements** | 187 requirements, each with a stable ID and at least one passing test that names it (`@pytest.mark.req`). A test naming an unknown ID fails at collection, and `make traceability` fails if any requirement has no passing test |
+| **Requirements** | 188 requirements, each with a stable ID and at least one passing test that names it (`@pytest.mark.req`). A test naming an unknown ID fails at collection, and `make traceability` fails if any requirement has no passing test |
 | **Tests** | About 1,100, in eight layers: unit, integration, API, contract (Schemathesis), end-to-end, dashboard (in Chromium), disruptive (real outages) and performance. About 92% coverage across all layers |
 | **Defects** | 56 defects found and fixed, each with its milestone, severity, how it was found and the commit that fixed it; [six written up in full](docs/progress/defects.md) with root cause and prevention (kept in the git history) |
 | **CI** | On every pull request and push to `main`, lint and unit tests, then the regression of every layer except performance, from the example settings and with no secrets ([docs/technical/ci.md](docs/technical/ci.md)) |
@@ -160,7 +160,7 @@ It writes `reports/regression-summary.md`, JUnit XML for each layer, a coverage 
 
 **QA documents** in `docs/`:
 - the [test strategy](docs/progress/test-strategy.md): risks, levels, techniques, scope, reports and testing by milestone;
-- the [requirements](docs/progress/requirements.md), 187 of them, and the [traceability matrix](docs/progress/traceability-matrix.md);
+- the [requirements](docs/progress/requirements.md), 188 of them, and the [traceability matrix](docs/progress/traceability-matrix.md);
 - the [defect log](docs/progress/defects.md): 56 defects found and fixed, 6 with full reports in the git history;
 - the [data-quality rules](docs/technical/data-quality-rules.md) and the [known limitations](docs/overview/limitations.md).
 
@@ -213,9 +213,17 @@ In three groups under `docs/`, indexed in [docs/README.md](docs/README.md):
 - **Start over with empty data:** `make reset && make up && make migrate`.
 - **`make reconcile` reports lost messages:** a message was acknowledged without a `raw_events` row. Check the consumer logs for that partition and offset. Resetting the consumer group's offset replays it safely, because redelivery is idempotent.
 
-## Data source
+## Data source and disclaimer
 
-Earthquake data comes from the [USGS Earthquake Hazards Program](https://earthquake.usgs.gov/), which is in the public domain.
+Earthquake data courtesy of the [U.S. Geological Survey](https://earthquake.usgs.gov/) (USGS) Earthquake Hazards Program, from its public GeoJSON feeds and FDSN event service. USGS data is in the public domain; Earth-Hub credits USGS as its source, as USGS asks.
+
+- **Independent, for research purposes.** Earth-Hub is a portfolio and research project. It is not affiliated with or endorsed by USGS, and it is not a complete or exact copy of the USGS service.
+- **The data may be late, incomplete or inaccurate.** USGS revises and deletes events after first publishing them, and Earth-Hub follows those changes with a delay: up to an hour in direct mode. If any part of the system fails (the feed, a round, a handover, the bucket, the trigger), events can be missing, out of date or wrong until it recovers. The [limitations](docs/overview/limitations.md) list what it does not do.
+- **Some fields are Earth-Hub's own.** City, region and country are derived from USGS's place text ([`validation/places.py`](src/earth_hub/validation/places.py)), not provided by USGS, and the dashboard's rankings and charts are Earth-Hub's summaries.
+- **Not for emergency or safety decisions.** For current earthquakes and alerts, use [USGS's own map](https://earthquake.usgs.gov/earthquakes/map/) and official warnings.
+- **No warranty.** The software and the data it shows are provided as is, without warranty of any kind ([MIT License](LICENSE)).
+
+The dashboard repeats this in its footer, beside the map credits (© OpenFreeMap, © OpenMapTiles, data © OpenStreetMap contributors). Its DuckDB engine is loaded from jsDelivr, and its bundled packages' licenses are in `third-party-licenses.txt`.
 
 ## License
 
