@@ -12,14 +12,6 @@ import release  # noqa: E402
 
 pytestmark = pytest.mark.req("REQ-OPS-007")
 
-NUMBERS = {
-    "fix-status-case": 34,
-    "merge-survivor-by-key": 36,
-    "dashboard-magnitude-band": 35,
-    "release-prep": 37,
-    "release-public": 38,
-}
-
 
 class Fake(release.Shell):
     """Answers questions with `answer` and records them, and every changing command, in order."""
@@ -38,17 +30,13 @@ class Fake(release.Shell):
         if cmd[:3] == ("git", "config", "user.email"):
             return release.NOREPLY
         if cmd[:2] == ("git", "rev-parse"):
-            return "new" if cmd[2] == "HEAD" else f"tip-{cmd[2].removeprefix('origin/')}"
+            raise AssertionError(f"no branch to look up: {line}")  # DEF-055
         if cmd[:2] == ("gitleaks", "version"):
             return "8.21.0"
         if cmd[:2] == ("git", "for-each-ref") and "refs/remotes/origin" in cmd:
             return "origin/main\norigin/old-feature"
-        if cmd[:3] == ("gh", "pr", "view"):
-            return f"{NUMBERS[cmd[3]]}\tOPEN\tthe title"
         if cmd[:3] == ("gh", "pr", "list") and "old-feature" in cmd:
             return "12"
-        if cmd[:3] == ("gh", "pr", "checks"):
-            return "all green"
         if cmd[:3] == ("gh", "repo", "view"):
             return "PRIVATE"
         if cmd[:3] == ("gh", "run", "list"):
@@ -110,32 +98,44 @@ def test_answering_no_stops_having_changed_nothing_and_a_new_run_resumes_there()
     assert release._load()["done"] == [name for name, _ in release.STEPS]
 
 
-def test_pull_requests_merge_in_order_each_rebased_past_the_one_below():
+@pytest.mark.req("REQ-OPS-007")
+def test_the_release_runs_on_main_alone_and_in_order():
+    # DEF-055: preflight looked up the release's pull-request branches, merged and deleted
+    # since; the release then stopped before its first step. Nothing is merged any more.
     sh = Fake(yes)
     assert release.run(sh, {"done": []}) is True
-    done = changes(sh.events)
-    merged = [cmd[3] for cmd in done if cmd[:3] == ("gh", "pr", "merge")]
-    assert merged == ["34", "36", "35", "37", "38"]
-    rebases = [cmd[4] for cmd in done if cmd[:2] == ("git", "rebase")]
-    # The first lands as it is; each later one drops the commits of the one below.
-    assert rebases == [
-        "tip-fix-status-case",
-        "tip-merge-survivor-by-key",
-        "tip-dashboard-magnitude-band",
-        "tip-release-prep",
-    ]
-    assert all("--reset-author" in cmd[-1] for cmd in done if cmd[:2] == ("git", "rebase"))
-    # Public comes after every merge but release-public's, and before the environment.
-    order = [cmd[:3] for cmd in done]
-    assert order.index(("gh", "repo", "edit")) > order.index(("gh", "pr", "merge"))
-    env = next(i for i, cmd in enumerate(done) if "environments/r2" in " ".join(cmd))
-    last_merge = max(i for i, cmd in enumerate(done) if cmd[:3] == ("gh", "pr", "merge"))
-    assert order.index(("gh", "repo", "edit")) < env < last_merge
+    assert [name for name, _ in release.STEPS] == [
+        "preflight", "settings", "audit", "cleanup", "public", "contact", "ruleset", "r2-env",
+        "finish",
+    ]  # fmt: skip
+    done = [" ".join(cmd) for cmd in changes(sh.events)]
+    assert not any(c.startswith(("gh pr merge", "git rebase", "make dashboard")) for c in done)
+
+    def first(prefix: str) -> int:
+        return next(i for i, c in enumerate(done) if c.startswith(prefix))
+
+    # Public before the ruleset (GitHub Free has none for private repositories) and the
+    # environment; its credentials tried in a round before the repository's are deleted.
+    assert first("gh repo edit") < first("gh api -X POST repos/") < first("gh api -X PUT")
+    assert first("gh secret set") < first("gh workflow run") < first("gh secret delete")
+
+
+@pytest.mark.req("REQ-OPS-007")
+def test_a_contact_in_env_is_kept(tmp_path):
+    (tmp_path / ".env").write_text("USGS_CONTACT=someone@example.org\n")
+    sh = Fake(yes)
+    release.contact(sh, {"done": []})
+    assert (tmp_path / ".env").read_text() == "USGS_CONTACT=someone@example.org\n"
+    assert not any("in your .env too" in str(event) for kind, event in sh.events)
+    (tmp_path / ".env").write_text("USGS_CONTACT=\n")
+    release.contact(sh, {"done": []})
+    assert (tmp_path / ".env").read_text() == f"USGS_CONTACT={release.URL}\n"
 
 
 def test_going_public_needs_the_word_typed_in_full():
     sh = Fake(lambda question: "yes" if question.strip().startswith("Type") else "y")
-    state = {"done": [name for name, _ in release.STEPS[:5]]}
+    names = [name for name, _ in release.STEPS]
+    state = {"done": names[: names.index("public")]}
     assert release.run(sh, state) is False
     assert not any(cmd[:3] == ("gh", "repo", "edit") for cmd in changes(sh.events))
     assert release._load()["done"][-1] == "cleanup"

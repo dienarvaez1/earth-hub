@@ -242,7 +242,7 @@ The scenarios from Milestone 5 of the plan, verified through the API on the whol
 | REQ-OPS-004 | Logs are one JSON object per line, with extra fields such as event ID and stage |
 | REQ-OPS-005 | The poller's, consumers' and catch-up's health checks follow their heartbeats |
 | REQ-OPS-006 | Requests to USGS identify Earth-Hub in the `User-Agent`, with an optional operator contact |
-| REQ-OPS-007 | The release script (`make release`) asks before every step that changes the repository, GitHub, its secrets or the dashboard, needs `public` typed in full to change the visibility, stops at a no having changed nothing, resumes at the step it stopped at, and passes secrets only on standard input |
+| REQ-OPS-007 | The release script (`make release`) asks before every step that changes the repository, GitHub or its secrets, needs `public` typed in full to change the visibility, stops at a no having changed nothing, resumes at the step it stopped at, and passes secrets only on standard input |
 | REQ-QA-001 | Unit tests never use the network, the live USGS feed included |
 | REQ-QA-002 | Test data is deterministic: results do not depend on live earthquakes |
 | REQ-QA-003 | `make test` and `make coverage` run exactly the regression's unit layer, which needs no Docker, network or browser (DEF-039) |
