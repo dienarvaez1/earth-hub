@@ -24,7 +24,7 @@ As of 2026-10-29. The plan below is the original, with Milestone 7 revised; the 
 | 7.1 CI, third-party licenses, preview marking | Done | #16 |
 | 7.2 Documentation and demo | Done | #18; skills and cheat sheet #19; defect reports to history #20; docs reorganized #21 |
 | 7.3 Release, prepared: audit, MIT license, `USGS_CONTACT` setting, preview label removed, the release script | Done | #37, #38 |
-| 7.3 Release, the rest: public repository, branch protection on `main`, R2 secrets into the `r2` environment, rounds every 15 minutes | Not run yet (`make release`, run by the author) | |
+| 7.3 Release, the rest: public repository, branch protection on `main`, R2 secrets into the `r2` environment (the script's merge and deploy steps removed: DEF-055, #51) | Not run yet (`make release`, run by the author) | |
 | 8.1 Persistence decisions in memory (`processing/ledger.py`), `EventStore`, `PostgresStore`; the record key | Done | #22, #23 |
 | 8.2 `BucketStore`, the direct runner, parity tests | Done | #24 |
 | 8.3 The mode switch, handovers with log replay | Done | #25 |
@@ -41,7 +41,7 @@ As of 2026-10-29. The plan below is the original, with Milestone 7 revised; the 
 | The check against USGS measures each feed by when USGS generated it, not when a round read it or ended (DEF-054) | Done | #49 |
 | Dashboard: a link to the project on GitHub in the footer | Done | #50 |
 
-Current numbers: 185 requirements, all covered by a passing test; 54 defects, all fixed; about 1,200 tests in the full regression.
+Current numbers: 185 requirements, all covered by a passing test; 55 defects, all fixed; about 1,200 tests in the full regression.
 
 ## 1. Project vision
 

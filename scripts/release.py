@@ -13,17 +13,16 @@ The steps:
   1. preflight   gh signed in with the repo and workflow scopes; gitleaks; a clean checkout
   2. settings    your GitHub email privacy and $0 Actions budget (you set them; it asks)
   3. audit       gitleaks over every commit of every branch and pull request
-  4. merge       the pull requests below `release-public`, in order, each rebased onto main,
-                 green in CI, and squash-merged
-  5. cleanup     merged branches deleted from GitHub
-  6. public      the repository made public
-  7. contact     USGS_CONTACT as a repository variable and in .env
-  8. ruleset     main protected: both CI checks required, no force push or deletion
-  9. r2-env      an `r2` environment limited to main, holding the workflow's R2 credentials
- 10. finish      `release-public` merged (it moves the workflow to that environment and the
-                 schedule to every 15 minutes), a round run by hand, then the repository's
-                 R2 secrets deleted
- 11. deploy      the dashboard without its preview label, still out of search engines
+  4. cleanup     merged branches deleted from GitHub
+  5. public      the repository made public
+  6. contact     USGS_CONTACT as a repository variable, and in .env if it has none
+  7. ruleset     main protected: both CI checks required, no force push or deletion
+  8. r2-env      an `r2` environment limited to main, holding the workflow's R2 credentials
+  9. finish      a round run by hand with them, then the repository's R2 secrets deleted
+
+It once also merged the release's pull requests (#34 to #38) and deployed the dashboard
+without its preview label; those were merged by hand on 2026-10-22, so the steps were
+removed (DEF-055). The workflow already reads the `r2` environment (#38).
 """
 
 import argparse
@@ -42,14 +41,6 @@ REPO = Path(__file__).resolve().parents[1]
 SLUG = "dienarvaez1/earth-hub"
 URL = f"https://github.com/{SLUG}"
 STATE = REPO / ".git" / "earth-hub-release.json"
-# The branches to merge, in order; each is built on the one before.
-STACK = [
-    "fix-status-case",
-    "merge-survivor-by-key",
-    "dashboard-magnitude-band",
-    "release-prep",
-]
-FINAL = "release-public"  # merged once the repository is public and the environment exists
 CHECKS = ["Lint and unit tests", "Regression (all layers but performance)"]
 R2_SECRETS = ["R2_ACCOUNT_ID", "R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY", "R2_BUCKET"]
 NOREPLY = "155141291+dienarvaez1@users.noreply.github.com"
@@ -122,10 +113,6 @@ def preflight(sh: Shell, state: dict) -> None:
         sh.require("Use the noreply address for this repository's commits?")
         sh.change("git", "config", "user.email", NOREPLY)
     sh.read("git", "fetch", "--prune", "origin")
-    # The tip of each branch now: rebasing one onto main later drops the commits it shares
-    # with the branch below, which has by then been squash-merged.
-    if "tips" not in state:
-        state["tips"] = {b: sh.read("git", "rev-parse", f"origin/{b}") for b in [*STACK, FINAL]}
 
 
 def settings(sh: Shell, state: dict) -> None:
@@ -169,18 +156,8 @@ def audit(sh: Shell, state: dict) -> None:
         sh.require("Are all of these false positives, or rotated already?")
 
 
-def merge(sh: Shell, state: dict) -> None:
-    done = state.setdefault("merged", [])
-    for below, branch in zip([None, *STACK], STACK, strict=False):
-        if branch in done:
-            continue
-        _land(sh, state, branch, below)
-        done.append(branch)
-        _save(state)
-
-
 def cleanup(sh: Shell, state: dict) -> None:
-    keep = {"main", FINAL}
+    keep = {"main"}
     merged = []
     for ref in sh.read(
         "git", "for-each-ref", "--format=%(refname:short)", "refs/remotes/origin"
@@ -224,7 +201,9 @@ def contact(sh: Shell, state: dict) -> None:
     sh.require("Set it as the repository variable USGS_CONTACT (the scheduled workflow's)?")
     sh.change("gh", "variable", "set", "USGS_CONTACT", "--repo", SLUG, "--body", URL)
     env = REPO / ".env"
-    if env.exists() and f"USGS_CONTACT={URL}" not in env.read_text():
+    if _dotenv(env).get("USGS_CONTACT"):
+        print("  Your .env names a contact already; it is kept.")
+    elif env.exists():
         if sh.confirm(f"Set USGS_CONTACT={URL} in your .env too?"):
             lines = [
                 line
@@ -297,10 +276,6 @@ def r2_env(sh: Shell, state: dict) -> None:
 
 
 def finish(sh: Shell, state: dict) -> None:
-    if FINAL not in state.setdefault("merged", []):
-        _land(sh, state, FINAL, STACK[-1])
-        state["merged"].append(FINAL)
-        _save(state)
     sh.require("Run a direct round by hand now, with the environment's credentials?")
     sh.change(
         "gh", "workflow", "run", "direct.yml", "--repo", SLUG, "--ref", "main", "-f", "job=round"
@@ -321,117 +296,20 @@ def finish(sh: Shell, state: dict) -> None:
             sh.change("gh", "secret", "delete", name, "--repo", SLUG)
 
 
-def deploy(sh: Shell, state: dict) -> None:
-    sh.read("git", "fetch", "origin")
-    print("  The dashboard, built from main: no preview label, still out of search engines.")
-    sh.require("Deploy it to Cloudflare now (make dashboard-deploy)?")
-    with _worktree(sh, "origin/main") as tree:
-        sh.change("cp", str(REPO / ".env"), str(tree / ".env"))
-        sh.change("make", "dashboard-install", cwd=tree)
-        sh.change("make", "dashboard-deploy", cwd=tree)
-
-
 STEPS: list[tuple[str, Callable[[Shell, dict], None]]] = [
     ("preflight", preflight),
     ("settings", settings),
     ("audit", audit),
-    ("merge", merge),
     ("cleanup", cleanup),
     ("public", public),
     ("contact", contact),
     ("ruleset", ruleset),
     ("r2-env", r2_env),
     ("finish", finish),
-    ("deploy", deploy),
 ]
 
 
 # --- helpers -----------------------------------------------------------------------------------
-
-
-def _pr(sh: Shell, branch: str) -> tuple[str, str]:
-    out = sh.read("gh", "pr", "view", branch, "--repo", SLUG, "--json", "number,title,state",
-                  "-q", '"\\(.number)\\t\\(.state)\\t\\(.title)"')  # fmt: skip
-    number, pr_state, title = out.split("\t", 2)
-    if pr_state != "OPEN":
-        raise Stop(f"#{number} ({branch}) is {pr_state.lower()}, not open")
-    return number, title
-
-
-def _land(sh: Shell, state: dict, branch: str, below: str | None) -> None:
-    """Rebases a pull request onto main (after the one below it merged), waits for CI,
-    and squash-merges it: one question, asked before anything is pushed."""
-    number, title = _pr(sh, branch)
-    print(f"  #{number}  {title}")
-    sh.require(f"Rebase #{number} onto main if needed, wait for CI, then squash-merge it?")
-    if below is not None:
-        _rebase(sh, state, branch, old_base=state["tips"][below])
-    _wait_for_checks(sh, number)
-    sh.change("gh", "pr", "merge", number, "--squash", "--repo", SLUG)
-    sh.change("git", "push", "origin", "--delete", branch)
-    sh.read("git", "fetch", "--prune", "origin")
-
-
-def _rebase(sh: Shell, state: dict, branch: str, old_base: str) -> None:
-    """Replays the branch's own commits, those after `old_base` (the old tip of the branch
-    below, now squash-merged), onto main. Recorded, so running again does not repeat it."""
-    rebased = state.setdefault("rebased", {})
-    sh.read("git", "fetch", "origin")
-    current = sh.read("git", "rev-parse", f"origin/{branch}")
-    if rebased.get(branch) == current:
-        return
-    with _worktree(sh, current) as tree:
-        # Authored again with the noreply address: GitHub refuses pushes of commits that
-        # carry a private email once "Block command line pushes" is on.
-        sh.change("git", "rebase", "--onto", "origin/main", old_base,
-                  "--exec", "git commit --amend --no-edit --reset-author", cwd=tree)  # fmt: skip
-        new = current if sh.dry_run else sh.read("git", "rev-parse", "HEAD", cwd=tree)
-        sh.change("git", "push", f"--force-with-lease={branch}:{current}", "origin",
-                  f"HEAD:refs/heads/{branch}", cwd=tree)  # fmt: skip
-    rebased[branch] = new
-    _save(state)
-
-
-def _wait_for_checks(sh: Shell, number: str) -> None:
-    if sh.dry_run:
-        print(f"    would wait for CI on #{number}")
-        return
-    print(f"  Waiting for CI on #{number} (the regression takes about 15 minutes)...")
-    for _ in range(30):  # the checks take a moment to appear after a push
-        if sh.read("gh", "pr", "checks", number, "--repo", SLUG, ok=(0, 1, 8)):
-            break
-        time.sleep(10)
-    if sh.status(
-        "gh",
-        "pr",
-        "checks",
-        number,
-        "--repo",
-        SLUG,
-        "--watch",
-        "--fail-fast",
-        "--interval",
-        "30",
-        show=True,
-    )[0]:
-        raise Stop(f"CI failed on #{number}: fix it, then run again")
-
-
-class _worktree:
-    """A temporary detached worktree at `ref`, removed afterwards."""
-
-    def __init__(self, sh: Shell, ref: str):
-        self.sh, self.ref = sh, ref
-        self.path = Path(tempfile.mkdtemp(prefix="earth-hub-release-")) / "tree"
-
-    def __enter__(self) -> Path:
-        if not self.sh.dry_run:
-            self.sh.read("git", "worktree", "add", "--detach", str(self.path), self.ref)
-        return self.path
-
-    def __exit__(self, *exc) -> None:
-        if not self.sh.dry_run:
-            self.sh.status("git", "worktree", "remove", "--force", str(self.path))
 
 
 def _version(text: str) -> tuple[int, ...]:
