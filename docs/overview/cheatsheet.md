@@ -183,7 +183,7 @@ Only while `make mode` says `direct`. The hourly rounds (a Cloudflare cron trigg
 | `/eh-mode catchup` | `make catchup-now` ⚠ | Catch up now: a direct round with the day feed, the month feed and the deletions, whether due or not |
 | `/eh-mode reconcile` | `make reconcile-direct [DEEP=1]` | Rows, manifest, snapshot, ID map and log agree, read-only ([direct mode](../technical/architecture.md#direct-mode)) |
 | `/eh-r2 count` | `make r2-get KEY=analytics/meta.json \| jq '{run_id, written_at, rows}'` | Rows in the bucket now (PostgreSQL falls behind until `make mode-full`) |
-| | `gh secret set -f <file>` ⚠ | The workflow's four `R2_*` secrets, from a file of `NAME=value` lines: repository secrets while the repository is private, `--env r2` once it is public (empty values make every run fail) |
+| | `gh secret set -f <file>` ⚠ | The workflow's four `R2_*` secrets, from a file of `NAME=value` lines, with `--env r2` (the environment only `main` can use; empty values make every run fail) |
 
 **Before closing the computer:** `make mode` says `direct (active)`, and no `make direct-run` is left running. **Back at it:** `make to-full` brings PostgreSQL and the API up to date.
 

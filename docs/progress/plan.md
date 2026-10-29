@@ -24,7 +24,7 @@ As of 2026-10-29. The plan below is the original, with Milestone 7 revised; the 
 | 7.1 CI, third-party licenses, preview marking | Done | #16 |
 | 7.2 Documentation and demo | Done | #18; skills and cheat sheet #19; defect reports to history #20; docs reorganized #21 |
 | 7.3 Release, prepared: audit, MIT license, `USGS_CONTACT` setting, preview label removed, the release script | Done | #37, #38 |
-| 7.3 Release, the rest: public repository (2026-10-29, v1.0.0), branch protection on `main`, R2 secrets into the `r2` environment (the script's merge and deploy steps removed: DEF-055, #51) | Public; the rest with `make release`, run by the author | |
+| 7.3 Release, the rest: public repository, v1.0.0, branch protection on `main`, `USGS_CONTACT`, R2 secrets in the `r2` environment only (the script's merge and deploy steps removed: DEF-055) | Done, 2026-10-29 (`make release`, run by the author) | #51 |
 | 8.1 Persistence decisions in memory (`processing/ledger.py`), `EventStore`, `PostgresStore`; the record key | Done | #22, #23 |
 | 8.2 `BucketStore`, the direct runner, parity tests | Done | #24 |
 | 8.3 The mode switch, handovers with log replay | Done | #25 |
@@ -485,7 +485,7 @@ Revised on 2026-10-19: reports are built from the R2 bucket, not PostgreSQL, and
 
 ### Milestone 7 — CI/CD, documentation, and portfolio release
 
-Revised on 2026-10-19: the release (license, public repository, branch protection, `USGS_CONTACT`, removing the dashboard's preview marking) and the pre-release audit are deferred to a later step. Until then the repository stays private and the dashboard public, marked as a preview and kept out of search engines. The demo is a written walkthrough. Released later with `make release` (#37): the repository public, the email in old commits accepted (new commits use the noreply address), the MIT license, the direct-mode schedule every 15 minutes from an `r2` environment, and the dashboard's preview label removed (#38). The repository and the dashboard are not promoted: the dashboard stays out of search engines, and the repository has no description, topics or website.
+Revised on 2026-10-19: the release (license, public repository, branch protection, `USGS_CONTACT`, removing the dashboard's preview marking) and the pre-release audit are deferred to a later step. Until then the repository stays private and the dashboard public, marked as a preview and kept out of search engines. The demo is a written walkthrough. Released on 2026-10-29 as v1.0.0, with `make release` (#37, #51): the repository public, the email in old commits accepted (new commits use the noreply address; [limitations](../overview/limitations.md#testing-and-ci)), the MIT license, `main` protected, direct mode's R2 credentials in an `r2` environment only `main` can use, and the dashboard's preview label removed (#38). Direct mode stays hourly, started from Cloudflare (DEF-052, DEF-056). The repository and the dashboard are not promoted: the dashboard stays out of search engines, and the repository has no description, topics or website.
 
 **Implementation**
 
