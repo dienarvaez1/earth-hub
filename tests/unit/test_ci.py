@@ -12,7 +12,9 @@ REPO = Path(__file__).resolve().parents[2]
 WORKFLOW = REPO / ".github" / "workflows" / "ci.yml"
 sys.path.insert(0, str(REPO / "scripts"))
 import regression  # noqa: E402
+import release  # noqa: E402
 import traceability  # noqa: E402
+from support.shard import parse, split  # noqa: E402
 
 
 @pytest.fixture(scope="module")
@@ -33,7 +35,7 @@ def test_every_pull_request_and_push_to_main_is_checked(workflow):
     triggers = workflow[True]  # YAML 1.1 reads the key `on` as true
     assert "pull_request" in triggers
     assert triggers["push"]["branches"] == ["main"]
-    assert {"checks", "regression"} <= workflow["jobs"].keys()
+    assert {"checks", "layers", "dashboard", "regression"} <= workflow["jobs"].keys()
 
 
 @pytest.mark.req("REQ-CI-001")
@@ -42,13 +44,48 @@ def test_the_quick_job_runs_lint_and_unit_tests(workflow):
     assert "make lint" in run and "make test" in run
 
 
-@pytest.mark.req("REQ-CI-001")
-def test_the_regression_job_runs_every_layer_but_performance_from_the_example_settings(workflow):
-    run = commands(workflow, "regression")
-    assert "cp .env.example .env" in run
-    assert "make up" in run
-    (regression_line,) = [line for line in run.splitlines() if "scripts/regression.py" in line]
-    assert regression_line.split("regression.py", 1)[1].split() == ["--skip", "performance"]
+def regression_args(workflow: dict, job: str) -> list[str]:
+    (line,) = [line for line in commands(workflow, job).splitlines() if "regression.py" in line]
+    return line.split("regression.py", 1)[1].split()
+
+
+@pytest.mark.req("REQ-CI-001", "REQ-CI-008")
+def test_the_regression_runs_every_layer_but_performance_from_the_example_settings(workflow):
+    for job in ("layers", "dashboard"):
+        assert "cp .env.example .env" in commands(workflow, job), job
+    assert "make up" in commands(workflow, "layers")
+    assert regression_args(workflow, "layers") == ["--skip", "performance", "dashboard"]
+    assert regression_args(workflow, "dashboard") == [
+        "--only",
+        "dashboard",
+        "--shard",
+        '"$SHARD/2"',
+    ]
+    assert workflow["jobs"]["dashboard"]["strategy"]["matrix"]["shard"] == [1, 2]
+    combine = regression_args(workflow, "regression")
+    assert combine == ["--skip", "performance", "--combine", "parts/*/"]
+
+
+@pytest.mark.req("REQ-CI-008")
+def test_the_required_check_merges_every_part_and_runs_unless_cancelled(workflow):
+    job = workflow["jobs"]["regression"]
+    assert job["needs"] == ["layers", "dashboard"]
+    assert job["if"] == "${{ !cancelled() }}"  # a skipped required check would count as passed
+    (download,) = [s for s in job["steps"] if s.get("uses", "").startswith("actions/download-")]
+    assert download["with"] == {"pattern": "part-*", "path": "parts/"}
+    for part in ("layers", "dashboard"):
+        (upload,) = [
+            s for s in steps(workflow, part) if s.get("uses", "").startswith("actions/upload-")
+        ]
+        assert upload["if"] == "always()" and upload["with"]["name"].startswith("part-")
+        assert upload["with"]["path"] == "reports/"
+
+
+@pytest.mark.req("REQ-CI-008")
+def test_the_release_requires_the_checks_ci_has():
+    names = {job["name"] for job in yaml.safe_load(WORKFLOW.read_text())["jobs"].values()}
+    assert set(release.CHECKS) <= names
+    assert "Regression (all layers but performance)" in release.CHECKS  # the merged one
 
 
 @pytest.mark.req("REQ-CI-001")
@@ -80,8 +117,64 @@ def test_actions_are_pinned_to_commit_shas_and_the_token_is_read_only(workflow):
     assert checkouts and all(s["with"]["persist-credentials"] is False for s in checkouts)
 
 
-def result(layer: str, ok: bool = True) -> regression.Result:
-    return regression.Result(layer, ok, 1.0, tests=3)
+def result(layer: str, ok: bool = True, seconds: float = 1.0, shard: str = "") -> regression.Result:
+    return regression.Result(layer, ok, seconds, tests=3, shard=shard)
+
+
+@pytest.mark.req("REQ-CI-008")
+def test_shards_split_the_tests_into_parts_that_cover_each_once():
+    items = list(range(7))
+    parts = [split(items, k, 3) for k in (1, 2, 3)]
+    assert [kept for kept, _ in parts] == [[0, 3, 6], [1, 4], [2, 5]]
+    assert sorted(i for kept, _ in parts for i in kept) == items
+    assert all(sorted(kept + others) == items for kept, others in parts)
+    assert parse("2/3") == (2, 3)
+    for bad in ("3/2", "0/2", "1", "a/b"):
+        with pytest.raises(pytest.UsageError):
+            parse(bad)
+
+
+@pytest.mark.req("REQ-CI-008")
+def test_shards_of_a_layer_count_once_as_long_as_the_slowest():
+    parts = [result("unit"), result("dashboard", seconds=5, shard="1/2"),
+             result("dashboard", ok=False, seconds=9, shard="2/2")]  # fmt: skip
+    unit, dashboard = regression.merge(parts)
+    assert (unit.layer, unit.tests) == ("unit", 3)
+    assert (dashboard.ok, dashboard.tests, dashboard.seconds) == (False, 6, 9)
+    assert regression.missing_shards(parts) == []
+    assert regression.missing_shards(parts[:2]) == ["dashboard (shard 2/2)"]
+
+
+def write_part(directory: Path, results: list[regression.Result], traces: dict) -> Path:
+    directory.mkdir()
+    (directory / "regression-summary.json").write_text(
+        json.dumps([r.__dict__ for r in results], default=list)
+    )
+    for name, trace in traces.items():
+        (directory / f"trace-{name}.json").write_text(json.dumps(trace))
+    return directory
+
+
+@pytest.mark.req("REQ-CI-008")
+def test_combine_reads_each_parts_results_and_traces(tmp_path, monkeypatch):
+    monkeypatch.setattr(regression, "REPORTS", tmp_path / "reports")
+    (tmp_path / "reports").mkdir()
+    one = write_part(tmp_path / "one", [result("lint"), result("unit")], {"unit": {"R": {}}})
+    two = write_part(tmp_path / "two", [result("dashboard", shard="1/2")], {"dashboard-1of2": {}})
+    (tmp_path / "three").mkdir()  # a part that stopped before writing its summary
+    parts = regression.combine([one, two, tmp_path / "three"])
+    assert [(r.layer, r.shard) for r in parts] == [("lint", ""), ("unit", ""), ("dashboard", "1/2")]
+    copied = sorted(p.name for p in (tmp_path / "reports").iterdir())
+    assert copied == ["trace-dashboard-1of2.json", "trace-unit.json"]
+    assert regression.missing_shards(parts) == ["dashboard (shard 2/2)"]
+
+
+@pytest.mark.req("REQ-CI-008")
+def test_a_part_takes_neither_skip_nor_combine_and_shard_needs_a_part():
+    for argv in (["--only", "unit", "--skip", "lint"], ["--shard", "1/2"],
+                 ["--only", "unit", "--combine", "x"]):  # fmt: skip
+        with pytest.raises(SystemExit):
+            regression.main(argv)
 
 
 @pytest.mark.req("REQ-CI-003")

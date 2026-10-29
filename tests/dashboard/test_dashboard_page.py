@@ -3,6 +3,7 @@ same snapshot, the form, the drawing, phone width and the empty state."""
 
 import json
 from datetime import datetime, timedelta
+from decimal import ROUND_HALF_UP, Decimal
 
 import pytest
 from support.dashboard import LocalDashboard
@@ -305,7 +306,7 @@ def test_a_popup_gives_the_time_in_utc_and_where_the_event_happened(browser_page
         "2024-03-10 23:00:00 UTC",
         "2024-03-10 15:00:00 AKDT (UTC-8)",
     )
-    assert after["details"] == "M 5.2 · 10 km deep"  # magnitude and depth on their own line
+    assert after["details"] == "M 5.2 · 10.0 km deep"  # magnitude and depth on their own line
     assert browser_page.errors == [] and browser_page.blocked == []
 
 
@@ -350,9 +351,10 @@ def test_local_times_give_seconds_the_abbreviation_and_the_offset(
     assert utc == when.replace("T", " ").replace("Z", " UTC")
 
 
-def js_number(value: float) -> str:
-    """A number as JavaScript writes it in text: 10, not 10.0."""
-    return str(int(value)) if float(value).is_integer() else repr(value)
+def depth(value: float) -> str:
+    """A depth as the page writes it, JavaScript's toFixed(1): the float's exact value rounded,
+    halves up (Python's own format rounds halves to even)."""
+    return str(Decimal(value).quantize(Decimal("0.1"), rounding=ROUND_HALF_UP))
 
 
 def popups(page) -> int:
@@ -368,7 +370,7 @@ def test_a_popup_flags_a_tsunami(browser_page, large_server):
     for point, flag in ((flagged, True), (calm, False)):
         assert page.evaluate("key => window.__earthHub.openPopup(key)", point["key"])
         details = page.inner_text(".maplibregl-popup [data-testid=popup-details]")
-        assert details.split(" · ")[1] == f"{js_number(point['depth_km'])} km deep"
+        assert details.split(" · ")[1] == f"{depth(point['depth_km'])} km deep"
         assert ("tsunami flagged" in details) is flag
     assert browser_page.errors == [] and browser_page.blocked == []
 

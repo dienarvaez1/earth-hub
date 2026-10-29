@@ -11,6 +11,15 @@ reports/regression-summary.md and the traceability matrix to docs/.
 `--skip` leaves out layers by choice: CI skips performance, whose timings shared runners
 cannot repeat. Skipped layers are listed as such and do not fail the run; requirements
 covered only by their tests show as not run, not as gaps.
+
+CI runs the regression in parallel jobs (docs/technical/ci.md), each a part of it:
+    regression.py --skip performance dashboard          the layers that need Docker
+    regression.py --only dashboard --shard 1/2          half the dashboard tests (each shard)
+    regression.py --skip performance --combine DIR...   the jobs' reports/, merged
+A part runs no traceability check, since it sees only some of the tests. `--combine` merges
+the parts' results (a layer split in shards counts once, as long as its slowest shard), their
+traces and coverage, then checks traceability over all of them. A layer, or a shard of one,
+that no part reports was not run, and fails the run like a failing layer.
 """
 
 import argparse
@@ -28,6 +37,7 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
 REPORTS = REPO / "reports"
+COVERAGE_DATA = "coverage.data"  # the run's .coverage, kept in reports/ for --combine
 
 UNIT = "not integration and not e2e and not disruptive and not performance and not dashboard"
 LAYERS = [
@@ -54,6 +64,7 @@ class Result:
     errors: int = 0
     skipped: int = 0
     failed_tests: tuple[str, ...] = ()
+    shard: str = ""  # "1/2": this part of the layer's tests (pytest --shard)
 
 
 def run(cmd: list[str]) -> int:
@@ -68,8 +79,9 @@ def run_lint() -> Result:
     return Result("lint", ok, time.monotonic() - start)
 
 
-def run_pytest(layer: str, args: list[str], first: bool) -> Result:
-    junit = REPORTS / f"junit-{layer}.xml"
+def run_pytest(layer: str, args: list[str], first: bool, shard: str = "") -> Result:
+    name = layer + (f"-{shard.replace('/', 'of')}" if shard else "")  # files of each part
+    junit = REPORTS / f"junit-{name}.xml"
     cmd = [
         "uv",
         "run",
@@ -77,15 +89,16 @@ def run_pytest(layer: str, args: list[str], first: bool) -> Result:
         *args,
         "-q",
         f"--junitxml={junit}",
-        f"--trace-out={REPORTS / f'trace-{layer}.json'}",
+        f"--trace-out={REPORTS / f'trace-{name}.json'}",
         "--cov=earth_hub",
         "--cov-report=",
+        *([f"--shard={shard}"] if shard else []),
     ]
     if not first:
         cmd.append("--cov-append")
     start = time.monotonic()
     code = run(cmd)
-    result = Result(layer, code == 0, time.monotonic() - start)
+    result = Result(layer, code == 0, time.monotonic() - start, shard=shard)
     if junit.exists():
         suite = ET.parse(junit).getroot()
         suite = suite.find("testsuite") if suite.tag == "testsuites" else suite
@@ -120,6 +133,59 @@ def environment() -> dict[str, str]:
         "docker": tool_version("docker", "--version"),
         "uv": tool_version("uv", "--version"),
     }
+
+
+def merge(results: list[Result]) -> list[Result]:
+    """One result per layer, in the layers' order: a layer's shards add up, and take as long
+    as the slowest one (they ran side by side)."""
+    merged = []
+    for layer in NAMES:
+        parts = [r for r in results if r.layer == layer]
+        if parts:
+            merged.append(
+                Result(
+                    layer,
+                    all(r.ok for r in parts),
+                    max(r.seconds for r in parts),
+                    tests=sum(r.tests for r in parts),
+                    failures=sum(r.failures for r in parts),
+                    errors=sum(r.errors for r in parts),
+                    skipped=sum(r.skipped for r in parts),
+                    failed_tests=tuple(t for r in parts for t in r.failed_tests),
+                )
+            )
+    return merged
+
+
+def missing_shards(results: list[Result]) -> list[str]:
+    """The shards of a split layer that no part reports, as "dashboard (shard 2/2)"."""
+    missing = []
+    for layer in NAMES:
+        shards = {r.shard for r in results if r.layer == layer and r.shard}
+        if shards:
+            n = int(next(iter(shards)).split("/")[1])
+            missing += [
+                f"{layer} (shard {k}/{n})" for k in range(1, n + 1) if f"{k}/{n}" not in shards
+            ]
+    return missing
+
+
+def combine(dirs: list[Path]) -> list[Result]:
+    """The results of the parts whose reports/ are in `dirs`, with their traces and JUnit
+    files copied to reports/ and their coverage combined into .coverage."""
+    results, coverage = [], []
+    for directory in dirs:
+        summary_json = directory / "regression-summary.json"
+        if summary_json.exists():  # a part that stopped before writing it reports nothing
+            for r in json.loads(summary_json.read_text()):
+                results.append(Result(**r | {"failed_tests": tuple(r["failed_tests"])}))
+        for path in [*directory.glob("trace-*.json"), *directory.glob("junit-*.xml")]:
+            shutil.copy(path, REPORTS / path.name)
+        if (directory / COVERAGE_DATA).exists():
+            coverage.append(str(directory / COVERAGE_DATA))
+    if coverage:
+        run(["uv", "run", "coverage", "combine", "--keep", "-q", *coverage])
+    return results
 
 
 def coverage_total() -> str | None:
@@ -189,41 +255,64 @@ def layer_dirs(names: tuple[str, ...]) -> list[str]:
     return [args[0] for name, args in LAYERS if name in names and args]
 
 
-def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Run every test layer and write reports/.")
-    parser.add_argument(
-        "--skip", nargs="+", default=[], choices=NAMES, metavar="LAYER", help="layers to leave out"
-    )
-    left_out = tuple(parser.parse_args(argv).skip)
-    shutil.rmtree(REPORTS, ignore_errors=True)
-    REPORTS.mkdir()
-    (REPO / ".coverage").unlink(missing_ok=True)
-    os.environ.setdefault("PYTHONUNBUFFERED", "1")
-
+def run_layers(left_out: tuple[str, ...], only: list[str] | None, shard: str):
+    """Run the layers in order, stopping at the first that fails: (results, layers not run)."""
     results: list[Result] = []
     first_pytest = True
-    layers = [(name, args) for name, args in LAYERS if name not in left_out]
+    layers = [(n, a) for n, a in LAYERS if n not in left_out and (only is None or n in only)]
     for index, (layer, args) in enumerate(layers):
         print(f"\n=== {layer} ===", flush=True)
         if args is None:
             result = run_lint()
         else:
-            result = run_pytest(layer, args, first_pytest)
+            result = run_pytest(layer, args, first_pytest, shard)
             first_pytest = False
         results.append(result)
         if not result.ok:
-            skipped = [name for name, _ in layers[index + 1 :]]
-            break
+            return results, [name for name, _ in layers[index + 1 :]]
+    return results, []
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description="Run every test layer and write reports/.")
+    parser.add_argument(
+        "--skip", nargs="+", default=[], choices=NAMES, metavar="LAYER", help="layers to leave out"
+    )
+    parser.add_argument(
+        "--only", nargs="+", choices=NAMES, metavar="LAYER", help="run only these layers, a part"
+    )
+    parser.add_argument("--shard", metavar="K/N", help="with --only: pytest's --shard K/N")
+    parser.add_argument(
+        "--combine", nargs="+", type=Path, metavar="DIR", help="merge the parts' reports/"
+    )
+    options = parser.parse_args(argv)
+    if options.only and (options.skip or options.combine):
+        parser.error("--only runs a part: it takes neither --skip nor --combine")
+    if options.shard and not options.only:
+        parser.error("--shard needs --only")
+    left_out = tuple(options.skip)
+    shutil.rmtree(REPORTS, ignore_errors=True)
+    REPORTS.mkdir()
+    (REPO / ".coverage").unlink(missing_ok=True)
+    os.environ.setdefault("PYTHONUNBUFFERED", "1")
+
+    if options.combine:
+        parts = combine(options.combine)
+        results = merge(parts)
+        ran = {r.layer for r in results}
+        skipped = [n for n in NAMES if n not in left_out and n not in ran] + missing_shards(parts)
     else:
-        skipped = []
+        results, skipped = run_layers(left_out, options.only, options.shard or "")
 
     coverage = coverage_total()
+    if (REPO / ".coverage").exists():
+        shutil.copy(REPO / ".coverage", REPORTS / COVERAGE_DATA)
     trace_ok = None
-    if not skipped and all(r.ok for r in results):
+    if not options.only and not skipped and all(r.ok for r in results):
         not_run = [f"--not-run={d}" for d in layer_dirs(left_out)]
         trace_ok = run(["uv", "run", "python", "scripts/traceability.py", *not_run]) == 0
 
-    text = summary(results, skipped, coverage, trace_ok, left_out)
+    text = summary(results, skipped, coverage, trace_ok, () if options.only else left_out)
     (REPORTS / "regression-summary.md").write_text(text)
     (REPORTS / "regression-summary.json").write_text(
         json.dumps([r.__dict__ for r in results], indent=2, default=list)

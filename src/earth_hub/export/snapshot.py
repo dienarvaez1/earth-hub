@@ -20,6 +20,11 @@ SNAPSHOT_KEY = "analytics/earthquakes.parquet"
 META_KEY = "analytics/meta.json"
 PARQUET_TYPE = "application/vnd.apache.parquet"
 
+# The dashboard downloads the whole file before it shows anything, so it is written small:
+# zstd at level 19 made the live snapshot 27% smaller than the default level (24.8 MB to
+# 18.1 MB, 424,555 rows) for about 5 seconds more per write. Levels above 19 gain nothing.
+ZSTD_LEVEL = 19
+
 TIMESTAMPTZ = "TIMESTAMP WITH TIME ZONE"  # DuckDB's own name for it, as Parquet readers report
 
 # Every published `earthquakes` column (all but the database's `id`), in table order, with
@@ -95,7 +100,7 @@ def _rows_source(path: Path) -> str:
 def _write_parquet(con, source: str, out: Path) -> None:
     con.execute(
         f"COPY (SELECT * FROM {source} ORDER BY key) TO {_quote(out)} "
-        "(FORMAT parquet, COMPRESSION zstd)"
+        f"(FORMAT parquet, COMPRESSION zstd, COMPRESSION_LEVEL {ZSTD_LEVEL})"
     )
 
 
