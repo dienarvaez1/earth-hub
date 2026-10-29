@@ -43,7 +43,8 @@ def test_a_stopped_trigger_fails_the_run_with_an_error_line(capsys):
 def test_it_holds_the_repositorys_only_schedule(workflow):
     assert set(workflow[True]) == {"schedule", "workflow_dispatch"}  # `on`, read as true
     (cron,) = [entry["cron"] for entry in workflow[True]["schedule"]]
-    assert cron == "47 */3 * * *"  # every 3 hours, off the rounds' :17
+    # Hourly: GitHub skipped the first 3-hourly slot and ran the next 72 minutes late (DEF-057).
+    assert cron == "47 * * * *"
     scheduled = [p.name for p in WORKFLOWS.glob("*.y*ml") if "schedule" in yaml.safe_load(
         p.read_text())[True]]  # fmt: skip
     assert scheduled == ["watchdog.yml"]

@@ -12,7 +12,9 @@ name: Watchdog
 
 on:
   schedule:
-    - cron: "47 */3 * * *"
+    # Hourly, off the busy top of the hour: GitHub starts scheduled runs late or skips them
+    # (DEF-052, DEF-057), so each run is a chance, and the next covers a skipped one.
+    - cron: "47 * * * *"
   workflow_dispatch:
 
 permissions:

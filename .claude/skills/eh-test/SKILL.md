@@ -1,7 +1,7 @@
 ---
 name: eh-test
-description: Run Earth-Hub's tests by layer — lint, unit, integration, API, contract, end-to-end, dashboard, disruptive, performance — the API load test with Locust, or the whole regression, the flake check, traceability, coverage, or the tests matching a keyword or naming a requirement. Use for /eh-test, "run the unit tests", "run the regression", "test the API", "run the tests for REQ-API-005", "is it flaky", "load-test the API".
-argument-hint: "[lint | unit | integration | api | contract | e2e | dashboard | disruptive | performance | load | load-ui | regression | flake | traceability | coverage | REQ-… | <keyword>]"
+description: Run Earth-Hub's tests by layer — lint, unit, integration, API, contract, end-to-end, dashboard, disruptive, performance — the API load test with Locust, or the whole regression, the flake check, traceability, coverage, or the tests matching a keyword or naming a requirement, and GitHub's open security alerts (CodeQL, Dependabot, secret scanning). Use for /eh-test, "run the unit tests", "run the regression", "test the API", "run the tests for REQ-API-005", "is it flaky", "load-test the API", "any security alerts".
+argument-hint: "[lint | security | unit | integration | api | contract | e2e | dashboard | disruptive | performance | load | load-ui | regression | flake | traceability | coverage | REQ-… | <keyword>]"
 ---
 
 # Tests
@@ -10,7 +10,8 @@ Run from the repository root. Report real results; never call something passing 
 
 | Argument | Command | Needs | Time |
 | --- | --- | --- | --- |
-| `lint` | `make lint` | — | < 1 s |
+| `lint` | `make lint`: Ruff's style, bug, complexity, security, simplification and Pylint rules (`pyproject.toml`), and formatting | — | < 1 s |
+| `security` | GitHub's open alerts, read-only: `gh api 'repos/dienarvaez1/earth-hub/code-scanning/alerts?state=open' -q '.[] \| [.number, .rule.id, .most_recent_instance.location.path] \| @tsv'`, then the same for `dependabot/alerts` and `secret-scanning/alerts` (CodeQL runs on GitHub, on every PR and push) | `gh` signed in | ~2 s |
 | `unit` (default) | `make test` | nothing: no Docker, no network | ~15 s |
 | `integration` | `uv run pytest tests/integration -m integration` | `make up` | ~1 min |
 | `api` | `uv run pytest tests/api -m integration --deselect tests/api/test_contract.py` | `make up` | ~5 s |
@@ -35,6 +36,9 @@ Run from the repository root. Report real results; never call something passing 
   `reports/load_stats.csv`; for `load-ui`, start it in the background and give the address.
 - For a regression, report from `reports/regression-summary.md`: the result, each layer's counts and time,
   coverage, traceability.
+- A new Ruff finding: fix it, or if it is a false alarm mark it `# noqa: <rule> (<why>)` on its line; never widen
+  the ignores in `pyproject.toml` without saying why. A scanning alert: read the code it points to and say whether
+  it is real; dismissing a false positive (with its reason) is for the user to approve.
 - A failing test: show its name and the assertion, read the code it tests, and say what broke. Don't change a
   test to make it pass without saying so; record real defects in `docs/progress/defects.md` (CLAUDE.md).
 

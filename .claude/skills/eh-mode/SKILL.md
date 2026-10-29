@@ -46,7 +46,8 @@ cron trigger, keeping the dashboard current while no machine runs.
   settings, in the `r2` environment; the repository has none of its own).
 - **The rounds come from the dashboard Worker's cron trigger**, hourly at :17 (docs/technical/ci.md#the-trigger);
   and the daily reconcile at 05:41 UTC; `direct.yml` has no schedule of its own. A failed `Watchdog` run means no
-  `direct.yml` run started for 2 hours: the trigger stopped. A failed `Trigger token` run means the trigger's GitHub token
+  `direct.yml` run started for 2 hours: the trigger stopped; `make -s trigger-check 2>&1 | grep -v '@' | tail -1`
+  says whether its token still works (starts nothing). A failed `Trigger token` run means the trigger's GitHub token
   expires within 14 days: the user runs `make trigger-token` in a terminal (never run it for them).
 - Filter lines with `@` from `gh` output before showing it.
 

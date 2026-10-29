@@ -10,7 +10,7 @@ flowchart TB
     pr["pull request,<br/>push to main"] --> ci["ci.yml<br/>lint, unit, regression<br/>(no secrets)"]
     trigger["dashboard Worker's<br/>cron triggers"] -- "round, hourly;<br/>reconcile, 05:41 UTC" --> direct["direct.yml<br/>round / reconcile<br/>(r2 environment)"]
     hand["by hand"] --> direct
-    watchdog["watchdog.yml,<br/>every 3 hours"] -. "a run in<br/>the last 2 h?" .-> direct
+    watchdog["watchdog.yml,<br/>hourly"] -. "a run in<br/>the last 2 h?" .-> direct
     direct --> check{"_state/mode.json<br/>direct (active)?"}
     check -- yes --> r2[("R2 bucket:<br/>rows, snapshot, log")]
     check -- "no: full or<br/>handing-over" --> skip["skip, succeed"]
@@ -73,7 +73,7 @@ Both also run by hand: **Actions → Direct mode → Run workflow**, or `gh work
 - **Secrets.** R2 credentials (`R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET`) are given only to the step that runs the command; `USGS_CONTACT` is a repository variable, the repository's address. Use an R2 token for this workflow only (Object Read & Write on the bucket), so it can be revoked alone. They are secrets of the `r2` environment, which only `main` can use (`gh secret set <NAME> --env r2`, which reads the value from the terminal), and the repository has none of its own (moved by the release on 2026-10-29; GitHub Free had no environments while it was private). The workflow has no pull request or push trigger, pull requests from forks never get secrets, and a workflow run from any other branch cannot use the environment.
 - **Freshness.** New events reach the bucket up to about an hour after USGS publishes them (a minute with `make direct-run`); none are lost, as the day feed lists the last 24 hours.
 - **Cost.** Each run takes about 1–1½ minutes with uv's cache. Actions minutes are free for a public repository. While it was private, GitHub Free's 2,000 minutes a month were shared with CI, and hourly rounds used 720 to 1,440 of them, which is why the trigger runs hourly; it could now run every 15 minutes. The Cloudflare trigger is free (the Workers Free plan has 5 cron triggers). R2 operations are fewer than with `make direct-run`: 24 feed rounds a day instead of about 437 (`tests/unit/test_direct_budget.py`).
-- **Failures** e-mail whoever started the run: for the rounds and the reconcile, the trigger token's owner. A trigger GitHub refused shows in the Worker's logs on Cloudflare (**Workers → earth-hub → Logs**), and the watchdog fails within 3 hours.
+- **Failures** e-mail whoever started the run: for the rounds and the reconcile, the trigger token's owner. A trigger GitHub refused shows in the Worker's logs on Cloudflare (**Workers → earth-hub → Logs**), and the watchdog fails at its next run that GitHub starts.
 - **GitHub's schedule did not keep time** (DEF-052): while the repository was private it ran about one hourly slot in five, and on 21–22 October it ran none for over 8 hours, the 15-minute schedule included. Nothing is lost while rounds are missed (the day feed covers 24 hours, catch-up 30 days), but the dashboard goes stale. So the rounds are started from Cloudflare, whose cron triggers fire on time, and so is the daily reconcile, which fails if no direct round has written for 2 hours.
 - **No schedule in `direct.yml`** (DEF-056). GitHub disables a public repository's scheduled workflows after 60 days without commits, and a disabled workflow cannot be dispatched either: with the reconcile's schedule in it, the rounds would have stopped too. `direct.yml` has only `workflow_dispatch`, and [the watchdog](#the-watchdog) holds the repository's one schedule.
 
@@ -98,7 +98,9 @@ To run every 15 minutes once the repository is public, change the cron to `2,17,
 
 ### The watchdog
 
-`.github/workflows/watchdog.yml` runs every 3 hours (`47 */3 * * *`), and by hand. It reads when the newest `direct.yml` run started by `workflow_dispatch` began (`gh run list`, with the job's own token, which can only read), and `scripts/watchdog.py` fails if that was more than 2 hours ago: the trigger stopped, or its token expired. The failure says *"The dashboard Worker's trigger has started no direct.yml run since …: check its cron trigger and its GitHub token (make trigger-token)"*, and GitHub e-mails whoever last changed the workflow's schedule. Rounds run, and skip, in either mode, so it holds in full mode too. No secrets (REQ-CI-009).
+`.github/workflows/watchdog.yml` runs hourly (`47 * * * *`), and by hand. It reads when the newest `direct.yml` run started by `workflow_dispatch` began (`gh run list`, with the job's own token, which can only read), and `scripts/watchdog.py` fails if that was more than 2 hours ago: the trigger stopped, or its token expired. The failure says *"The dashboard Worker's trigger has started no direct.yml run since …: check its cron trigger and its GitHub token (make trigger-token)"*, and GitHub e-mails whoever last changed the workflow's schedule. Rounds run, and skip, in either mode, so it holds in full mode too. No secrets (REQ-CI-009).
+
+**GitHub starts it late, or not at all** (DEF-057). Its first 3-hourly slots, the day it was added, were skipped (18:47 UTC) and run 72 minutes late (21:47); GitHub's schedule for the old daily reconcile, at 05:41, started 4 to 9 hours late every day that week. So it runs hourly, off the busy top of the hour: one skipped or late run is covered by the next, at about 10 seconds a run, free for a public repository. A stopped trigger is still caught, within about 2 hours plus GitHub's delay.
 
 It is the repository's only schedule. After 60 days without commits GitHub disables it, and only it: the rounds go on. **Actions → Watchdog → Enable workflow**, or any push, turns it back on.
 
