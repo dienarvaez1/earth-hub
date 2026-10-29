@@ -36,6 +36,8 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
 GROUPS = ("earth-hub-consumer", "earth-hub-consumer-backfill")
+# kafka-consumer-groups --describe: GROUP TOPIC PARTITION CURRENT-OFFSET LOG-END-OFFSET LAG ...
+LAG = 5
 DIRECT, FULL = "direct (active)", "full (active)"
 
 
@@ -58,7 +60,7 @@ class Shell:
     ran: list[list[str]] = field(default_factory=list)
 
     def read(self, *cmd: str) -> tuple[int, str]:
-        result = subprocess.run(cmd, cwd=REPO, capture_output=True, text=True)
+        result = subprocess.run(cmd, cwd=REPO, capture_output=True, text=True, check=False)
         return result.returncode, result.stdout + result.stderr
 
     def run(self, *cmd: str) -> None:
@@ -68,7 +70,7 @@ class Shell:
             print(f"    would run: {shown}")
             return
         print(f"    $ {shown}", flush=True)
-        if subprocess.run(cmd, cwd=REPO).returncode != 0:
+        if subprocess.run(cmd, cwd=REPO, check=False).returncode != 0:
             raise Failed(f"`{shown}` failed (above)")
 
 
@@ -117,9 +119,9 @@ def lag(shell: Shell, group: str) -> int | None:
     total, rows = 0, 0
     for line in out.splitlines():
         cols = line.split()
-        if len(cols) >= 6 and cols[0] == group and re.fullmatch(r"\d+|-", cols[5]):
+        if len(cols) > LAG and cols[0] == group and re.fullmatch(r"\d+|-", cols[LAG]):
             rows += 1
-            total += 0 if cols[5] == "-" else int(cols[5])
+            total += 0 if cols[LAG] == "-" else int(cols[LAG])
     return total if rows else None
 
 

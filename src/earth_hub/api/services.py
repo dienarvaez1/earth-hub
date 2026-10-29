@@ -29,11 +29,12 @@ SORT_COLUMNS = {
     "magnitude": earthquakes.c.magnitude,
     "depth": earthquakes.c.depth_km,
 }
-# (label, inclusive min, exclusive max), in display order.
+# (label, inclusive min, exclusive max), in display order: one-unit buckets up to TOP_BUCKET.
+TOP_BUCKET = 7
 MAGNITUDE_BUCKETS = [
     ("<0", None, 0.0),
-    *[(f"{n}-{n + 1}", float(n), float(n + 1)) for n in range(7)],
-    (">=7", 7.0, None),
+    *[(f"{n}-{n + 1}", float(n), float(n + 1)) for n in range(TOP_BUCKET)],
+    (f">={TOP_BUCKET}", float(TOP_BUCKET), None),
     ("unknown", None, None),
 ]
 
@@ -208,7 +209,7 @@ def magnitude_summary(conn: Connection, filters: Filters) -> list[dict[str, Any]
     label = case(
         (m.is_(None), literal("unknown")),
         (m < 0, literal("<0")),
-        (m >= 7, literal(">=7")),
+        (m >= TOP_BUCKET, literal(f">={TOP_BUCKET}")),
         else_=floor_label,
     )
     counts = dict(

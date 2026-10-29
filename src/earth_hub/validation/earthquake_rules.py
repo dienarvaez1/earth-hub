@@ -19,6 +19,7 @@ EARLIEST_EVENT_TIME = datetime(1900, 1, 1, tzinfo=UTC)
 MAX_FUTURE = timedelta(hours=1)
 LATITUDE_RANGE = (-90.0, 90.0)
 LONGITUDE_RANGE = (-180.0, 180.0)
+COORDINATES = 3  # GeoJSON's [longitude, latitude, depth]
 DEPTH_RANGE_KM = (-10.0, 1000.0)
 MAGNITUDE_RANGE = (-2.0, 10.5)
 REVIEW_STATUSES = frozenset({"automatic", "reviewed", "deleted"})
@@ -93,7 +94,7 @@ def _in_range(value: float, bounds: tuple[float, float]) -> bool:
     return bounds[0] <= value <= bounds[1]
 
 
-def _validate_envelope(envelope: Any) -> None:
+def _validate_envelope(envelope: Any) -> None:  # noqa: C901 (to refactor: docs/progress/plan.md)
     if not isinstance(envelope, dict):
         raise Rejected([Violation("ENV-001", "message is not a JSON object")])
     if envelope.get("schema_version") != SCHEMA_VERSION:
@@ -129,7 +130,7 @@ def _validate_envelope(envelope: Any) -> None:
         )
 
 
-def validate(envelope: Any, *, now: datetime) -> ValidEvent:
+def validate(envelope: Any, *, now: datetime) -> ValidEvent:  # noqa: C901, PLR0912, PLR0915 (to refactor: docs/progress/plan.md)
     """Return the normalized event, or raise Rejected listing every violated rule."""
     _validate_envelope(envelope)
     payload = envelope["payload"]
@@ -143,7 +144,7 @@ def validate(envelope: Any, *, now: datetime) -> ValidEvent:
         not isinstance(geometry, dict)
         or geometry.get("type") != "Point"
         or not isinstance(coords, list)
-        or len(coords) != 3
+        or len(coords) != COORDINATES
         or not all(_is_number(c) for c in coords)
     ):
         violations.append(Violation("GEO-001", "geometry must be a Point with 3 finite numbers"))

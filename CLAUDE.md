@@ -28,7 +28,7 @@ Local-first earthquake data platform: USGS GeoJSON feed → Python poller → Ka
 
 - `make install`: install dependencies from `uv.lock`
 - `make up` / `make down` / `make reset`: start, stop, or stop and wipe Kafka and PostgreSQL
-- `make lint` / `make format`: Ruff checks and fixes
+- `make lint` / `make format`: Ruff checks and fixes. Rules in `pyproject.toml`: also complexity (`C90`), security (`S`), simplification (`SIM`) and Pylint's (`PL`), with the deliberate exceptions listed there; a finding that is a false alarm gets `# noqa: <rule> (<why>)` on its line, and the functions already over the complexity limits are listed in the plan to refactor
 - `make test`: unit tests (no Docker)
 - `make smoke`: integration smoke tests (needs `make up`)
 - `make smoke-restart`: restart services and check data survives

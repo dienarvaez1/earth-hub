@@ -46,6 +46,7 @@ from collections.abc import Callable, Iterator
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime, timedelta
+from http import HTTPStatus
 from pathlib import Path
 
 import httpx
@@ -359,7 +360,7 @@ class Exporter:
             logger.warning("%d rows listed in the manifest were missing; uploaded", len(repaired))
         return repaired
 
-    def _upload_changes(self, record, manifest, known, read, failed_keys, snapshot) -> None:
+    def _upload_changes(self, record, manifest, known, read, failed_keys, snapshot) -> None:  # noqa: C901 (to refactor: docs/progress/plan.md)
         """Upload what changed. `snapshot` collects every row read; None on a dry run."""
         counts = record.counts
         dry_run = snapshot is None
@@ -441,7 +442,7 @@ class Exporter:
             response = self.api.get(EXPORT_PATH, params={"after_id": after_id, "limit": limit})
         except httpx.HTTPError as exc:
             raise ApiUnavailable(f"{self.api_url}/{EXPORT_PATH}: {exc}") from None
-        if response.status_code != 200:
+        if response.status_code != HTTPStatus.OK:
             raise ApiUnavailable(
                 f"{self.api_url}/{EXPORT_PATH} returned {response.status_code}: "
                 f"{response.text[:200]}"

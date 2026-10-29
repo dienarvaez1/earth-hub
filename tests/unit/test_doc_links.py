@@ -56,9 +56,12 @@ def test_every_relative_link_and_anchor_resolves(page):
     for target in links(page):
         path, _, anchor = target.partition("#")
         linked = (page.parent / path).resolve() if path else page
-        if not linked.exists() or REPO not in linked.parents:
-            broken.append(target)
-        elif anchor and (linked.suffix != ".md" or anchor not in anchors(linked)):
+        if (
+            not linked.exists()
+            or REPO not in linked.parents
+            or anchor
+            and (linked.suffix != ".md" or anchor not in anchors(linked))
+        ):
             broken.append(target)
     assert broken == []
 

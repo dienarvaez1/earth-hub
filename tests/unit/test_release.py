@@ -25,7 +25,7 @@ class Fake(release.Shell):
         self.events.append(("ask", question))
         return self.answer(question)
 
-    def read(self, *cmd, ok=(0,), cwd=None) -> str:
+    def read(self, *cmd, ok=(0,), cwd=None) -> str:  # noqa: PLR0911 (to refactor: docs/progress/plan.md)
         line = " ".join(cmd)
         if cmd[:3] == ("git", "config", "user.email"):
             return release.NOREPLY

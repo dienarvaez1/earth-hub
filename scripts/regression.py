@@ -69,7 +69,7 @@ class Result:
 
 def run(cmd: list[str]) -> int:
     print("$ " + " ".join(cmd), flush=True)
-    return subprocess.run(cmd, cwd=REPO).returncode
+    return subprocess.run(cmd, cwd=REPO, check=False).returncode
 
 
 def run_lint() -> Result:
@@ -100,7 +100,7 @@ def run_pytest(layer: str, args: list[str], first: bool, shard: str = "") -> Res
     code = run(cmd)
     result = Result(layer, code == 0, time.monotonic() - start, shard=shard)
     if junit.exists():
-        suite = ET.parse(junit).getroot()
+        suite = ET.parse(junit).getroot()  # noqa: S314 (pytest's own report)
         suite = suite.find("testsuite") if suite.tag == "testsuites" else suite
         result.tests = int(suite.get("tests", 0))
         result.failures = int(suite.get("failures", 0))
@@ -116,7 +116,9 @@ def run_pytest(layer: str, args: list[str], first: bool, shard: str = "") -> Res
 
 def tool_version(*cmd: str) -> str:
     try:
-        return subprocess.run(cmd, capture_output=True, text=True, cwd=REPO).stdout.strip()
+        return subprocess.run(
+            cmd, capture_output=True, text=True, cwd=REPO, check=False
+        ).stdout.strip()
     except FileNotFoundError:
         return "not installed"
 
@@ -193,7 +195,7 @@ def coverage_total() -> str | None:
         return None
     run(["uv", "run", "coverage", "xml", "-o", str(REPORTS / "coverage.xml"), "-q"])
     run(["uv", "run", "coverage", "html", "-d", str(REPORTS / "coverage-html"), "-q"])
-    root = ET.parse(REPORTS / "coverage.xml").getroot()
+    root = ET.parse(REPORTS / "coverage.xml").getroot()  # noqa: S314 (coverage's own report)
     return f"{float(root.get('line-rate', 0)) * 100:.1f}%"
 
 

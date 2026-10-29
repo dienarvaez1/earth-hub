@@ -16,6 +16,7 @@ import subprocess
 import sys
 import webbrowser
 from collections.abc import Callable
+from http import HTTPStatus
 from pathlib import Path
 from urllib.parse import urlencode
 
@@ -23,7 +24,7 @@ import httpx
 
 DASHBOARD = Path(__file__).resolve().parents[1] / "dashboard"
 TEMPLATE = DASHBOARD / "wrangler.template.jsonc"
-SECRET = "GITHUB_TOKEN"
+SECRET = "GITHUB_TOKEN"  # noqa: S105 (the secret's name, not its value)
 WORKFLOW = "direct.yml"
 
 
@@ -37,7 +38,7 @@ def setting(name: str) -> str:
 
 def token_form(repo: str) -> str:
     """GitHub's new fine-grained token form, filled in: only Actions, read and write."""
-    owner = repo.split("/")[0]
+    owner = repo.split("/", maxsplit=1)[0]
     fields = {
         "name": "earth-hub dashboard trigger",
         "description": f"Cloudflare cron starts {WORKFLOW} rounds",
@@ -63,9 +64,9 @@ def check(token: str, repo: str, api: str, client: httpx.Client) -> tuple[str | 
     except httpx.HTTPError as error:
         return f"could not reach GitHub ({type(error).__name__}); try again", None
     expiry = response.headers.get("GitHub-Authentication-Token-Expiration")
-    if response.status_code == 200:
+    if response.status_code == HTTPStatus.OK:
         return None, expiry
-    if response.status_code == 401:
+    if response.status_code == HTTPStatus.UNAUTHORIZED:
         return "GitHub does not accept this token: copy it again, whole", None
     if response.status_code in (403, 404):
         return (

@@ -341,7 +341,7 @@ def to_full(
     return result
 
 
-def main(argv: list[str] | None = None) -> int:
+def main(argv: list[str] | None = None) -> int:  # noqa: C901 (to refactor: docs/progress/plan.md)
     import time
 
     from earth_hub.config import get_settings

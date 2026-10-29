@@ -52,7 +52,7 @@ def test_the_footer_links_to_the_licenses(dash):
 
 def git(*args: str) -> str:
     return subprocess.run(
-        ["git", *args], cwd=DASHBOARD, capture_output=True, text=True
+        ["git", *args], cwd=DASHBOARD, capture_output=True, text=True, check=False
     ).stdout.strip()
 
 
@@ -159,6 +159,7 @@ def test_a_package_without_a_license_text_fails_the_build(built, tmp_path):
         ["npx", "--no-install", "vite", "build", "--outDir", str(tmp_path / "out")],
         cwd=DASHBOARD,
         env=ENV | {"DASHBOARD_LICENSES": str(tmp_path)},  # no texts at all
+        check=False,
         capture_output=True,
         text=True,
         timeout=300,

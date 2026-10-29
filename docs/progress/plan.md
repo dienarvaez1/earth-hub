@@ -44,8 +44,20 @@ As of 2026-10-29. The plan below is the original, with Milestone 7 revised; the 
 | `make trigger-check`: whether the Worker's deployed token works, asked on Cloudflare, starting nothing | Done | #54 |
 | The USGS credit and a disclaimer (research purposes, not affiliated with or endorsed by USGS, data that may be late or inaccurate when a part fails, no warranty, not for emergencies) in the dashboard's footer and the README | Done | #57 |
 | A privacy notice (`/privacy`, linked from the footer): no cookies, storage, tracking or location; the Worker's invocation logs, which recorded visitors' IP addresses and IP-derived locations, switched off | Done | #58 |
+| Code quality: Ruff's complexity (`C90`), security (`S`), simplification (`SIM`) and Pylint (`PL`) rules, with their first findings fixed or marked; CodeQL code scanning | Done | #59 |
 
 Current numbers: 190 requirements, all covered by a passing test; 56 defects, all fixed; about 1,200 tests in the full regression.
+
+**To refactor** (#59): functions over Ruff's complexity limits when the rules were added, each marked `# noqa: … (to refactor: docs/progress/plan.md)`. New code is held to the limits. Each one is a separate change, with the full regression as its check.
+
+| Function | Over |
+| --- | --- |
+| `validation/earthquake_rules.py`: `validate`, `_validate_envelope` | complexity, branches, statements |
+| `usgs_reconcile.py`: `compare`, `main` | complexity, branches, statements |
+| `direct/__main__.py`: `_execute` | complexity, returns |
+| `direct/handover.py`: `main`; `direct/store.py`: `BucketStore.write` | complexity |
+| `export/r2.py`: `_upload_changes`; `ingestion/fdsn.py`: `_get`; `export/browse.py`: `main` | complexity or returns |
+| `scripts/load_test.py`: `main`; `tests/support/streams.py`: `random_stream`; `tests/unit/test_release.py`: `Fake.read` | statements, complexity or returns |
 
 ## 1. Project vision
 

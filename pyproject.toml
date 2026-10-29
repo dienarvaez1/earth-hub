@@ -26,7 +26,20 @@ line-length = 100
 target-version = "py313"
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "B", "UP"]
+# C90: complexity; S: security (Bandit's rules); SIM: simplifications; PL: Pylint's.
+select = ["E", "F", "I", "B", "UP", "C90", "S", "SIM", "PL"]
+ignore = [
+    "PLC0415",  # imports inside functions: on purpose, so commands start without loading what they don't use
+    "PLR0913",  # many arguments: keyword-only settings and test fixtures, by design
+    "PLR0917",  # many positional arguments: the same
+    "S603",     # subprocess without a shell: the safe form, with fixed argument lists
+    "S607",     # subprocess by name (git, uv, npx, docker): found on PATH, as a developer runs them
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Tests assert, compare with literal values, use made-up passwords and random streams, and
+# query their own temporary databases and files with SQL built from fixed parts.
+"tests/**" = ["S101", "PLR2004", "S105", "S106", "S108", "S311", "S608"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

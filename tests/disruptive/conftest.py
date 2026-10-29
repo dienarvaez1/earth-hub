@@ -30,6 +30,7 @@ def wait_healthy(service: str, timeout_s: float = 120) -> None:
             ["docker", "inspect", "--format", "{{.State.Health.Status}}", container],
             capture_output=True,
             text=True,
+            check=False,
         ).stdout.strip()
         if status == "healthy":
             return

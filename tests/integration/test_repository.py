@@ -323,17 +323,15 @@ def test_check_constraints_hold_without_the_application(db, column, value):
         "tsunami": False,
         column: value,
     }
-    with pytest.raises(IntegrityError, match="check constraint"):
-        with db.begin() as conn:
-            conn.execute(insert(Earthquake), row)
+    with pytest.raises(IntegrityError, match="check constraint"), db.begin() as conn:
+        conn.execute(insert(Earthquake), row)
 
 
 @pytest.mark.req("REQ-PER-006")
 def test_deleting_an_event_with_aliases_is_refused(db, deliver, make_envelope, feed_doc):
     deliver(make_envelope(feed_doc["features"][0]))
-    with pytest.raises(IntegrityError, match="foreign key"):
-        with db.begin() as conn:
-            conn.execute(text("DELETE FROM earthquakes"))
+    with pytest.raises(IntegrityError, match="foreign key"), db.begin() as conn:
+        conn.execute(text("DELETE FROM earthquakes"))
 
 
 @pytest.mark.req("REQ-PER-010")
