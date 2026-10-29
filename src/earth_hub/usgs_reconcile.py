@@ -15,11 +15,18 @@ The feed that brings an event is the day feed (`all_day`) for events of the 24 h
 last read, and catch-up's month feed otherwise. Anything else is unexplained, and the command
 exits 1. Events are matched by any of their IDs, so a merged event counts once.
 
-Full mode reads PostgreSQL (the day feed's last read: the live topic's last delivery); direct
-mode reads the bucket's snapshot and ID map (the last direct round). Catch-up's checkpoints say
-when the month feed and the deletions were last read. Read-only; two FDSN requests a day, and
-one per event of ours that USGS no longer lists in the window (its time may have moved), at most
-LOOKUPS.
+A feed's last read is the time USGS generated the newest copy of it Earth-Hub processed (its
+`metadata.generated`, in every message's envelope): what its content was as of. The feed is
+fetched up to a minute after that, and a round finishes a minute or two later; an update in
+between is not in what was read (DEF-054). Full mode reads PostgreSQL (the newest generation
+time among raw_events' feed and catch-up messages); direct mode reads the bucket's snapshot and
+ID map, and the generation times each round keeps in its state (direct/runner.py, FEEDS).
+Without one (no message carried it yet), the older, later marks stand in: the live topic's
+last delivery or the last round's end for the day feed, catch-up's checkpoint for the month
+feed. The deleted-events checkpoint says when the deletions were last checked.
+
+Read-only; two FDSN requests a day, and one per event of ours that USGS no longer lists in the
+window (its time may have moved), at most LOOKUPS.
 """
 
 import argparse
@@ -300,6 +307,10 @@ def usgs_lookup(fdsn) -> Callable[[str], Event | None]:
 # --- Earth-Hub ---------------------------------------------------------------------------------
 
 
+def _from_ms(ms) -> datetime | None:
+    return None if ms is None else datetime.fromtimestamp(float(ms) / 1000, UTC)
+
+
 def from_postgres(engine, live_topic: str) -> tuple[list[Event], Marks]:
     from sqlalchemy import text
 
@@ -322,10 +333,25 @@ def from_postgres(engine, live_topic: str) -> tuple[list[Event], Marks]:
             text("SELECT max(received_at) FROM raw_events WHERE kafka_topic = :t"),
             {"t": live_topic},
         ).scalar()
+        generated = dict(
+            conn.execute(
+                text(
+                    "SELECT envelope->>'source', max((envelope->>'feed_generated_ms')::numeric)"
+                    " FROM raw_events"
+                    " WHERE envelope->>'source' IN ('feed', 'catchup')"
+                    " AND jsonb_typeof(envelope->'feed_generated_ms') = 'number'"
+                    " GROUP BY 1"
+                )
+            ).all()
+        )
         checkpoints = dict(
             conn.execute(text("SELECT name, value FROM ingestion_checkpoints")).all()
         )
-    return events, Marks(delivered, checkpoints.get("catchup"), checkpoints.get("deleted"))
+    return events, Marks(
+        _from_ms(generated.get("feed")) or delivered,
+        _from_ms(generated.get("catchup")) or checkpoints.get("catchup"),
+        checkpoints.get("deleted"),
+    )
 
 
 def from_bucket(bucket) -> tuple[list[Event], Marks, datetime | None]:
@@ -347,11 +373,16 @@ def from_bucket(bucket) -> tuple[list[Event], Marks, datetime | None]:
         for key, t, u, review in rows
     ]
     checkpoints = status.get("checkpoints", {})
+    generated = status.get("generated", {})
     parse = lambda v: datetime.fromisoformat(v) if v else None  # noqa: E731
     last_round = parse(status.get("written_at"))
     return (
         events,
-        Marks(last_round, parse(checkpoints.get("catchup")), parse(checkpoints.get("deleted"))),
+        Marks(
+            parse(generated.get("feed")) or last_round,
+            parse(generated.get("catchup")) or parse(checkpoints.get("catchup")),
+            parse(checkpoints.get("deleted")),
+        ),
         last_round,
     )
 
@@ -365,8 +396,8 @@ def print_report(report: Report, marks: Marks, where: str) -> None:
 
     print(f"Earth-Hub ({where}) against USGS, by UTC day of the event")
     print(
-        f"  last read: day feed {show(marks.day_feed)}, month feed {show(marks.month_feed)}, "
-        f"deletions {show(marks.deletions)}"
+        f"  last read (as USGS generated it): day feed {show(marks.day_feed)}, "
+        f"month feed {show(marks.month_feed)}; deletions checked {show(marks.deletions)}"
     )
     for day, n in report.days.items():
         mine = [d for d in report.differences if d.day == day]

@@ -40,6 +40,12 @@ logger = logging.getLogger(__name__)
 # A round takes seconds; a lock left by one that crashed should not block the next for long.
 LOCK_TTL = timedelta(minutes=15)
 
+# The USGS feeds whose own time (`metadata.generated`) the state keeps: the newest of each a
+# round processed, which is what the feed's content was as of. The check against USGS
+# (usgs_reconcile.py) measures what Earth-Hub has read by them, not by when a round fetched
+# the feed or finished, which can be a minute or two later (DEF-054).
+FEEDS = ("feed", "catchup")
+
 
 def _one_at_a_time(method):
     def wrapper(self, *args, **kwargs):
@@ -229,6 +235,7 @@ class DirectRunner:
             )
         status = dict(self.state.status)
         status.update(seq=first + len(steps) - 1, run_id=run_id, written_at=iso(now))
+        status["generated"] = _generated(status.get("generated", {}), (e for e, _ in decoded))
         if sent is not None:
             status["sent"] = sent.entries()
         pending = {
@@ -272,6 +279,20 @@ class DirectRunner:
                 "seconds": round(seconds, 3),
             },
         )
+
+
+def _generated(known: dict[str, str], envelopes) -> dict[str, str]:
+    """The newest generation time of each feed in FEEDS, among `known` and the envelopes'."""
+    newest = dict(known)
+    for envelope in envelopes:
+        part = _source(envelope)
+        ms = envelope.get("feed_generated_ms") if isinstance(envelope, dict) else None
+        if part not in FEEDS or not isinstance(ms, int) or isinstance(ms, bool):
+            continue
+        when = datetime.fromtimestamp(ms / 1000, UTC)
+        if part not in newest or when > datetime.fromisoformat(newest[part]):
+            newest[part] = iso(when)
+    return newest
 
 
 def _source(envelope) -> str | None:

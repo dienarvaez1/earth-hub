@@ -39,7 +39,7 @@ As of 2026-10-29. The plan below is the original, with Milestone 7 revised; the 
 | Dashboard: popups with the time to the second and the UTC offset, tsunami flag, closing on a click or resize; significant events under the map, 10, 25 or 50, each opening on the map; zoom 1 to 15; the Countries card naming the chosen country; a Tsunami filter; ranking notes on what a bar is | Done | #47 |
 | CI's regression in parallel parts (the dashboard layer in two shards, merged into the required check); the snapshot compressed smaller (zstd level 19: 24.8 MB to 18.1 MB); the popup's depth to one decimal | Done | #48 |
 
-Current numbers: 183 requirements, all covered by a passing test; 53 defects, all fixed; about 1,200 tests in the full regression.
+Current numbers: 184 requirements, all covered by a passing test; 54 defects, all fixed; about 1,200 tests in the full regression.
 
 ## 1. Project vision
 
