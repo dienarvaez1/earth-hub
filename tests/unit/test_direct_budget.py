@@ -132,7 +132,8 @@ def test_the_schedule_makes_fewer_rounds_than_the_load_measured_above():
     lines = [
         line for line in render("earth-hub-test").splitlines() if not line.strip().startswith("//")
     ]
-    (cron,) = json.loads("\n".join(lines))["triggers"]["crons"]
+    cron, reconcile = json.loads("\n".join(lines))["triggers"]["crons"]
+    assert reconcile == "41 5 * * *"  # once a day, read-only: no round
     minutes, *rest = cron.split()
     assert rest == ["*"] * 4  # the same minutes every hour
     rounds_per_day = 24 * len(minutes.split(","))

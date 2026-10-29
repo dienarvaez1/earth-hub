@@ -2,7 +2,7 @@
 
 A local-first earthquake data platform, built as a QA engineering portfolio project. The live USGS feed flows through Apache Kafka into validated PostgreSQL tables. A read-only REST API serves them, and a public dashboard shows them from an export to Cloudflare R2. The point is less the pipeline than the evidence that it works: every requirement traces to a passing test, every defect found is logged with how it was found and how it was fixed, and CI runs the regression on every pull request.
 
-**Status:** Milestones 1 to 6 and 8 are complete, and Milestone 7 but for its last step: the public release is prepared (the license, `make release`) but not run yet, so the repository is still private. Milestone 8 adds a second mode that runs without Docker, keeps its state in R2, and runs every hour on GitHub Actions, started by a Cloudflare cron trigger, with an audit record of every run ([status](docs/progress/plan.md#status)). The dashboard runs at **https://earth-hub.diego-narvaez.workers.dev**, shared by link and kept out of search engines.
+**Status:** Milestones 1 to 6 and 8 are complete, and Milestone 7 but for the release's last settings. The repository is public since 2026-10-29, as [v1.0.0](https://github.com/dienarvaez1/earth-hub/releases/tag/v1.0.0); those settings (branch protection, the R2 credentials in an environment only `main` can use, the USGS contact) are made by `make release`. Milestone 8 adds a second mode that runs without Docker, keeps its state in R2, and runs every hour on GitHub Actions, started by a Cloudflare cron trigger, with an audit record of every run ([status](docs/progress/plan.md#status)). The dashboard runs at **https://earth-hub.diego-narvaez.workers.dev**, shared by link and kept out of search engines.
 
 ## For reviewers
 
@@ -49,9 +49,9 @@ stateDiagram-v2
 
 | | |
 | --- | --- |
-| **Requirements** | 185 requirements, each with a stable ID and at least one passing test that names it (`@pytest.mark.req`). A test naming an unknown ID fails at collection, and `make traceability` fails if any requirement has no passing test |
+| **Requirements** | 186 requirements, each with a stable ID and at least one passing test that names it (`@pytest.mark.req`). A test naming an unknown ID fails at collection, and `make traceability` fails if any requirement has no passing test |
 | **Tests** | About 1,100, in eight layers: unit, integration, API, contract (Schemathesis), end-to-end, dashboard (in Chromium), disruptive (real outages) and performance. About 92% coverage across all layers |
-| **Defects** | 55 defects found and fixed, each with its milestone, severity, how it was found and the commit that fixed it; [six written up in full](docs/progress/defects.md) with root cause and prevention (kept in the git history) |
+| **Defects** | 56 defects found and fixed, each with its milestone, severity, how it was found and the commit that fixed it; [six written up in full](docs/progress/defects.md) with root cause and prevention (kept in the git history) |
 | **CI** | On every pull request and push to `main`, lint and unit tests, then the regression of every layer except performance, from the example settings and with no secrets ([docs/technical/ci.md](docs/technical/ci.md)) |
 | **Data integrity** | Kafka offsets committed only after the database; idempotent upserts; newer revisions win; `make reconcile` compares each topic with the database. The guarantee claimed is at-least-once, never exactly-once |
 | **Recovery** | PostgreSQL stopped while events arrive, a Kafka restart, crashes between the two commits, poller and consumer restarts: each tested, and each ending in a reconciliation |
@@ -160,8 +160,8 @@ It writes `reports/regression-summary.md`, JUnit XML for each layer, a coverage 
 
 **QA documents** in `docs/`:
 - the [test strategy](docs/progress/test-strategy.md): risks, levels, techniques, scope, reports and testing by milestone;
-- the [requirements](docs/progress/requirements.md), 185 of them, and the [traceability matrix](docs/progress/traceability-matrix.md);
-- the [defect log](docs/progress/defects.md): 55 defects found and fixed, 6 with full reports in the git history;
+- the [requirements](docs/progress/requirements.md), 186 of them, and the [traceability matrix](docs/progress/traceability-matrix.md);
+- the [defect log](docs/progress/defects.md): 56 defects found and fixed, 6 with full reports in the git history;
 - the [data-quality rules](docs/technical/data-quality-rules.md) and the [known limitations](docs/overview/limitations.md).
 
 ## How Claude Code was used
@@ -193,7 +193,7 @@ Earth-Hub was built with [Claude Code](https://claude.com/claude-code), Anthropi
 - independent oracles;
 - tests of the test tooling.
 
-Five of the 55 defects were in the test tooling itself (DEF-007, DEF-008, DEF-025, DEF-028, DEF-029), found because results were checked rather than trusted. Nine were found after merge (DEF-034 to DEF-039, DEF-053 to DEF-055), and are logged as such.
+Five of the 56 defects were in the test tooling itself (DEF-007, DEF-008, DEF-025, DEF-028, DEF-029), found because results were checked rather than trusted. Ten were found after merge (DEF-034 to DEF-039, DEF-053 to DEF-056), and are logged as such.
 
 ## Documentation
 

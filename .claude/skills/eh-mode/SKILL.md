@@ -45,7 +45,8 @@ cron trigger, keeping the dashboard current while no machine runs.
   mean the workflow's secrets are empty: the user sets them (`gh secret set <NAME>` for the four `R2_*` settings, as
   repository secrets while the repository is private; `--env r2` once it is public).
 - **The rounds come from the dashboard Worker's cron trigger**, hourly at :17 (docs/technical/ci.md#the-trigger);
-  GitHub's own schedule keeps only the daily reconcile. A failed `Trigger token` run means the trigger's GitHub token
+  and the daily reconcile at 05:41 UTC; `direct.yml` has no schedule of its own. A failed `Watchdog` run means no
+  `direct.yml` run started for 2 hours: the trigger stopped. A failed `Trigger token` run means the trigger's GitHub token
   expires within 14 days: the user runs `make trigger-token` in a terminal (never run it for them).
 - Filter lines with `@` from `gh` output before showing it.
 

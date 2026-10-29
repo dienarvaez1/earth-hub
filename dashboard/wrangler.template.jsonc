@@ -12,9 +12,9 @@
   // remote: `wrangler dev` reads the real bucket (make dashboard-dev); tests use a simulated one.
   "r2_buckets": [{ "binding": "SNAPSHOTS", "bucket_name": "{{R2_BUCKET}}", "remote": {{REMOTE}} }],
   "observability": { "enabled": true },
-  // Starts one direct round (.github/workflows/direct.yml) every hour, at :17; every 15 minutes
-  // once the repository is public (Actions minutes are free there). GITHUB_TOKEN is a secret:
-  // `npx wrangler secret put GITHUB_TOKEN`.
-  "triggers": { "crons": ["17 * * * *"] },
+  // Starts one direct round (.github/workflows/direct.yml) every hour, at :17, and its daily
+  // reconcile at 05:41 UTC: direct.yml has no schedule of its own (DEF-052, DEF-056).
+  // GITHUB_TOKEN is a secret: `npx wrangler secret put GITHUB_TOKEN`.
+  "triggers": { "crons": ["17 * * * *", "41 5 * * *"] },
   "vars": { "GITHUB_API": "https://api.github.com", "GITHUB_REPO": "dienarvaez1/earth-hub" }
 }
