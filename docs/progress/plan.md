@@ -36,7 +36,7 @@ As of 2026-10-29. The plan below is the original, with Milestone 7 revised; the 
 | Reconciliation with USGS, catching up after each switch | Done | #32 |
 | One command each to switch modes and to backfill in full mode (`make to-full`, `make to-direct`, `make backfill-full`) | Done | #44 |
 | Dashboard map above 25,000 events: cells counted in SQL, the visible area's events once zoomed in (history back to 2024 loaded) | Done | #46 |
-| Dashboard: popups with the time to the second and the UTC offset, tsunami flag, closing on a click or resize; significant events under the map, 10, 25 or 50, each opening on the map; zoom 1 to 15; the Countries card naming the chosen country; a Tsunami filter; ranking notes on what a bar is | Done | this branch |
+| Dashboard: popups with the time to the second and the UTC offset, tsunami flag, closing on a click or resize; significant events under the map, 10, 25 or 50, each opening on the map; zoom 1 to 15; the Countries card naming the chosen country; a Tsunami filter; ranking notes on what a bar is | Done | #47 |
 
 Current numbers: 181 requirements, all covered by a passing test; 53 defects, all fixed; about 1,100 tests in the full regression.
 
