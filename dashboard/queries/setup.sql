@@ -20,6 +20,22 @@ CREATE OR REPLACE TABLE filter (
 );
 INSERT INTO filter VALUES (NULL, NULL, NULL, NULL, NULL, NULL, NULL, false, 'month', 10, 4.5);
 
+-- How the map is drawn when there are many events: one row, changed only through
+-- set_map_view.sql. It filters nothing: map_grid.sql, map_strong.sql, map_area.sql and
+-- depth_bins.sql read it beside `filtered`.
+CREATE OR REPLACE TABLE map_view (
+    strong_magnitude DOUBLE NOT NULL,  -- events at or above it are always their own points
+    cell_degrees DOUBLE NOT NULL CHECK (cell_degrees > 0),  -- map_grid.sql's cell size
+    west DOUBLE,                       -- the area map_area.sql reads, edges included;
+    south DOUBLE,                      -- NULL: the whole world
+    east DOUBLE,                       -- east - west is 0 to 360, so east may exceed 180
+    north DOUBLE,                      -- when the area crosses the antimeridian
+    area_limit INTEGER NOT NULL CHECK (area_limit > 0),  -- map_area.sql gives at most one more
+    CHECK (west IS NULL OR (west >= -180 AND west < 180 AND east >= west AND east - west <= 360
+                            AND south <= north))
+);
+INSERT INTO map_view VALUES (6, 0.25, NULL, NULL, NULL, NULL, 25000);
+
 CREATE OR REPLACE VIEW events AS
 SELECT
     *,

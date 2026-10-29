@@ -3,7 +3,7 @@ fixed dataset with DuckDB, as the page runs them, and compared with the results 
 document shows."""
 
 import pytest
-from support.analytics import QUERIES, Dashboard
+from support.analytics import MAP_VIEW_ORDER, QUERIES, Dashboard
 from support.dashboard_data import EVENTS, build
 from support.doc_examples import cell, sql_examples
 
@@ -25,7 +25,11 @@ def test_the_document_has_an_example_of_every_filtered_report():
 @pytest.mark.req("REQ-DOC-003")
 @pytest.mark.parametrize("example", EXAMPLES, ids=lambda e: f"line {e.line}")
 def test_each_report_gives_the_documented_result(dash, example):
-    dash.set_filter(**example.filters)
+    # A marker's map_view settings (map_area.sql's area, say) go to set_map_view.sql, the rest
+    # to set_filter.sql; each example starts from both tables' first values.
+    view = {k: v for k, v in example.filters.items() if k in MAP_VIEW_ORDER}
+    dash.set_filter(**{k: v for k, v in example.filters.items() if k not in MAP_VIEW_ORDER})
+    dash.set_map_view(**view)
     rows = dash.query(example.report)
     columns = list(rows[0]) if rows else example.columns
     assert columns == example.columns

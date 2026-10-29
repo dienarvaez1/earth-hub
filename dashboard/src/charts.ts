@@ -167,6 +167,36 @@ export function depthAgainstMagnitude(figure: HTMLElement, points: Row[]): void 
   );
 }
 
+/** The same chart from depth_bins.sql, when there are too many events to send one by one:
+ * each bin at its centre, weighing as many events as it holds. */
+export function depthBins(figure: HTMLElement, bins: Row[]): void {
+  const centres = bins.map((b) => ({
+    magnitude: (b.magnitude_from as number) + 0.05,
+    depth_km: (b.depth_from_km as number) + 2.5,
+    events: b.events as number,
+  }));
+  draw(
+    figure,
+    centres,
+    (width) =>
+      Plot.plot({
+        width,
+        height: 220,
+        marginLeft: 50,
+        x: { label: "Magnitude" },
+        y: { label: "Depth (km)", reverse: true, grid: true },
+        color: { scheme: "oranges", type: "log", legend: false },
+        marks: [
+          Plot.dot(
+            centres,
+            Plot.hexbin({ fill: "sum" }, { x: "magnitude", y: "depth_km", fill: "events", binWidth: 8 }),
+          ),
+        ],
+      }),
+    "Depth against magnitude, as hexagons shaded by number of events",
+  );
+}
+
 /** The top countries or regions: each bar's length is its share of all the events in the
  * bars shown (they add up to 100%), split by magnitude level in the legend's colors, with its
  * number of events at its end. */

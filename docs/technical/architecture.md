@@ -398,6 +398,7 @@ make dashboard-deploy    # publish; prints the workers.dev address
 - **Events over time** has a Style menu: Stacked columns (the default), Stacked areas, Lines (one per magnitude level, with a crosshair) and Trendlines (each level's periods as dots with its least-squares trend), per hour, day, week or month; the stacks run from 6 and above at the baseline to Below 2.5, then No magnitude, in the legend's colors.
 - **The top countries and regions** are shares of the events in the bars shown (the 10 bars add up to 100%), each bar split by magnitude level in the legend's colors, with its number of events at its end; a note under each says the counts follow how dense the seismic networks are (the United States records earthquakes too small to feel).
 - **The map** shows every event as its own point, up to 5,000 events. Above that it clusters them, except events of magnitude 6 or more, which always stay single points on top.
+- **Above 25,000 events the map gets cells, not every event**: sending each event to the map (and to the depth chart) was most of a filter change's time over long periods, 4.2 s of 4.7 for 412,000 events. `map_grid.sql` counts the events below magnitude 6 in cells of 0.25 degrees (about 28 km), each at its events' mean position with their number and strongest magnitude, and the map clusters the cells as it clusters events; `map_strong.sql` keeps the strong events as their own points, and `depth_bins.sql` gives the depth chart counts per 0.1 magnitude by 5 km. Zoomed in to level 4 or more, `map_area.sql` gives the events in the visible area (and half its size again around it, so a short pan stays covered) one by one, with their popups, in place of the cells, once it holds at most 25,000; zooming out brings the cells back. The strong magnitude, the cell size and the area are in `setup.sql`'s `map_view` table, set from `map.ts`. The same change over 412,000 events took 1.7 s.
 - **A point's popup** (a click) gives the event's time in UTC and, on the next line, where it happened: in the time zone its coordinates fall in, found by `@photostructure/tz-lookup` (the world's time-zone boundaries, nautical zones at sea), with the browser's summer time and abbreviation (`AKDT`, `CET`, else `GMT+9`); the zone's name shows on hover.
 - **The significant-events table** sorts by Time, Magnitude, Place or Depth from its column headers: ascending, descending, then the order Latest or Largest chose. It reorders the 10 events shown; Latest or Largest still picks them.
 - **Kept out of search engines.** The page is shared by link, not promoted: `X-Robots-Tag: noindex` on every response, a `robots` meta tag, and a disallow-all `robots.txt`.
@@ -406,8 +407,10 @@ make dashboard-deploy    # publish; prints the workers.dev address
 
 | Rows | Snapshot | First map (Today) | All events (Last 3 years) | Filter change |
 | --- | --- | --- | --- | --- |
-| 115,000 | 6.0 MB | about 4 s | about 0.5 s | about 140 ms |
-| 1,000,000 | 36 MB | about 4 s | about 3.7 s | about 900 ms |
+| 115,000 | 5.5 MB | about 3 s | about 0.25 s | about 180 ms |
+| 1,000,000 | 33 MB | about 4 s | about 1.4 s (4.2 s before the cells) | about 1 s |
+
+The synthetic events gather around 40 hotspots, with each unit of magnitude rarer than the last, as real ones do: spread evenly over the globe, nearly every event would get a map cell of its own.
 
 About 3–4 s of the first map is the browser compiling DuckDB's engine. Browsers cache that between visits, which the tests don't measure.
 

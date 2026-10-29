@@ -177,16 +177,20 @@ ORDER BY preferred_event_id;
 
 ## Dashboard reports
 
-The page runs every report unchanged. All filters live in one `filter` table, set through `set_filter.sql`, so no report takes parameters; `setup.sql` creates it, and the `events` and `filtered` views every report reads (and `matched`, for the menus). Times are bucketed from `event_time_ms` as a plain UTC `TIMESTAMP`, so results never depend on the browser's time zone.
+The page runs every report unchanged. All filters live in one `filter` table, set through `set_filter.sql`, so no report takes parameters; `setup.sql` creates it, and the `events` and `filtered` views every report reads (and `matched`, for the menus). How the map is drawn when it has too many events to draw one by one is in a second one-row table, `map_view` (the strong magnitude, the cell size, the visible area), set through `set_map_view.sql`: it filters nothing, and only the four map reports below read it. Times are bucketed from `event_time_ms` as a plain UTC `TIMESTAMP`, so results never depend on the browser's time zone.
 
 | File | Answers | Filtered |
 | --- | --- | --- |
-| `setup.sql` | Creates the `filter` table and the `events`, `matched` and `filtered` views | |
+| `setup.sql` | Creates the `filter` and `map_view` tables and the `events`, `matched` and `filtered` views | |
 | `set_filter.sql` | Sets every filter at once (11 parameters, in order) | |
+| `set_map_view.sql` | Sets the map's view at once (7 parameters, in order) | |
 | `summary.sql` | The headline numbers: events, strongest, first and last, countries, tsunami flags | yes |
 | `over_time.sql` | Events per hour, day, ISO week or month, empty periods included, split by magnitude level | yes |
 | `magnitude_bins.sql` | Events per half-unit of magnitude, empty bins included | yes |
 | `map_points.sql` | One point per event, for the map and the depth chart | yes |
+| `map_grid.sql`, `map_strong.sql` | Above 25,000 events, in place of `map_points.sql`: the events in cells of `cell_degrees` (count, mean position, strongest magnitude), and the strong events as their own points | yes |
+| `map_area.sql` | With the cells, once zoomed in: the other events in the visible area, one by one, at most `area_limit` + 1 | yes |
+| `depth_bins.sql` | With the cells: the depth chart's events counted per 0.1 magnitude by 5 km | yes |
 | `top_countries.sql`, `top_regions.sql` | The `top_n` countries and regions by events, split by magnitude level | yes |
 | `significant.sql`, `largest.sql` | The latest and the strongest `top_n` events at or above `significant_magnitude` | yes |
 | `countries.sql`, `regions.sql`, `event_types.sql` | The options of the filter's menus, counted under the rest of the filter | yes, except each menu's own choice (regions: listed for the chosen country) |
@@ -338,6 +342,49 @@ Per ISO week, from Monday. Weeks without events are listed with 0, so a chart's 
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | us0002 | -155.6123 | 57.4401 | 10.0 | 2.5 | 1709164800000 | place 2 | M 2.4 - 86 km E of Ugashik, Alaska | https://earthquake.usgs.gov/earthquakes/eventpage/ak0001 | reviewed |
 | us0003 | -155.6123 | 57.4401 | 10.0 | 4.5 | 1709208000000 | place 3 | M 2.4 - 86 km E of Ugashik, Alaska | https://earthquake.usgs.gov/earthquakes/eventpage/ak0001 | reviewed |
+
+### The map with too many events to draw one by one
+
+Above 25,000 filtered events the page draws cells instead of `map_points.sql`'s points. `map_grid.sql` puts the events below `map_view`'s `strong_magnitude` (6 on the page) in cells of `cell_degrees` (0.25). Every event of the fixed dataset is in one place, so one cell holds all seven the default filter keeps.
+
+<!-- replay: dashboard map_grid -->
+
+| cell_x | cell_y | longitude | latitude | events | max_magnitude |
+| --- | --- | --- | --- | --- | --- |
+| -623 | 229 | -155.6123 | 57.4401 | 7 | 5.2 |
+
+`map_strong.sql` gives the other events, at or above the strong magnitude, each as its own point, so a cell can never hide one: here with a strong magnitude of 4.5.
+
+<!-- replay: dashboard map_strong strong_magnitude=4.5 -->
+
+| key | longitude | latitude | depth_km | magnitude | event_time_ms | place | title | url | review_status |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| us0003 | -155.6123 | 57.4401 | 10.0 | 4.5 | 1709208000000 | place 3 | M 2.4 - 86 km E of Ugashik, Alaska | https://earthquake.usgs.gov/earthquakes/eventpage/ak0001 | reviewed |
+| us0006 | -155.6123 | 57.4401 | 10.0 | 5.2 | 1710111600000 | place 6 | M 2.4 - 86 km E of Ugashik, Alaska | https://earthquake.usgs.gov/earthquakes/eventpage/ak0001 | reviewed |
+
+Once zoomed in, `map_area.sql` gives the events in `map_view`'s area (edges included; an `east` above 180 wraps across the antimeridian) one by one, in place of the cells, leaving out the strong ones. Here the area around Alaska, from 1 March 2024:
+
+<!-- replay: dashboard map_area start_time="2024-03-01" west=-160 south=50 east=-150 north=60 -->
+
+| key | longitude | latitude | depth_km | magnitude | event_time_ms | place | title | url | review_status |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| us0004 | -155.6123 | 57.4401 | 10.0 | NULL | 1709251200000 | place 4 | M 2.4 - 86 km E of Ugashik, Alaska | https://earthquake.usgs.gov/earthquakes/eventpage/ak0001 | reviewed |
+| us0005 | -155.6123 | 57.4401 | 10.0 | -0.43 | 1709532000000 | place 5 | M 2.4 - 86 km E of Ugashik, Alaska | https://earthquake.usgs.gov/earthquakes/eventpage/ak0001 | reviewed |
+| us0006 | -155.6123 | 57.4401 | 10.0 | 5.2 | 1710111600000 | place 6 | M 2.4 - 86 km E of Ugashik, Alaska | https://earthquake.usgs.gov/earthquakes/eventpage/ak0001 | reviewed |
+| us0008 | -155.6123 | 57.4401 | 10.0 | 1.0 | 1712052000000 | place 8 | M 2.4 - 86 km E of Ugashik, Alaska | https://earthquake.usgs.gov/earthquakes/eventpage/ak0001 | reviewed |
+
+`depth_bins.sql` counts the same events for the depth chart, per 0.1 magnitude (`magnitude_from <= magnitude < magnitude_from + 0.1`) by 5 km; events without a magnitude are left out.
+
+<!-- replay: dashboard depth_bins -->
+
+| magnitude_from | depth_from_km | events |
+| --- | --- | --- |
+| -0.5 | 10.0 | 1 |
+| 1.0 | 10.0 | 1 |
+| 2.4 | 10.0 | 1 |
+| 2.5 | 10.0 | 1 |
+| 4.5 | 10.0 | 1 |
+| 5.2 | 10.0 | 1 |
 
 ### The filter's options
 

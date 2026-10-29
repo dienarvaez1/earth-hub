@@ -3,7 +3,7 @@
 import "./style.css";
 import * as charts from "./charts";
 import { DEFAULT_FILTER, Db, type Filter, type Row } from "./db";
-import { EventMap, legend } from "./map";
+import { AREA_LIMIT, EventMap, GRID_ABOVE, WORLD, legend } from "./map";
 import { BUCKET, DEFAULT_PERIOD, type Period, day, firstDay, lastDay } from "./periods";
 import { countryLabel, countryOrder, regionLabel, regionOrder } from "./places";
 
@@ -23,6 +23,10 @@ interface Status {
   mapFeatures: number;
   mapClustered: boolean;
   mapSinglePoints: number;
+  mapGrid: boolean; // the map came as cells (map_grid.sql): more than GRID_ABOVE events
+  mapCells: number;
+  mapAreaPoints: number | null; // the visible area's events shown in place of the cells
+  mapMoves: number; // map moves handled (each may change mapAreaPoints)
   summary: Row | null;
   // Runs every report for a filter, then restores the form's: lets the browser tests compare
   // DuckDB-WASM's answers with DuckDB's in Python on the same file. Read-only.
@@ -31,13 +35,15 @@ interface Status {
   mapIdle?: () => Promise<void>;
   // Opens an event's popup, as a click on its point does; false if the map does not show it.
   openPopup?: (key: string) => boolean;
+  // Moves the map at once; mapMoves counts up once its area is shown.
+  mapJumpTo?: (longitude: number, latitude: number, zoom: number) => void;
 }
 declare global {
   interface Window {
     __earthHub: Status;
   }
 }
-const status: Status = { ready: false, error: null, updates: 0, timings: {}, mapFeatures: 0, mapClustered: false, mapSinglePoints: 0, summary: null };
+const status: Status = { ready: false, error: null, updates: 0, timings: {}, mapFeatures: 0, mapClustered: false, mapSinglePoints: 0, mapGrid: false, mapCells: 0, mapAreaPoints: null, mapMoves: 0, summary: null };
 window.__earthHub = status;
 
 const REPORTS = [
@@ -49,6 +55,10 @@ const REPORTS = [
   "significant",
   "largest",
   "map_points",
+  "map_grid",
+  "map_strong",
+  "map_area",
+  "depth_bins",
   "date_range",
   "countries",
   "regions",
@@ -95,6 +105,7 @@ async function start(): Promise<void> {
   status.queryAll = (filter) =>
     queue(async () => {
       await db.setFilter({ ...DEFAULT_FILTER, ...filter });
+      await db.setMapView(WORLD);
       const results: Record<string, Row[]> = {};
       for (const name of REPORTS) results[name] = await db.query(name);
       await db.setFilter(readFilter());
@@ -103,6 +114,19 @@ async function start(): Promise<void> {
 
   status.mapIdle = () => map.idle();
   status.openPopup = (key) => map.openPopup(key);
+  status.mapJumpTo = (longitude, latitude, zoom) => map.jumpTo(longitude, latitude, zoom);
+  let moved: number | undefined;
+  map.onMoveEnd(() => {
+    window.clearTimeout(moved);
+    moved = window.setTimeout(
+      () =>
+        queue(async () => {
+          await showArea(db, map);
+          status.mapMoves += 1;
+        }).catch(fail),
+      200,
+    );
+  });
 
   let pending: number | undefined;
   // On the document: the time bucket select sits outside the form (form="filters").
@@ -269,7 +293,12 @@ async function render(db: Db, map: EventMap): Promise<void> {
   const filter = readFilter();
   await db.setFilter(filter);
   const [summary] = await db.query("summary");
-  const points = await db.query("map_points");
+  // Too many events to draw one by one: cells and bins counted in SQL (map_grid.sql).
+  const grid = (summary.events as number) > GRID_ABOVE;
+  await db.setMapView(WORLD);
+  const points = await db.query(grid ? "map_strong" : "map_points");
+  const cells = grid ? await db.query("map_grid") : [];
+  const depth = grid ? await db.query("depth_bins") : [];
   const time = await db.query("over_time");
   const bins = await db.query("magnitude_bins");
   const countries = await db.query("top_countries");
@@ -288,11 +317,17 @@ async function render(db: Db, map: EventMap): Promise<void> {
   fill("event_type", typeOptions, (r) => String(r.event_type), DEFAULT_EVENT_TYPE);
   fillRegions(regionOptions);
   showSummary(summary);
-  await map.show(points);
+  if (grid) {
+    await map.showGrid(cells, points);
+    await showArea(db, map);
+  } else {
+    await map.show(points);
+  }
   const style = (new FormData(form).get("chart_style") ?? "stacked") as charts.TimeStyle;
   charts.overTime($("#chart-time"), time, filter.time_bucket, style);
   charts.magnitudes($("#chart-magnitude"), bins);
-  charts.depthAgainstMagnitude($("#chart-depth"), points);
+  if (grid) charts.depthBins($("#chart-depth"), depth);
+  else charts.depthAgainstMagnitude($("#chart-depth"), points);
   charts.topBars(
     $("#chart-countries"),
     countries,
@@ -313,6 +348,9 @@ async function render(db: Db, map: EventMap): Promise<void> {
   status.mapFeatures = map.featureCount;
   status.mapClustered = map.clustered;
   status.mapSinglePoints = map.singleCount;
+  status.mapGrid = map.grid;
+  status.mapCells = map.cellCount;
+  status.mapAreaPoints = map.areaCount;
   status.summary = summary;
   status.updates += 1;
 }
@@ -437,6 +475,22 @@ function showSignificant(rows: Row[]): void {
       link.append(a);
     }
   }
+}
+
+/** In grid mode, zoomed in: the visible area's events (map_area.sql) in place of the cells, when
+ * it holds at most AREA_LIMIT of them; otherwise the cells. */
+async function showArea(db: Db, map: EventMap): Promise<void> {
+  if (!map.grid) return;
+  const area = map.area();
+  let points: Row[] | null = null;
+  if (area !== null) {
+    await db.setMapView({ ...WORLD, ...area });
+    const rows = await db.query("map_area");
+    if (rows.length <= AREA_LIMIT) points = rows;
+  }
+  map.showArea(points);
+  status.mapFeatures = map.featureCount;
+  status.mapAreaPoints = map.areaCount;
 }
 
 function fail(error: unknown): void {

@@ -68,6 +68,28 @@ def large_server(built, tmp_path_factory):
     local.stop()
 
 
+class GridServer:
+    def __init__(self, server, events: list, cells: list, strong: list):
+        self.server = server
+        self.events, self.cells, self.strong = events, cells, strong  # from Python, as the page
+
+
+@pytest.fixture(scope="session")
+def grid_server(built, tmp_path_factory):
+    """30,000 synthetic events: more than the map is given one by one (map_grid.sql)."""
+    snapshot = synthetic(tmp_path_factory.mktemp("grid"), 30_000)
+    dashboard = Dashboard(snapshot)
+    dashboard.set_filter(event_type="earthquake")  # the page's default type
+    events, cells = dashboard.query("map_points"), dashboard.query("map_grid")
+    strong = dashboard.query("map_strong")
+    dashboard.close()
+    local = LocalDashboard(tmp_path_factory.mktemp("r2-grid"))
+    local.seed(snapshot, META | {"rows": 30_000})
+    local.start()
+    yield GridServer(local, events, cells, strong)
+    local.stop()
+
+
 @pytest.fixture(scope="session")
 def empty_server(built, tmp_path_factory):
     """No snapshot in the bucket: before the first export."""
