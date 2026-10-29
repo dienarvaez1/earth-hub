@@ -201,6 +201,7 @@ The dashboard's SQL lives in `dashboard/queries/`; the page runs it in the brows
 | REQ-DASH-029 | The significant events show 10 rows by default, or 25 or 50 from a Show menu in their heading (`significant_n`), which says how many it lists and returns to 10 on Reset; it changes neither the top countries' and regions' bars (`top_n`) nor which events the Latest and Largest orders pick before the limit |
 | REQ-DASH-030 | The summary's Countries card names the country when one is chosen in the country menu, as the menu shows it (`US-` for US territories), and says `Unknown country` for Unknown; with All it says how many countries the events are in (`1 country`, `4 countries`), Unknown counting as one |
 | REQ-DASH-031 | A Tsunami box after Events in the filter bar, the same size as the Magnitude box, has a Flagged only checkbox (`tsunami_only`, off by default and after Reset): checked, every report keeps only the events USGS flags for tsunami, the menus' counts included |
+| REQ-DASH-032 | The page's footer links to the project's repository on GitHub, `https://github.com/dienarvaez1/earth-hub` |
 
 ## End-to-end scenarios
 

@@ -50,6 +50,14 @@ def test_the_footer_links_to_the_licenses(dash):
     assert link.get_attribute("href") == NOTICES
 
 
+@pytest.mark.req("REQ-DASH-032")
+def test_the_footer_links_to_the_project_on_github(dash):
+    link = dash.page.locator("footer a#source")
+    assert link.is_visible() and link.inner_text() == "Earth-Hub on GitHub"
+    assert link.get_attribute("href") == "https://github.com/dienarvaez1/earth-hub"
+    assert link.get_attribute("rel") == "noopener"
+
+
 @pytest.mark.req("REQ-DASH-016")
 def test_a_package_without_a_license_text_fails_the_build(built, tmp_path):
     result = subprocess.run(
