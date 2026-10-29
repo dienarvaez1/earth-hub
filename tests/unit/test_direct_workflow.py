@@ -68,6 +68,19 @@ def test_the_worker_triggers_a_round_every_hour_and_the_reconcile_every_day():
         "GITHUB_REPO": "dienarvaez1/earth-hub",
     }
     assert "GITHUB_TOKEN" not in json.dumps(config)  # a secret, never in the configuration
+
+
+@pytest.mark.req("REQ-DASH-035")
+def test_the_worker_logs_no_visitor_requests():
+    # Invocation logs record each request with the visitor's IP address and the location
+    # Cloudflare derives from it (city, postal code, coordinates); the Worker's own lines stay.
+    text = render("earth-hub-test")
+    lines = [line for line in text.splitlines() if not line.strip().startswith("//")]
+    config = json.loads("\n".join(lines))
+    assert config["observability"] == {"enabled": True, "logs": {"invocation_logs": False}}
+    source = (REPO / "dashboard" / "src" / "worker.ts").read_text()
+    fetch = source[source.index("async fetch(") : source.index("async scheduled(")]
+    assert "console." not in fetch  # nothing about a visitor's request is logged either
     source = (REPO / "dashboard" / "src" / "worker.ts").read_text()
     for constant in (
         'WORKFLOW = "direct.yml"',
