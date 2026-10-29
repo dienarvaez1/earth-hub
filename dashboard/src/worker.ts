@@ -2,9 +2,10 @@
 // runs; the Worker only answers /data/*, reading the snapshot from R2 through a binding,
 // so the bucket stays private and the page holds no credentials.
 //
-// It also starts direct mode's rounds on its cron trigger (wrangler.template.jsonc): GitHub's
-// own schedule fires late and skips runs (DEF-052), Cloudflare's runs on time. The handler is
-// not reachable over HTTP.
+// It also starts direct mode's rounds, and its daily reconcile, on its cron triggers
+// (wrangler.template.jsonc): GitHub's own schedule fires late and skips runs (DEF-052), and
+// in a public repository it disables a scheduled workflow, rounds included, after 60 days
+// without commits (DEF-056); Cloudflare's runs on time. The handler is not reachable over HTTP.
 
 interface Env {
   SNAPSHOTS: R2Bucket;
@@ -17,6 +18,9 @@ interface Env {
 const WORKFLOW = "direct.yml";
 const REF = "main";
 const JOB = "round";
+// The daily reconcile's trigger (the other one starts a round), and the job it runs.
+const RECONCILE_CRON = "41 5 * * *";
+const RECONCILE = "reconcile";
 // Who asked for the round, for its audit record (src/earth_hub/direct/audit.py).
 const STARTED_BY = "cloudflare-trigger";
 
@@ -47,20 +51,15 @@ export default {
   },
 
   async scheduled(controller: ScheduledController, env: Env): Promise<void> {
-    await startRound(env, new Date(controller.scheduledTime));
+    if (controller.cron === RECONCILE_CRON) await dispatch(env, RECONCILE, {});
+    else await startRound(env, new Date(controller.scheduledTime));
   },
 } satisfies ExportedHandler<Env>;
 
-/** Asks GitHub to run one direct round, once a day with the days the token has left.
- * Without a token it only says so; a refusal throws, so Cloudflare records the trigger as
- * failed. */
+/** Asks GitHub to run one direct round, once a day with the days the token has left. */
 async function startRound(env: Env, now: Date): Promise<void> {
-  if (!env.GITHUB_TOKEN) {
-    console.warn("trigger: GITHUB_TOKEN is not set, no direct round started");
-    return;
-  }
-  const inputs: Record<string, string> = { job: JOB, started_by: STARTED_BY };
-  if (now.getUTCHours() === CHECK_HOUR_UTC) {
+  const inputs: Record<string, string> = {};
+  if (env.GITHUB_TOKEN && now.getUTCHours() === CHECK_HOUR_UTC) {
     const days = await tokenDaysLeft(env, now);
     if (days !== null) {
       inputs.token_days_left = String(days);
@@ -69,12 +68,23 @@ async function startRound(env: Env, now: Date): Promise<void> {
       }
     }
   }
+  await dispatch(env, JOB, inputs);
+}
+
+/** Asks GitHub to run direct.yml's `job` on main. Without a token it only says so; a refusal
+ * throws, so Cloudflare records the trigger as failed. */
+async function dispatch(env: Env, job: string, extra: Record<string, string>): Promise<void> {
+  if (!env.GITHUB_TOKEN) {
+    console.warn(`trigger: GITHUB_TOKEN is not set, no direct ${job} started`);
+    return;
+  }
+  const inputs = { job, started_by: STARTED_BY, ...extra };
   const response = await github(env, "POST", "/dispatches", { ref: REF, inputs });
   if (!response.ok) {
     const detail = (await response.text()).slice(0, 300);
     throw new Error(`trigger: GitHub answered ${response.status}: ${detail}`);
   }
-  console.log("trigger: direct round started");
+  console.log(`trigger: direct ${job} started`);
 }
 
 /** The days until the token expires, from the date GitHub states on every reply to a token

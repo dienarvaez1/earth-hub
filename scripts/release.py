@@ -362,8 +362,8 @@ def main() -> int:
     finished = run(sh, {"done": [], "dry_run": True} if args.dry_run else _load())
     if finished and not args.dry_run:
         print(
-            "\nReleased. Remember: GitHub switches off a public repository's scheduled\n"
-            "workflows after 60 days with no activity; a push re-enables them."
+            "\nReleased. GitHub switches off the watchdog's schedule after 60 days without\n"
+            "commits (the rounds go on): a push, or Actions -> Watchdog -> Enable, turns it on."
         )
     return 0 if finished else 1
 

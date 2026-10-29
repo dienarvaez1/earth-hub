@@ -16,7 +16,7 @@ REPO = Path(__file__).resolve().parents[2]
 WORKFLOWS = REPO / ".github" / "workflows"
 WORKFLOW = WORKFLOWS / "direct.yml"
 ROUND_CRON = "17 * * * *"  # the dashboard Worker's trigger: every hour, off the top of it
-RECONCILE_CRON = "41 5 * * *"
+RECONCILE_CRON = "41 5 * * *"  # the same Worker's other trigger: the daily reconcile
 
 sys.path.insert(0, str(REPO / "scripts"))
 from dashboard_config import render  # noqa: E402
@@ -34,11 +34,11 @@ def run_lines(job: dict) -> str:
 
 
 @pytest.mark.req("REQ-CI-005")
-def test_it_runs_only_on_its_schedule_or_by_hand(workflow):
+def test_it_runs_only_when_asked(workflow):
     triggers = workflow[True]  # YAML 1.1 reads the key `on` as true
-    assert set(triggers) == {"schedule", "workflow_dispatch"}  # never branch code
-    # Only the reconcile is GitHub's to schedule: the rounds come from the Worker (DEF-052).
-    assert [entry["cron"] for entry in triggers["schedule"]] == [RECONCILE_CRON]
+    # Never branch code, and no schedule: GitHub disables a public repository's scheduled
+    # workflows after 60 days without commits, rounds included (DEF-056).
+    assert set(triggers) == {"workflow_dispatch"}
     job = triggers["workflow_dispatch"]["inputs"]["job"]
     assert job["options"] == ["round", "reconcile"] and job["default"] == "round"
 
@@ -48,9 +48,7 @@ def test_each_job_runs_when_asked_with_the_skip_flag(workflow):
     jobs = workflow["jobs"]
     assert set(jobs) == {"round", "reconcile", "token"}
     assert jobs["round"]["if"] == "inputs.job == 'round'"  # the trigger's dispatch, or by hand
-    assert jobs["reconcile"]["if"] == (
-        f"github.event.schedule == '{RECONCILE_CRON}' || inputs.job == 'reconcile'"
-    )
+    assert jobs["reconcile"]["if"] == "inputs.job == 'reconcile'"  # the trigger's, or by hand
     for name, command in (
         ("round", "python -m earth_hub.direct once --skip-unless-direct"),
         ("reconcile", "python -m earth_hub.direct.reconcile --skip-unless-direct"),
@@ -60,11 +58,11 @@ def test_each_job_runs_when_asked_with_the_skip_flag(workflow):
 
 
 @pytest.mark.req("REQ-CI-006")
-def test_the_worker_triggers_a_round_every_hour():
+def test_the_worker_triggers_a_round_every_hour_and_the_reconcile_every_day():
     text = render("earth-hub-test")
     lines = [line for line in text.splitlines() if not line.strip().startswith("//")]
     config = json.loads("\n".join(lines))  # the template's comments are whole lines
-    assert config["triggers"] == {"crons": [ROUND_CRON]}
+    assert config["triggers"] == {"crons": [ROUND_CRON, RECONCILE_CRON]}
     assert config["vars"] == {
         "GITHUB_API": "https://api.github.com",
         "GITHUB_REPO": "dienarvaez1/earth-hub",
@@ -76,6 +74,8 @@ def test_the_worker_triggers_a_round_every_hour():
         'REF = "main"',
         'JOB = "round"',
         'STARTED_BY = "cloudflare-trigger"',
+        f'RECONCILE_CRON = "{RECONCILE_CRON}"',
+        'RECONCILE = "reconcile"',
     ):
         assert f"const {constant};" in source
 

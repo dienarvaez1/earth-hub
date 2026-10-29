@@ -8,8 +8,9 @@ A second workflow, `.github/workflows/direct.yml`, is not a check: it runs [dire
 %%{init: {"flowchart": {"rankSpacing": 30, "nodeSpacing": 50}}}%%
 flowchart TB
     pr["pull request,<br/>push to main"] --> ci["ci.yml<br/>lint, unit, regression<br/>(no secrets)"]
-    trigger["dashboard Worker's<br/>cron trigger, hourly"] -- round --> direct["direct.yml<br/>round / reconcile<br/>(r2 environment)"]
-    cron["daily at 05:41 UTC,<br/>or by hand"] --> direct
+    trigger["dashboard Worker's<br/>cron triggers"] -- "round, hourly;<br/>reconcile, 05:41 UTC" --> direct["direct.yml<br/>round / reconcile<br/>(r2 environment)"]
+    hand["by hand"] --> direct
+    watchdog["watchdog.yml,<br/>every 3 hours"] -. "a run in<br/>the last 2 h?" .-> direct
     direct --> check{"_state/mode.json<br/>direct (active)?"}
     check -- yes --> r2[("R2 bucket:<br/>rows, snapshot, log")]
     check -- "no: full or<br/>handing-over" --> skip["skip, succeed"]
@@ -61,7 +62,7 @@ A ruleset on `main` requires both checks before a merge, and blocks force pushes
 | --- | --- | --- |
 | **Direct round** (`round`) | every hour at :17, started by the dashboard Worker's [cron trigger](#the-trigger) | `python -m earth_hub.direct once --skip-unless-direct`: one poller round, and catch-up if due (`make direct-once`) |
 | **Trigger token** (`token`) | once a day, when the trigger passes the days its token has left | Fails within 14 days of the expiry, so GitHub e-mails the token's owner ([the reminder](#the-trigger)); no secrets |
-| **Direct reconcile** (`reconcile`) | every day, at 05:41 UTC | `python -m earth_hub.direct.reconcile --skip-unless-direct` (`make reconcile-direct`), then `python -m earth_hub.usgs_reconcile --skip-unless-direct --max-age-hours 2` ([against USGS](architecture.md#reconciliation-with-usgs)); either failing fails the run |
+| **Direct reconcile** (`reconcile`) | every day at 05:41 UTC, started by the Worker's other cron trigger | `python -m earth_hub.direct.reconcile --skip-unless-direct` (`make reconcile-direct`), then `python -m earth_hub.usgs_reconcile --skip-unless-direct --max-age-hours 2` ([against USGS](architecture.md#reconciliation-with-usgs)); either failing fails the run |
 
 Both also run by hand: **Actions → Direct mode → Run workflow**, or `gh workflow run direct.yml -f job=round` (`job=reconcile`); `gh run list --workflow direct.yml` lists the runs. Each run's page shows the command's summary lines.
 
@@ -71,13 +72,13 @@ Both also run by hand: **Actions → Direct mode → Run workflow**, or `gh work
 - **Secrets.** R2 credentials (`R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET`) are given only to the step that runs the command; `USGS_CONTACT` is a repository variable, the repository's address. Use an R2 token for this workflow only (Object Read & Write on the bucket), so it can be revoked alone. While the repository is private they are repository secrets (`gh secret set <NAME>`): GitHub Free has no environments for private repositories, and the jobs' `r2` environment holds none. Once it is public, move them to the `r2` environment, which only `main` can use (`gh secret set <NAME> --env r2`, which reads the value from the terminal). The workflow has no pull request or push trigger, pull requests from forks never get secrets, and a workflow run from any other branch cannot use the environment.
 - **Freshness.** New events reach the bucket up to about an hour after USGS publishes them (a minute with `make direct-run`); none are lost, as the day feed lists the last 24 hours.
 - **Cost.** Each run takes about 1–1½ minutes with uv's cache. While the repository is private, GitHub Free includes 2,000 Actions minutes a month, shared with CI: hourly rounds use about 720 to 1,440 of them, which is why the trigger runs hourly; Actions minutes are free for a public repository, where it can run every 15 minutes. The Cloudflare trigger is free (the Workers Free plan has 5 cron triggers). R2 operations are fewer than with `make direct-run`: 24 feed rounds a day instead of about 437 (`tests/unit/test_direct_budget.py`).
-- **Failures** of the reconcile e-mail whoever last changed the workflow's schedule, as GitHub does for scheduled workflows; a failed round shows in **Actions**, a trigger GitHub refused in the Worker's logs on Cloudflare (**Workers → earth-hub → Logs**).
-- **GitHub's schedule did not keep time** (DEF-052): while the repository was private it ran about one hourly slot in five, and on 21–22 October it ran none for over 8 hours, the 15-minute schedule included. Nothing is lost while rounds are missed (the day feed covers 24 hours, catch-up 30 days), but the dashboard goes stale. So the rounds are started from Cloudflare, whose cron triggers fire on time; the daily reconcile stays on GitHub's schedule and fails if no direct round has written for 2 hours.
-- **60 days without activity.** GitHub switches off a public repository's scheduled workflows after 60 days with no activity in it, here the daily reconcile; a push, or **Actions → Direct mode → Enable workflow**, turns it back on.
+- **Failures** e-mail whoever started the run: for the rounds and the reconcile, the trigger token's owner. A trigger GitHub refused shows in the Worker's logs on Cloudflare (**Workers → earth-hub → Logs**), and the watchdog fails within 3 hours.
+- **GitHub's schedule did not keep time** (DEF-052): while the repository was private it ran about one hourly slot in five, and on 21–22 October it ran none for over 8 hours, the 15-minute schedule included. Nothing is lost while rounds are missed (the day feed covers 24 hours, catch-up 30 days), but the dashboard goes stale. So the rounds are started from Cloudflare, whose cron triggers fire on time, and so is the daily reconcile, which fails if no direct round has written for 2 hours.
+- **No schedule in `direct.yml`** (DEF-056). GitHub disables a public repository's scheduled workflows after 60 days without commits, and a disabled workflow cannot be dispatched either: with the reconcile's schedule in it, the rounds would have stopped too. `direct.yml` has only `workflow_dispatch`, and [the watchdog](#the-watchdog) holds the repository's one schedule.
 
 ### The trigger
 
-The dashboard's Worker (`dashboard/src/worker.ts`) has a cron trigger, `17 * * * *` in `dashboard/wrangler.template.jsonc`: every hour it asks GitHub's API to run `direct.yml`'s round on `main` (`POST /repos/dienarvaez1/earth-hub/actions/workflows/direct.yml/dispatches`, `{"ref": "main", "inputs": {"job": "round"}}`). Its scheduled handler cannot be reached over HTTP, so the page still exposes only its two files. Without a token it starts nothing and says so in its log; a refusal fails the trigger. `tests/dashboard/test_dashboard_trigger.py` runs it under `wrangler dev --test-scheduled` against a local stand-in for GitHub (REQ-CI-006).
+The dashboard's Worker (`dashboard/src/worker.ts`) has two cron triggers in `dashboard/wrangler.template.jsonc`. `17 * * * *`: every hour it asks GitHub's API to run `direct.yml`'s round on `main` (`POST /repos/dienarvaez1/earth-hub/actions/workflows/direct.yml/dispatches`, `{"ref": "main", "inputs": {"job": "round", "started_by": "cloudflare-trigger"}}`). `41 5 * * *`: once a day, the same with `"job": "reconcile"`. Its scheduled handler cannot be reached over HTTP, so the page still exposes only its two files. Without a token it starts nothing and says so in its log; a refusal fails the trigger. `tests/dashboard/test_dashboard_trigger.py` runs it under `wrangler dev --test-scheduled` against a local stand-in for GitHub (REQ-CI-006).
 
 To set it up, once, then again before the token expires: run `make trigger-token` in a terminal (`scripts/trigger_token.py`), then `make dashboard-deploy` the first time.
 
@@ -91,5 +92,11 @@ By hand, the same: create the token in **Settings → Developer settings → Fin
 To run every 15 minutes once the repository is public, change the cron to `2,17,32,47 * * * *` and deploy.
 
 **The reminder to renew it** (REQ-CI-007). GitHub states a token's expiry on every reply to it (`GitHub-Authentication-Token-Expiration`). Once a day, the 08:17 UTC trigger reads it (a read of the workflow, which starts nothing) and passes the days left with the round, as the input `token_days_left`. The workflow's **Trigger token** job, which has no secrets, fails when 14 days or fewer are left, with *"The dashboard trigger's GitHub token expires in N days: run make trigger-token"*; GitHub e-mails a failed run to whoever started it, the token's owner (check **Settings → Notifications → Actions**: failed workflows, e-mail). The round runs as usual, and the Worker logs the same warning. After `make trigger-token`, the next day's check passes. Until then it adds a minute of Actions time a day; the job is skipped, at no cost, on the other runs.
+
+### The watchdog
+
+`.github/workflows/watchdog.yml` runs every 3 hours (`47 */3 * * *`), and by hand. It reads when the newest `direct.yml` run started by `workflow_dispatch` began (`gh run list`, with the job's own token, which can only read), and `scripts/watchdog.py` fails if that was more than 2 hours ago: the trigger stopped, or its token expired. The failure says *"The dashboard Worker's trigger has started no direct.yml run since …: check its cron trigger and its GitHub token (make trigger-token)"*, and GitHub e-mails whoever last changed the workflow's schedule. Rounds run, and skip, in either mode, so it holds in full mode too. No secrets (REQ-CI-009).
+
+It is the repository's only schedule. After 60 days without commits GitHub disables it, and only it: the rounds go on. **Actions → Watchdog → Enable workflow**, or any push, turns it back on.
 
 **With Claude Code:** `/eh-mode schedule` runs a round now, `/eh-mode runs` lists the recent runs, and `/eh-mode` says whether the schedule writes (direct mode) or skips (full mode).

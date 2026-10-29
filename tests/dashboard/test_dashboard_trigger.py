@@ -77,10 +77,12 @@ def worker(state, github, *token: str) -> LocalDashboard:
     return local
 
 
-def fire(local: LocalDashboard, at: str = "2026-10-22T09:17:00+00:00") -> httpx.Response:
-    """What Cloudflare does every hour: run the scheduled handler, as at `at`."""
+def fire(
+    local: LocalDashboard, at: str = "2026-10-22T09:17:00+00:00", cron: str = "17 * * * *"
+) -> httpx.Response:
+    """What Cloudflare does on a cron trigger: run the scheduled handler, as at `at`."""
     time = int(datetime.fromisoformat(at).timestamp() * 1000)
-    params = {"cron": "17 * * * *", "time": str(time)}
+    params = {"cron": cron, "time": str(time)}
     # The runtime's own endpoint (`--test-scheduled`); it takes the event's time in ms.
     return httpx.get(f"{local.url}/cdn-cgi/local/scheduled", params=params, timeout=30)
 
@@ -147,6 +149,22 @@ def test_the_other_hours_only_start_the_round(with_token, github):
     (dispatch,) = github.requests
     assert dispatch["method"] == "POST"
     assert dispatch["body"]["inputs"] == {"job": "round", "started_by": "cloudflare-trigger"}
+
+
+def test_the_daily_trigger_asks_github_for_the_reconcile(with_token, github):
+    # DEF-056: direct.yml has no schedule of its own, so GitHub never disables it.
+    github.requests.clear()
+    github.expiry = "2026-11-05 07:00:00 UTC"
+    try:
+        assert fire(with_token, at="2026-10-22T05:41:00+00:00", cron="41 5 * * *").is_success
+    finally:
+        github.expiry = None
+    (dispatch,) = github.requests  # no token check: that rides on the 08:17 round
+    assert dispatch["path"] == DISPATCHES
+    assert dispatch["body"] == {
+        "ref": "main",
+        "inputs": {"job": "reconcile", "started_by": "cloudflare-trigger"},
+    }
 
 
 def test_a_refusal_fails_the_trigger(with_token, github):

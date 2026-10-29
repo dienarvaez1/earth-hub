@@ -1,0 +1,37 @@
+# The watchdog (docs/technical/ci.md#the-watchdog): fails, so GitHub e-mails, when the
+# dashboard Worker's cron trigger has started no direct.yml run for 2 hours (scripts/watchdog.py).
+#
+# The repository's only schedule. GitHub disables a public repository's scheduled workflows
+# after 60 days without commits; kept apart from direct.yml, that stops this check, never the
+# rounds (DEF-056). A failed scheduled run e-mails whoever last changed its cron.
+#
+# No secrets: it reads the Actions API with the job's own token, which can only read. Actions
+# are pinned to commit SHAs (the tag is in the comment).
+
+name: Watchdog
+
+on:
+  schedule:
+    - cron: "47 */3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  trigger:
+    name: Trigger alive
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: A direct.yml run started within 2 hours
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          last=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow direct.yml \
+            --event workflow_dispatch --limit 1 --json createdAt -q '.[0].createdAt // ""')
+          python3 scripts/watchdog.py "$last"
