@@ -20,19 +20,23 @@ flowchart TB
 | Job | Runs | Takes about | For |
 | --- | --- | --- | --- |
 | **Lint and unit tests** (`checks`) | `make install`, `make lint`, `make test` | 1 min | quick feedback; no Docker |
-| **Regression** (`regression`) | the quick start (`cp .env.example .env`, `make install`, the dashboard and its test browser, `make up`), then `scripts/regression.py --skip performance` | usually 9–15 min | every layer but performance: lint, unit, integration, api, contract, e2e, dashboard, disruptive; then the traceability check |
+| **Regression layers** (`layers`) | the quick start (`cp .env.example .env`, `make install`, `make up`), then `scripts/regression.py --skip performance dashboard` | 6 min | lint, unit, integration, api, contract, e2e, disruptive |
+| **Regression layers, dashboard** (`dashboard`, shards 1 and 2) | `cp .env.example .env`, `make install`, the dashboard and its test browser, then `scripts/regression.py --only dashboard --shard K/2` | 6 and 10 min | each half of the dashboard layer; no Docker |
+| **Regression** (`regression`) | after the three above: their reports merged with `scripts/regression.py --skip performance --combine parts/*/` | 1 min | one summary, coverage and traceability check over every part; the check a merge requires |
 
-The regression job uses `scripts/regression.py`, the script behind `make regression`, so CI and a local run cannot drift apart. It stops at the first failing layer, like locally.
+The jobs use `scripts/regression.py`, the script behind `make regression`, so CI and a local run cannot drift apart. Each part stops at its first failing layer, like locally.
+
+**Why in parts** (REQ-CI-008). The dashboard layer took 15 of the 21 minutes of a single regression job (about 12 s per browser test on a shared runner), so it runs beside the other layers, split in two by `pytest --shard K/N` (`tests/support/shard.py`: the Kth, (K+N)th, ... test collected, so the shards run each test once). A part runs no traceability check, since it sees only some tests; `--combine` does it over all of them. **Regression** is the check a merge requires (and `make release`'s ruleset names), so it runs unless the run was cancelled, even when a part failed: a required check that was skipped would count as passed. A part, or a shard, that failed or wrote no summary fails it. A run takes about 10 minutes instead of 21. Shard 2 is the longer, as the tests over the large synthetic datasets fell to it. The price is more runner time, about 26 minutes per run instead of 22, as each job installs its own tools; with `shard: [1]` in the matrix (and `--shard "$SHARD/1"`) the dashboard runs in one job again.
 
 **Performance is left out.** Shared runners vary too much for the ±15% repeatability check, so those tests run on a developer machine (`make regression`). In CI the layer shows as `skipped (--skip)`, and the three requirements covered only by it (REQ-BF-011, REQ-DASH-008, REQ-API-014) as *not run*, not as gaps. Every other requirement still needs a passing test, or the run fails.
 
 ## Reading a run
 
 - **Run page:** the regression summary (layers, counts, coverage, traceability) is shown at the bottom of the run's **Summary**, even when the run fails.
-- **Artifact `regression-reports`**, kept 30 days: JUnit XML per layer, the coverage report (`coverage-html/index.html`), `regression-summary.md` and the run's traceability matrix.
-- **When a run fails:** the summary's *Failed tests* names them; the last 200 log lines of Kafka and PostgreSQL are printed in the last step.
+- **Artifact `regression-reports`**, kept 30 days: JUnit XML per layer (`junit-dashboard-1of2.xml` and `-2of2` for the shards), the coverage report of every part combined (`coverage-html/index.html`), `regression-summary.md` and the run's traceability matrix. Each part's own reports are kept too, as `part-layers`, `part-dashboard-1` and `part-dashboard-2`.
+- **When a run fails:** the summary's *Failed tests* names them, and a part that never reported shows as *not run*; the last 200 log lines of Kafka and PostgreSQL are printed in the last step of **Regression layers**.
 
-To reproduce a CI run locally: `uv run python scripts/regression.py --skip performance` (with `make up` first, like `make regression`). With Claude Code, `/eh-test regression` runs the full local version, performance included.
+To reproduce a CI run locally: `uv run python scripts/regression.py --skip performance` (with `make up` first, like `make regression`), all in one go. With Claude Code, `/eh-test regression` runs the full local version, performance included.
 
 ## Security
 

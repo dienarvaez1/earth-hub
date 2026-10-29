@@ -14,6 +14,7 @@ from confluent_kafka import KafkaException
 from confluent_kafka.admin import AdminClient, NewTopic
 from sqlalchemy import Engine, create_engine, text
 from sqlalchemy.exc import OperationalError
+from support.shard import Shard, parse
 
 from earth_hub.config import Settings, get_settings
 from earth_hub.database.engine import make_engine
@@ -41,10 +42,20 @@ def pytest_addoption(parser):
         help="run the performance tests (a full year of synthetic backfill, a few minutes)",
     )
     parser.addoption(
+        "--shard",
+        metavar="K/N",
+        help="run only the Kth of N parts of the tests collected (CI's dashboard jobs)",
+    )
+    parser.addoption(
         "--trace-out",
         metavar="PATH",
         help="write requirement -> test outcomes as JSON, for scripts/traceability.py",
     )
+
+
+def pytest_configure(config):
+    if config.getoption("--shard"):
+        config.pluginmanager.register(Shard(*parse(config.getoption("--shard"))), "shard")
 
 
 def known_requirements() -> set[str]:

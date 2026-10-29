@@ -373,7 +373,7 @@ export class EventMap {
     const magnitude = p.magnitude === null || p.magnitude === undefined ? "no magnitude" : `M ${p.magnitude}`;
     body.append(title);
     line(
-      `${magnitude} · ${p.depth_km} km deep` + (p.tsunami ? " · tsunami flagged" : "") + (p.deleted ? " · deleted by USGS" : ""),
+      `${magnitude} · ${(p.depth_km as number).toFixed(1)} km deep` + (p.tsunami ? " · tsunami flagged" : "") + (p.deleted ? " · deleted by USGS" : ""),
       "popup-details",
     );
     // The time in UTC, then where it happened (the zone's name on hover).

@@ -10,7 +10,7 @@ from support.export import BUCKET, NOW, make_row
 
 from earth_hub.api.schemas import EarthquakeRow
 from earth_hub.export.r2 import published
-from earth_hub.export.snapshot import COLUMNS, META_KEY, SNAPSHOT_KEY, TIMESTAMPTZ
+from earth_hub.export.snapshot import COLUMNS, META_KEY, SNAPSHOT_KEY, TIMESTAMPTZ, SnapshotFile
 
 pytestmark = pytest.mark.req("REQ-EXP-009")
 
@@ -62,6 +62,26 @@ def test_a_run_writes_every_row_and_column_exactly(export, api, s3, tmp_path):
 
 
 @pytest.mark.req("REQ-EXP-010")
+@pytest.mark.req("REQ-EXP-013")
+def test_the_snapshot_is_written_small_with_zstd(tmp_path):
+    snapshot = SnapshotFile()
+    for n in range(1, 3001):
+        snapshot.add(json.dumps(published(make_row(n, magnitude=n % 70 / 10))).encode())
+    try:
+        body = snapshot.build()
+    finally:
+        snapshot.close()
+    path, default = tmp_path / "snapshot.parquet", tmp_path / "default.parquet"
+    path.write_bytes(body)
+    con = duckdb.connect()
+    codecs = con.sql(f"SELECT DISTINCT compression FROM parquet_metadata('{path}')").fetchall()
+    con.execute(f"COPY (FROM '{path}') TO '{default}' (FORMAT parquet, COMPRESSION zstd)")
+    assert codecs == [("ZSTD",)]
+    assert con.sql(f"SELECT count(*) FROM '{path}'").fetchone() == (3000,)
+    con.close()
+    assert len(body) < default.stat().st_size  # smaller than zstd's default level
+
+
 def test_meta_describes_the_file(export, s3):
     record = export()
     body = s3.get_object(Bucket=BUCKET, Key=SNAPSHOT_KEY)["Body"].read()
