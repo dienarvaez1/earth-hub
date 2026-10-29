@@ -8,7 +8,8 @@ range), in order, as a single request where USGS can serve one:
    once for deleted ones (mixed in one query USGS is 20-100x slower and returns stub records);
 2. fail the week if fewer arrive than were counted, for either kind;
 3. publish only events that are new or newer than what PostgreSQL already stores;
-4. record the week as done, so a re-run skips it. The current week stays `open`.
+4. record the week as done, so a re-run skips it. The current week stays `open`, and an end
+   after now is cut to now, so no week still to come is recorded as done.
 
 A week is split into days, on the same boundaries, when it holds more than 20,000 events (the
 service's cap) or when USGS times out on it (504 after 60 s, which happens for some busy recent
@@ -74,7 +75,8 @@ class Backfill:
 
     def run(self, start: datetime, end: datetime | None = None, *, sweep: bool = True) -> Report:
         started = floor_to_second(self._clock())
-        end = floor_to_second(end) if end else started
+        # Never past now: a week that has not happened yet would be recorded as done (DEF-053).
+        end = min(floor_to_second(end), started) if end else started
         report = Report()
         done = self._progress.finished("backfill")
         plan = weekly_windows(start, end)
@@ -238,7 +240,7 @@ def main(argv: list[str] | None = None) -> int:
 
     parser = argparse.ArgumentParser(description="Backfill USGS events, one week per request.")
     parser.add_argument("--start", required=True, type=parse_date, help="e.g. 2026-01-01 (UTC)")
-    parser.add_argument("--end", type=parse_date, help="default: now")
+    parser.add_argument("--end", type=parse_date, help="default, and at most: now")
     parser.add_argument(
         "--no-sweep", action="store_true", help="skip the final updated-since sweep"
     )

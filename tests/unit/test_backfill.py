@@ -241,6 +241,29 @@ def test_the_open_week_is_fetched_again_next_time(server, make_job, feature_temp
     ]
 
 
+@pytest.mark.req("REQ-BF-001", "REQ-BF-005")
+def test_an_end_after_now_is_cut_to_now(server, make_job, feature_template):
+    """DEF-053: weeks still to come were fetched, came back empty and were recorded as done, so
+    no later run fetched them again."""
+    now = datetime(2026, 1, 14, 12, tzinfo=UTC)  # Wednesday; END is 1 February
+    progress = MemoryProgress()
+    make_job(progress, now=now)[0].run(SUN_4, END, sweep=False)
+    assert [q["endtime"] for q in regular_queries(server)] == [
+        "2026-01-11T00:00:00",
+        "2026-01-14T12:00:00",
+    ]
+    assert progress.finished("backfill") == {(SUN_4, SUN_11)}  # the current week stays open
+
+    server.put(event_at(feature_template, "later", datetime(2026, 1, 27, tzinfo=UTC)))
+    server.requests.clear()
+    make_job(progress, now=END + timedelta(hours=1))[0].run(SUN_4, END, sweep=False)
+    assert [q["starttime"] for q in regular_queries(server)] == [
+        "2026-01-11T00:00:00",
+        "2026-01-18T00:00:00",
+        "2026-01-25T00:00:00",
+    ]
+
+
 # --- what gets published -------------------------------------------------------------------
 
 
