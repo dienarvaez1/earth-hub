@@ -30,6 +30,7 @@ removed. Each step can be repeated with the same result, so a round interrupted 
 finished by the next one, which applies a pending record before anything else.
 """
 
+import contextlib
 import gzip
 import hashlib
 import json
@@ -219,7 +220,8 @@ class BucketState:
             con.execute("SET TimeZone = 'UTC'")
             path = str(self.snapshot_path).replace("'", "''")
             result = con.execute(
-                f"SELECT * FROM read_parquet('{path}') WHERE list_contains(?, key)", [keys]
+                f"SELECT * FROM read_parquet('{path}') WHERE list_contains(?, key)",  # noqa: S608 (our temp file)
+                [keys],
             )
             columns = [d[0] for d in result.description]
             found = {r[0]: dict(zip(columns, r, strict=True)) for r in result.fetchall()}
@@ -284,15 +286,13 @@ class BucketState:
             self.manifest = manifest
         self._apply_snapshot(pending, list(rows.values()), removed)
         if pending["log"]:
-            try:
+            with contextlib.suppress(PreconditionFailed):  # written before an interruption
                 self.bucket.put(
                     pending["log_key"],
                     pending["log"].encode(),
                     content_type=NDJSON,
                     if_none_match=True,
                 )
-            except PreconditionFailed:
-                pass  # written before an interruption
         self._put(STATE_KEY, json.dumps(pending["status"], indent=1).encode())
         self.status = pending["status"]
         self.bucket.delete([PENDING_KEY])
@@ -359,7 +359,7 @@ class BucketStore:
         records = {state.order[key]: record_of(row) for key, row in rows.items()}
         return Ledger(records, {i: state.order[key] for i, key in keys.items()})
 
-    def write(self, ledger: Ledger, now: datetime) -> dict[Key, int]:
+    def write(self, ledger: Ledger, now: datetime) -> dict[Key, int]:  # noqa: C901 (to refactor: docs/progress/plan.md)
         """Find a ledger's writes (in self.changes); returns each record's creation number."""
         state = self.state
         numbers: dict[Key, int] = {k: k for k in ledger.records if not isinstance(k, NewKey)}

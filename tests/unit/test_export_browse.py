@@ -24,9 +24,7 @@ def filled(s3):
 @pytest.fixture
 def run(filled, monkeypatch, capsys):
     monkeypatch.setattr("earth_hub.export.bucket.make_s3_client", lambda settings: filled)
-    monkeypatch.setattr(
-        "earth_hub.config.get_settings", lambda: type("S", (), {"r2_bucket": BUCKET})()
-    )
+    monkeypatch.setattr("earth_hub.config.get_settings", type("S", (), {"r2_bucket": BUCKET}))
 
     def main(*argv):
         code = browse.main(list(argv))

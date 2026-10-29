@@ -12,9 +12,8 @@ LIVE_FEED = "https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/all_day.g
 
 @pytest.mark.req("REQ-QA-001")
 def test_live_usgs_feed_is_unreachable_from_unit_tests():
-    with pytest.raises(RuntimeError, match="must not use the network"):
-        with make_http_client() as http:
-            UsgsClient(LIVE_FEED, http, max_attempts=1).fetch()
+    with pytest.raises(RuntimeError, match="must not use the network"), make_http_client() as http:
+        UsgsClient(LIVE_FEED, http, max_attempts=1).fetch()
 
 
 @pytest.mark.req("REQ-QA-001")

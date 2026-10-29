@@ -116,7 +116,7 @@ def _after(event: Event, mark: datetime | None) -> bool:
     return mark is None or event.updated_ms > _ms(mark)
 
 
-def compare(
+def compare(  # noqa: C901, PLR0912 (to refactor: docs/progress/plan.md)
     ours: Iterable[Event],
     live: Iterable[Event],
     deleted: Iterable[Event],
@@ -363,7 +363,7 @@ def from_bucket(bucket) -> tuple[list[Event], Marks, datetime | None]:
         state = DirectRunner(bucket, workdir=Path(tmp)).state
         state.refresh()
         rows = duckdb.sql(
-            "SELECT key, event_time_ms, source_updated_ms, review_status "
+            "SELECT key, event_time_ms, source_updated_ms, review_status "  # noqa: S608 (our temp file)
             f"FROM '{state.snapshot_path}'"
         ).fetchall()
         ids = state.ids_by_key
@@ -412,7 +412,7 @@ def print_report(report: Report, marks: Marks, where: str) -> None:
     print("RESULT: " + ("OK" if report.ok else f"{len(report.unexplained)} unexplained"))
 
 
-def main(argv: list[str] | None = None) -> int:
+def main(argv: list[str] | None = None) -> int:  # noqa: PLR0915 (to refactor: docs/progress/plan.md)
     from earth_hub.config import get_settings
     from earth_hub.export import mode
     from earth_hub.export.bucket import Bucket, MissingSettings, make_s3_client

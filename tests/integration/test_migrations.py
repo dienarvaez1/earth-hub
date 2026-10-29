@@ -25,10 +25,10 @@ def test_upgrade_then_downgrade_to_base(empty_database, make_alembic_config):
     engine = create_engine(empty_database)
     try:
         command.upgrade(config, "head")
-        assert TABLES <= set(inspect(engine).get_table_names())
+        assert set(inspect(engine).get_table_names()) >= TABLES
         command.downgrade(config, "base")
         assert not TABLES & set(inspect(engine).get_table_names())
         command.upgrade(config, "head")  # and back up again cleanly
-        assert TABLES <= set(inspect(engine).get_table_names())
+        assert set(inspect(engine).get_table_names()) >= TABLES
     finally:
         engine.dispose()

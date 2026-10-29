@@ -88,7 +88,7 @@ def main(argv: list[str] | None = None) -> int:
     return code
 
 
-def _execute(args, settings, bucket, audit) -> tuple[int, str, str | None]:
+def _execute(args, settings, bucket, audit) -> tuple[int, str, str | None]:  # noqa: C901, PLR0911 (to refactor: docs/progress/plan.md)
     """Runs the command: its exit code, and the audit's status and reason."""
     from earth_hub.ingestion.catchup import CatchUp
     from earth_hub.ingestion.fdsn import FdsnClient

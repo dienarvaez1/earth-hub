@@ -5,7 +5,7 @@ processing the same messages: batched or one by one (test_batch.py), PostgreSQL 
 import json
 
 
-def random_stream(rng, ns: str, make_envelope, make_feature, merges: bool) -> list[bytes]:
+def random_stream(rng, ns: str, make_envelope, make_feature, merges: bool) -> list[bytes]:  # noqa: C901 (to refactor: docs/progress/plan.md)
     """A random but realistic message stream over a small pool of events in namespace `ns`."""
     pool = [f"{ns}e{i}" for i in range(12)]
     latest: dict[str, dict] = {}

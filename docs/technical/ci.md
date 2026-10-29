@@ -45,6 +45,7 @@ To reproduce a CI run locally: `uv run python scripts/regression.py --skip perfo
 - **Read-only token** (`permissions: contents: read`), and checkout does not keep it (`persist-credentials: false`).
 - **Actions pinned to commit SHAs**, with the release in a comment, chosen at least two weeks after their release. To update one, look up the new release's commit (`gh api repos/<owner>/<action>/commits/<tag> -q .sha`) and change the SHA and the comment together.
 - **Deploying stays manual** (`make dashboard-deploy`); CI never holds Cloudflare credentials.
+- **Code scanning** is GitHub's CodeQL, in its default setup (no workflow file): Python, JavaScript/TypeScript and the workflows, on every pull request and push to `main` and weekly, beside CI. Findings are in **Security → Code scanning**; they don't block a merge. Dependabot alerts and secret scanning with push protection are on too.
 
 `tests/unit/test_ci.py` checks all of this in the workflow file (REQ-CI-001 to REQ-CI-004), and `tests/unit/test_direct_workflow.py` the scheduled workflow (REQ-CI-005).
 

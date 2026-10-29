@@ -19,6 +19,7 @@ import time
 from collections.abc import Callable
 from datetime import UTC, datetime
 from email.utils import parsedate_to_datetime
+from http import HTTPStatus
 
 import httpx
 
@@ -135,7 +136,7 @@ class FdsnClient:
             params["updatedafter"] = fdsn_time(updated_after)
         return params
 
-    def _get(self, method: str, params: dict[str, str], *, missing_ok: bool = False) -> bytes:
+    def _get(self, method: str, params: dict[str, str], *, missing_ok: bool = False) -> bytes:  # noqa: C901 (to refactor: docs/progress/plan.md)
         url = f"{self.base_url}/{method}"
         last_error = "no attempts made"
         for attempt in range(1, self._max_attempts + 1):
@@ -148,9 +149,11 @@ class FdsnClient:
             except httpx.TransportError as exc:
                 last_error = f"{type(exc).__name__}: {exc}"
             else:
-                if response.status_code == 204 or (missing_ok and response.status_code == 404):
+                if response.status_code == HTTPStatus.NO_CONTENT or (
+                    missing_ok and response.status_code == HTTPStatus.NOT_FOUND
+                ):
                     return b""  # no events match; an unknown event ID is a 404
-                if response.status_code == 200:
+                if response.status_code == HTTPStatus.OK:
                     return response.content
                 if response.status_code == TOO_SLOW_STATUS:
                     raise FdsnTooSlow(f"{url} {params} -> HTTP 504 Gateway Time-out")

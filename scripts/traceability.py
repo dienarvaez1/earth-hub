@@ -88,7 +88,7 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     git = lambda *args: subprocess.run(  # noqa: E731
-        ["git", *args], capture_output=True, text=True, cwd=REPO
+        ["git", *args], capture_output=True, text=True, cwd=REPO, check=False
     ).stdout.strip()
     commit = git("rev-parse", "--short", "HEAD")
     if git("status", "--porcelain"):

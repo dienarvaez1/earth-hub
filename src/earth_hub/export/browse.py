@@ -51,7 +51,7 @@ def read_object(client, bucket: str, key: str) -> bytes | None:
     return gzip.decompress(body) if key.endswith(".gz") else body
 
 
-def main(argv: list[str] | None = None) -> int:
+def main(argv: list[str] | None = None) -> int:  # noqa: PLR0911 (to refactor: docs/progress/plan.md)
     from earth_hub.config import get_settings
     from earth_hub.export.bucket import MissingSettings, make_s3_client
 

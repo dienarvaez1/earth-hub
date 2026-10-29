@@ -113,7 +113,7 @@ The [demo walkthrough](docs/overview/demo.md) goes through these with what to lo
 | `gh workflow run direct.yml -f job=round` / `gh run list --workflow direct.yml` | Direct mode on GitHub Actions, a round started every hour by the dashboard Worker's cron trigger: a round now / the recent runs |
 | `make dashboard-install` / `make dashboard-dev` / `make dashboard-deploy` | The dashboard's Node dependencies and test browser / a local server over the real bucket / publish the page and the Worker's hourly trigger to Cloudflare Workers |
 | `make trigger-token` | The trigger's GitHub token: opens GitHub's form, checks the token you paste (never shown), stores it on the Worker; run it in a terminal, again before it expires |
-| `make lint` / `make format` | Check / fix style and formatting with Ruff |
+| `make lint` / `make format` | Check / fix style, formatting, complexity and security rules with Ruff |
 | `make test` | Unit tests; no Docker or network needed |
 | `make test-integration` / `make smoke` | Integration, API and contract tests against the running services |
 | `make test-e2e` / `make test-dashboard` | End-to-end tests, from a mock feed to the API / the dashboard in Chromium against a simulated R2 |

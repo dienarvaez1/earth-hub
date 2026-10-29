@@ -107,7 +107,7 @@ def test_direct_mode_stays_well_inside_the_free_operations(
     )
     from earth_hub.direct.audit import HEARTBEAT
 
-    assert AUDIT_PUTS_PER_DAY >= 86400 // HEARTBEAT.total_seconds() + 2 * 24
+    assert 86400 // HEARTBEAT.total_seconds() + 2 * 24 <= AUDIT_PUTS_PER_DAY
     print(f"per live round: A {per_round_a}, B {per_round_b}; per catch-up pass: {catchup}")
     print(f"a month at {LOAD_FACTOR}x: A {month_a:,}, B {month_b:,}")
     # About 10 writes a live round: the lock, the redo record, the rows, the ID map, the
@@ -137,5 +137,5 @@ def test_the_schedule_makes_fewer_rounds_than_the_load_measured_above():
     minutes, *rest = cron.split()
     assert rest == ["*"] * 4  # the same minutes every hour
     rounds_per_day = 24 * len(minutes.split(","))
-    assert rounds_per_day == 24 and 96 <= FEED_ROUNDS_PER_DAY
-    assert 24 <= CATCHUP_PASSES_PER_DAY  # catch-up is due about hourly (CATCHUP_INTERVAL_SECONDS)
+    assert rounds_per_day == 24 and FEED_ROUNDS_PER_DAY >= 96
+    assert CATCHUP_PASSES_PER_DAY >= 24  # catch-up is due about hourly (CATCHUP_INTERVAL_SECONDS)

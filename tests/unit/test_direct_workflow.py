@@ -150,7 +150,7 @@ def test_r2_credentials_reach_only_the_step_that_uses_them(workflow):
         with_secrets = [s for s in job["steps"] if "secrets." in str(s.get("env", {}))]
         assert len(with_secrets) == 1, name
         (step,) = with_secrets
-        assert R2_SETTINGS <= set(step["env"]) and "python -m earth_hub.direct" in step["run"]
+        assert set(step["env"]) >= R2_SETTINGS and "python -m earth_hub.direct" in step["run"]
     others = [p.name for p in WORKFLOWS.glob("*.y*ml") if p != WORKFLOW]
     assert others and all("secrets." not in (WORKFLOWS / n).read_text() for n in others)
 
@@ -177,6 +177,7 @@ def token_check(workflow: dict, days: str) -> subprocess.CompletedProcess:
         env={"PATH": os.environ["PATH"], "DAYS_LEFT": days},
         capture_output=True,
         text=True,
+        check=False,
     )
 
 

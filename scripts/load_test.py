@@ -26,6 +26,7 @@ import sys
 import time
 import uuid
 from datetime import UTC, datetime, timedelta
+from http import HTTPStatus
 from pathlib import Path
 
 import httpx
@@ -36,6 +37,7 @@ LOCUSTFILE = ROOT / "tests" / "load" / "locustfile.py"
 REPORTS = ROOT / "reports"
 EVENTS = 140_000
 BATCH = 2000
+MOMENT_FROM = 4  # magnitudes from here get a moment magnitude type (mww), as at USGS
 PLACES = [
     ("86 km E of Ugashik, Alaska", -155.6, 57.4),
     ("10 km NW of The Geysers, CA", -122.8, 38.8),
@@ -69,7 +71,7 @@ def feature(i: int, now: datetime, count: int) -> dict:
         },
         "properties": {
             "mag": magnitude,
-            "magType": "ml" if magnitude < 4 else "mww",
+            "magType": "ml" if magnitude < MOMENT_FROM else "mww",
             "place": place,
             "time": t,
             "updated": t + 600_000,
@@ -112,7 +114,7 @@ def free_port() -> int:
         return s.getsockname()[1]
 
 
-def run(
+def run(  # noqa: PLR0915 (to refactor: docs/progress/plan.md)
     *, ui: bool, users: int, spawn_rate: float, run_time: str, events: int, prefix: str = "load"
 ) -> int:
     """Seed, serve and load-test; returns Locust's exit code (1 if any request failed)."""
@@ -149,7 +151,7 @@ def run(
         deadline = time.monotonic() + 30
         while True:
             try:
-                if httpx.get(f"{base}/health", timeout=2).status_code == 200:
+                if httpx.get(f"{base}/health", timeout=2).status_code == HTTPStatus.OK:
                     break
             except httpx.HTTPError:
                 pass

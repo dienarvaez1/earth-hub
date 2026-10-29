@@ -321,7 +321,6 @@ def test_final_sweep_catches_events_revised_into_an_already_fetched_week(
             )
             server.put(revised)
             server.interceptors.remove(revise_during_third_week)
-        return None
 
     server.interceptors.append(revise_during_third_week)
     fdsn = FdsnClient(

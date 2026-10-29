@@ -61,7 +61,7 @@ class Shell:
     log: list[list[str]] = field(default_factory=list)  # changing commands, as run
 
     def read(self, *cmd: str, ok=(0,), cwd: Path = REPO) -> str:
-        result = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True)
+        result = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, check=False)
         if result.returncode not in ok:
             raise Stop(f"{' '.join(cmd)} failed:\n{result.stderr.strip() or result.stdout.strip()}")
         return result.stdout.strip()
@@ -69,8 +69,8 @@ class Shell:
     def status(self, *cmd: str, cwd: Path = REPO, show: bool = False) -> tuple[int, str]:
         """Exit code and output of a command that changes nothing; `show` streams it instead."""
         if show:
-            return subprocess.run(cmd, cwd=cwd).returncode, ""
-        result = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True)
+            return subprocess.run(cmd, cwd=cwd, check=False).returncode, ""
+        result = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, check=False)
         return result.returncode, result.stdout + result.stderr
 
     def change(self, *cmd: str, cwd: Path = REPO, stdin: str | None = None) -> None:
@@ -80,7 +80,7 @@ class Shell:
             print(f"    would run: {shown}")
             return
         print(f"    $ {shown}")
-        result = subprocess.run(cmd, cwd=cwd, input=stdin, text=True)
+        result = subprocess.run(cmd, cwd=cwd, input=stdin, text=True, check=False)
         if result.returncode != 0:
             raise Stop(f"{shown} failed (exit {result.returncode})")
 
@@ -203,15 +203,12 @@ def contact(sh: Shell, state: dict) -> None:
     env = REPO / ".env"
     if _dotenv(env).get("USGS_CONTACT"):
         print("  Your .env names a contact already; it is kept.")
-    elif env.exists():
-        if sh.confirm(f"Set USGS_CONTACT={URL} in your .env too?"):
-            lines = [
-                line
-                for line in env.read_text().splitlines()
-                if not line.startswith("USGS_CONTACT=")
-            ]
-            if not sh.dry_run:
-                env.write_text("\n".join([*lines, f"USGS_CONTACT={URL}"]) + "\n")
+    elif env.exists() and sh.confirm(f"Set USGS_CONTACT={URL} in your .env too?"):
+        lines = [
+            line for line in env.read_text().splitlines() if not line.startswith("USGS_CONTACT=")
+        ]
+        if not sh.dry_run:
+            env.write_text("\n".join([*lines, f"USGS_CONTACT={URL}"]) + "\n")
 
 
 def ruleset(sh: Shell, state: dict) -> None:

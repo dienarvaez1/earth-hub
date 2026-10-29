@@ -7,6 +7,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from email.utils import parsedate_to_datetime
+from http import HTTPStatus
 
 import httpx
 
@@ -104,7 +105,7 @@ class UsgsClient:
         )
 
     def _to_feed_response(self, response: httpx.Response) -> FeedResponse:
-        not_modified = response.status_code == 304
+        not_modified = response.status_code == HTTPStatus.NOT_MODIFIED
         return FeedResponse(
             not_modified=not_modified,
             body=None if not_modified else response.content,

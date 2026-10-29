@@ -99,7 +99,7 @@ def _rows_source(path: Path) -> str:
 
 def _write_parquet(con, source: str, out: Path) -> None:
     con.execute(
-        f"COPY (SELECT * FROM {source} ORDER BY key) TO {_quote(out)} "
+        f"COPY (SELECT * FROM {source} ORDER BY key) TO {_quote(out)} "  # noqa: S608 (our temp files)
         f"(FORMAT parquet, COMPRESSION zstd, COMPRESSION_LEVEL {ZSTD_LEVEL})"
     )
 
@@ -116,7 +116,8 @@ def updated_snapshot(previous: Path | None, bodies: list[bytes], removed: set[st
         con = duckdb.connect()
         try:
             con.execute("SET TimeZone = 'UTC'")
-            con.execute(f"CREATE TABLE changed AS SELECT * FROM {_rows_source(rows_path)}")
+            changed = f"CREATE TABLE changed AS SELECT * FROM {_rows_source(rows_path)}"  # noqa: S608 (our temp file)
+            con.execute(changed)
             con.execute("CREATE TABLE gone (key VARCHAR)")
             if removed:
                 con.executemany("INSERT INTO gone VALUES (?)", [[key] for key in sorted(removed)])
@@ -124,11 +125,12 @@ def updated_snapshot(previous: Path | None, bodies: list[bytes], removed: set[st
                 kept = "SELECT * FROM changed WHERE false"
             else:
                 kept = (
-                    f"SELECT * FROM read_parquet({_quote(previous)}) "
+                    f"SELECT * FROM read_parquet({_quote(previous)}) "  # noqa: S608 (our temp file)
                     "WHERE key NOT IN (SELECT key FROM changed) "
                     "AND key NOT IN (SELECT key FROM gone)"
                 )
-            _write_parquet(con, f"({kept} UNION ALL BY NAME SELECT * FROM changed)", out)
+            union = f"({kept} UNION ALL BY NAME SELECT * FROM changed)"  # noqa: S608 (built above)
+            _write_parquet(con, union, out)
         finally:
             con.close()
         return out.read_bytes()

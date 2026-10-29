@@ -116,7 +116,9 @@ class Bucket:
             "Key": key,
             "Body": body,
             "ContentType": content_type,
-            "ContentMD5": base64.b64encode(hashlib.md5(body).digest()).decode(),
+            "ContentMD5": base64.b64encode(
+                hashlib.md5(body, usedforsecurity=False).digest()
+            ).decode(),
         }
         if content_encoding:
             params["ContentEncoding"] = content_encoding

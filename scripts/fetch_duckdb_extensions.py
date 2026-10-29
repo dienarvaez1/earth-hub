@@ -35,8 +35,9 @@ def fetch(platform: str, expected: str) -> str:
         return f"{path.relative_to(TARGET)} present"
     url = f"{SOURCE}/{ENGINE}/{platform}/{NAME}"
     # The server refuses Python's default User-Agent.
-    request = urllib.request.Request(url, headers={"User-Agent": "earth-hub-dashboard-build"})
-    with urllib.request.urlopen(request, timeout=60) as response:  # noqa: S310 (fixed https URL)
+    headers = {"User-Agent": "earth-hub-dashboard-build"}
+    request = urllib.request.Request(url, headers=headers)  # noqa: S310 (a fixed https:// URL)
+    with urllib.request.urlopen(request, timeout=60) as response:  # noqa: S310 (the same URL)
         body = response.read()
     actual = hashlib.sha256(body).hexdigest()
     if actual != expected:
