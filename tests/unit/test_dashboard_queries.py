@@ -4,6 +4,8 @@ The page runs these same files in the browser (DuckDB-WASM); here DuckDB runs th
 snapshot built by the exporter's own code.
 """
 
+import math
+import random
 from datetime import datetime
 
 import pytest
@@ -381,3 +383,182 @@ def test_an_empty_table_has_no_date_range(tmp_path):
 def test_an_invalid_filter_is_rejected(dash):
     with pytest.raises(Exception, match="CHECK"):
         dash.set_filter(time_bucket="year")
+
+
+# --- the map when it has too many events to draw one by one (map_grid.sql and its partners) ---
+
+
+def spot(row_id, longitude, latitude, magnitude, depth_km=10.0, **changes):
+    return event(
+        row_id, "2024-03-01T00:00:00", magnitude, "Chile", None,
+        longitude=longitude, latitude=latitude, depth_km=depth_km, **changes,
+    )  # fmt: skip
+
+
+# Cell edges (0 and 0.25 belong to the cell they start), negative coordinates, the two ends of
+# the longitudes, no magnitude, strong events at and above 6, and a deleted event.
+SPOTS = [
+    spot(1, 0.0, 0.0, 1.0, depth_km=0.0),
+    spot(2, 0.24, 0.24, 2.0, depth_km=4.99),
+    spot(3, 0.25, 0.0, 3.0, depth_km=5.0),
+    spot(4, -0.01, -0.01, None),
+    spot(5, 180.0, 10.0, 5.9),
+    spot(6, -180.0, 10.0, 6.0),
+    spot(7, 10.0, 10.0, 7.1),
+    spot(8, 0.1, 0.1, 4.0, review_status="deleted"),
+    spot(9, -179.5, 5.0, 2.0),
+]
+
+
+@pytest.fixture
+def spots(tmp_path):
+    dashboard = Dashboard(build(tmp_path, SPOTS))
+    dashboard.set_filter()
+    yield dashboard
+    dashboard.close()
+
+
+def keys(dash, name, **view):
+    dash.set_map_view(**view)
+    return [number(r) for r in dash.query(name)]
+
+
+@pytest.mark.req("REQ-DASH-025")
+def test_cells_count_the_events_below_the_strong_magnitude(spots):
+    cells = [
+        (r["cell_x"], r["cell_y"], r["longitude"], r["latitude"], r["events"], r["max_magnitude"])
+        for r in spots.query("map_grid")
+    ]
+    assert cells == [
+        (-718, 20, -179.5, 5.0, 1, 2.0),  # -179.5 / 0.25 = -718
+        (-1, -1, -0.01, -0.01, 1, None),
+        (0, 0, pytest.approx(0.12), pytest.approx(0.12), 2, 2.0),  # 0 and 0.24; not the deleted 0.1
+        (1, 0, 0.25, 0.0, 1, 3.0),  # 0.25 starts the next cell
+        (720, 40, 180.0, 10.0, 1, 5.9),
+    ]
+    assert keys(spots, "map_strong") == [6, 7]  # 6.0 is strong
+    total = sum(c[4] for c in cells) + 2
+    assert total == spots.query("summary")[0]["events"] == 8
+
+
+@pytest.mark.req("REQ-DASH-025")
+def test_the_cell_size_and_the_strong_magnitude_come_from_the_map_view(spots):
+    spots.set_map_view(cell_degrees=1.0, strong_magnitude=5.0)
+    assert [(r["cell_x"], r["cell_y"], r["events"]) for r in spots.query("map_grid")] == [
+        (-180, 5, 1),
+        (-1, -1, 1),
+        (0, 0, 3),
+    ]
+    assert keys(spots, "map_strong", strong_magnitude=5.0) == [5, 6, 7]
+
+
+@pytest.mark.req("REQ-DASH-025")
+@pytest.mark.parametrize(
+    ("view", "expected"),
+    [
+        ({}, [1, 2, 3, 4, 5, 9]),  # the whole world, strong and deleted events left out
+        ({"west": -1, "south": -1, "east": 1, "north": 1}, [1, 2, 3, 4]),
+        ({"west": 0.25, "south": 0, "east": 1, "north": 0}, [3]),  # edges included
+        ({"west": 0.26, "south": -1, "east": 1, "north": 1}, []),
+        ({"west": 179, "south": 0, "east": 181, "north": 20}, [5, 9]),  # across the antimeridian
+        ({"west": -180, "south": -90, "east": 180, "north": 90}, [1, 2, 3, 4, 5, 9]),
+        ({"west": 170, "south": -90, "east": 530, "north": 90}, [1, 2, 3, 4, 5, 9]),  # 360 wide
+        ({"area_limit": 2}, [1, 2, 3]),  # one more than the limit: too many to draw
+    ],
+)
+def test_the_area_gives_its_events_one_by_one(spots, view, expected):
+    assert keys(spots, "map_area", **view) == expected
+
+
+@pytest.mark.req("REQ-DASH-025")
+def test_an_area_the_map_view_cannot_hold_is_rejected(spots):
+    with pytest.raises(Exception, match="CHECK"):
+        spots.set_map_view(west=190, south=0, east=200, north=1)  # west must be below 180
+
+
+@pytest.mark.req("REQ-DASH-025")
+def test_depth_bins_count_events_by_tenth_of_magnitude_and_5_km(spots):
+    bins = [
+        (r["magnitude_from"], r["depth_from_km"], r["events"]) for r in spots.query("depth_bins")
+    ]
+    assert bins == [
+        (1.0, 0.0, 1),  # depth 0 starts the first bin
+        (2.0, 0.0, 1),  # 4.99 km
+        (2.0, 10.0, 1),
+        (3.0, 5.0, 1),  # 5 km starts the next
+        (5.9, 10.0, 1),
+        (6.0, 10.0, 1),
+        (7.1, 10.0, 1),  # no magnitude and the deleted event are left out
+    ]
+
+
+@pytest.mark.req("REQ-DASH-025")
+def test_depth_bins_put_each_magnitude_in_its_own_tenth(tmp_path):
+    """2.3 * 10 is 22.999999999999996 in floating point: it still starts at 2.3."""
+    dash = Dashboard(
+        build(tmp_path, [spot(n, 0, 0, m) for n, m in enumerate([2.3, 2.29, 7.1, -0.43, 4.05], 1)])
+    )
+    dash.set_filter()
+    assert [r["magnitude_from"] for r in dash.query("depth_bins")] == [-0.5, 2.2, 2.3, 4.0, 7.1]
+    dash.close()
+
+
+def random_spots(rng: random.Random, count: int) -> list[dict]:
+    def coordinate(limit):
+        # Half on cell edges (multiples of 0.25, the ends included), half anywhere.
+        if rng.random() < 0.5:
+            return rng.randint(-4 * limit, 4 * limit) / 4
+        return round(rng.uniform(-limit, limit), 4)
+
+    return [
+        spot(
+            n,
+            coordinate(180),
+            coordinate(90),
+            rng.choice([None, round(rng.uniform(-1, 8), 2), 6.0, 5.99]),
+            review_status="deleted" if rng.random() < 0.1 else "reviewed",
+        )  # fmt: skip
+        for n in range(1, count + 1)
+    ]
+
+
+@pytest.mark.req("REQ-DASH-025")
+@pytest.mark.parametrize("seed", range(20))
+def test_cells_strong_events_and_areas_agree_with_every_point(tmp_path, seed):
+    """On random events and filters: the cells and strong events hold every point of
+    map_points.sql exactly once, in the cell its coordinates fall in, and an area holds exactly
+    the points inside it."""
+    rng = random.Random(seed)
+    dash = Dashboard(build(tmp_path, random_spots(rng, 300)))
+    dash.set_filter(
+        min_magnitude=rng.choice([None, 1.0]),
+        include_deleted=rng.random() < 0.5,
+    )
+    points = dash.query("map_points")
+    strong = {p["key"] for p in points if p["magnitude"] is not None and p["magnitude"] >= 6}
+    assert {r["key"] for r in dash.query("map_strong")} == strong
+
+    expected: dict[tuple[int, int], int] = {}
+    for p in points:
+        if p["key"] not in strong:
+            cell = (math.floor(p["longitude"] / 0.25), math.floor(p["latitude"] / 0.25))
+            expected[cell] = expected.get(cell, 0) + 1
+    cells = {(r["cell_x"], r["cell_y"]): r["events"] for r in dash.query("map_grid")}
+    assert cells == expected
+    assert sum(cells.values()) + len(strong) == dash.query("summary")[0]["events"]
+
+    for _ in range(10):
+        west = rng.uniform(-180, 179.999)
+        east = west + rng.choice([rng.uniform(0, 360), rng.uniform(0, 5)])
+        south = rng.uniform(-90, 90)
+        north = rng.uniform(south, 90)
+        dash.set_map_view(west=west, south=south, east=east, north=north)
+        inside = {
+            p["key"]
+            for p in points
+            if p["key"] not in strong
+            and (p["longitude"] - west) % 360 <= east - west
+            and south <= p["latitude"] <= north
+        }
+        assert {r["key"] for r in dash.query("map_area")} == inside
+    dash.close()

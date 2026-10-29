@@ -20,6 +20,10 @@ REPORTS = [
     "significant",
     "largest",
     "map_points",
+    "map_grid",
+    "map_strong",
+    "map_area",
+    "depth_bins",
     "date_range",
     "countries",
     "regions",
@@ -36,7 +40,9 @@ def as_page(value):
     return value
 
 
-@pytest.mark.req("REQ-DASH-001", "REQ-DASH-002", "REQ-DASH-003", "REQ-DASH-004", "REQ-DASH-005")
+@pytest.mark.req(
+    "REQ-DASH-001", "REQ-DASH-002", "REQ-DASH-003", "REQ-DASH-004", "REQ-DASH-005", "REQ-DASH-025"
+)
 @pytest.mark.parametrize(
     "filters",
     [
@@ -189,6 +195,60 @@ def test_a_large_result_set_clusters_all_but_the_strong_events(browser_page, lar
     # Every M 6+ event stays a single point, so no cluster can hide one.
     assert status["mapSinglePoints"] == large_server.strong > 0
     assert browser_page.errors == [] and browser_page.blocked == []
+
+
+@pytest.mark.req("REQ-DASH-025")
+def test_a_very_large_result_set_comes_as_cells_and_strong_events(browser_page, grid_server):
+    browser_page.open(grid_server.server.url, now=LARGE_NOW, period="last_3_years")
+    browser_page.page.evaluate("window.__earthHub.mapIdle()")
+    status = browser_page.status()
+    assert status["error"] is None
+    assert status["summary"]["events"] == len(grid_server.events) > 25_000
+    assert status["mapGrid"] is True and status["mapAreaPoints"] is None  # zoomed out
+    assert status["mapCells"] == len(grid_server.cells)
+    assert status["mapSinglePoints"] == len(grid_server.strong) > 0
+    assert status["mapFeatures"] == len(grid_server.cells) + len(grid_server.strong)
+    assert browser_page.page.query_selector("#chart-depth svg") is not None
+    assert browser_page.errors == [] and browser_page.blocked == []
+
+
+@pytest.mark.req("REQ-DASH-025", "REQ-DASH-019")
+def test_zoomed_in_the_area_shows_its_events_with_their_popups(browser_page, grid_server):
+    browser_page.open(grid_server.server.url, now=LARGE_NOW, period="last_3_years")
+    page = browser_page.page
+    strong = {e["key"] for e in grid_server.strong}
+    target = next(e for e in grid_server.events if e["key"] not in strong)
+
+    def jump(zoom: float) -> dict:
+        before = browser_page.status()["mapMoves"]
+        page.evaluate(
+            "([lon, lat, zoom]) => window.__earthHub.mapJumpTo(lon, lat, zoom)",
+            [target["longitude"], target["latitude"], zoom],
+        )
+        page.wait_for_function(f"window.__earthHub.mapMoves > {before}", timeout=30_000)
+        return browser_page.status()
+
+    status = jump(6)
+    assert status["mapGrid"] is True
+    assert 0 < status["mapAreaPoints"] <= 25_000
+    assert status["mapFeatures"] == status["mapAreaPoints"] + len(grid_server.strong)
+    assert page.evaluate("(key) => window.__earthHub.openPopup(key)", target["key"]) is True
+    assert page.inner_text(".maplibregl-popup strong") == target["title"]
+    page.click(".maplibregl-popup-close-button")
+
+    status = jump(2)  # zoomed out again: the cells come back
+    assert status["mapAreaPoints"] is None
+    assert status["mapFeatures"] == len(grid_server.cells) + len(grid_server.strong)
+    assert page.evaluate("(key) => window.__earthHub.openPopup(key)", target["key"]) is False
+    assert browser_page.errors == [] and browser_page.blocked == []
+
+
+@pytest.mark.req("REQ-DASH-025")
+def test_below_the_grid_threshold_the_map_gets_every_event(browser_page, large_server):
+    browser_page.open(large_server.server.url, now=LARGE_NOW, period="last_3_years")
+    status = browser_page.status()
+    assert status["mapGrid"] is False and status["mapCells"] == 0
+    assert status["mapFeatures"] == large_server.events
 
 
 @pytest.mark.req("REQ-DASH-005")

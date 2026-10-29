@@ -51,7 +51,8 @@ def build(directory: Path, rows: list[dict]) -> Path:
 
 def synthetic(directory: Path, rows: int) -> Path:
     """A snapshot of `rows` made-up events over 2025, deterministic, in the snapshot's own
-    column types: for measuring the page at sizes beyond today's table."""
+    column types, gathered around hotspots as real ones are: for measuring the page at sizes
+    beyond today's table."""
     import duckdb
 
     from earth_hub.export.snapshot import COLUMNS
@@ -80,14 +81,19 @@ def synthetic(directory: Path, rows: int) -> Path:
         "event_time_ms": "1735689600000 + i * $step",
         "source_updated": "to_timestamp((1735689600000 + i * $step) / 1000.0 + 300)",
         "source_updated_ms": "1735689600000 + i * $step + 300000",
-        "magnitude": "CASE WHEN h % 97 = 0 THEN NULL ELSE (h % 800) / 100.0 - 1 END",
+        # Each unit of magnitude rarer than the last, as Gutenberg and Richter found: about 1 in
+        # 450 is 6 or more (in USGS's real feed, about 1 in 1,100).
+        "magnitude": "CASE WHEN h % 97 = 0 THEN NULL ELSE $magnitude END",
         "mag_type": "'ml'",
         "place": "'synthetic place ' || (h % 1000)",
         "city": "'Town ' || (h % 1000)",
         "region": f"{regions}[(h % 12) + 1]",
         "country": f"{countries}[(h % 12) + 1]",
-        "longitude": "((h // 7) % 36000) / 100.0 - 180",
-        "latitude": "((h // 11) % 17000) / 100.0 - 85",
+        # Around 40 hotspots, 4 degrees across, as earthquakes gather along plate boundaries:
+        # spread evenly over the globe, nearly every event would have a map cell of its own.
+        "longitude": "least(180, greatest(-180, (h % 40) * 47 % 360 - 180"
+        " + ((h // 7) % 400) / 100.0 - 2))",
+        "latitude": "(h % 40) * 29 % 140 - 70 + ((h // 11) % 400) / 100.0 - 2",
         "depth_km": "((h // 13) % 70000) / 100.0",
         "event_type": "CASE WHEN h % 50 = 0 THEN 'quarry blast' ELSE 'earthquake' END",
         "review_status": "CASE WHEN h % 200 = 0 THEN 'deleted' ELSE 'reviewed' END",
@@ -99,14 +105,18 @@ def synthetic(directory: Path, rows: int) -> Path:
         "sig": "(h % 900)",
         "net": "'us'",
         "url": "'https://earthquake.usgs.gov/earthquakes/eventpage/syn' || i",
-        "title": "'M ' || ((h % 800) / 100.0 - 1) || ' - synthetic'",
+        "title": "'M ' || $magnitude || ' - synthetic'",
         "revision_ids": "['syn' || i]",
         "revision_count": "1",
         "first_seen_at": "to_timestamp((1735689600000 + i * $step) / 1000.0 + 60)",
         "last_applied_at": "to_timestamp((1735689600000 + i * $step) / 1000.0 + 360)",
     }
     assert list(values) == list(COLUMNS)
-    select = ", ".join(f"CAST({values[c]} AS {kind}) AS {c}" for c, kind in COLUMNS.items())
+    magnitude = "least(9.0, round(0.5 - 0.9 * ln(1 - (h % 100000) / 100000.0), 2))"
+    select = ", ".join(
+        f"CAST({values[c].replace('$magnitude', magnitude)} AS {kind}) AS {c}"
+        for c, kind in COLUMNS.items()
+    )
     path = directory / f"synthetic-{rows}.parquet"
     con = duckdb.connect()
     con.execute("SET TimeZone = 'UTC'")

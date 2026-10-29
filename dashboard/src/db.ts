@@ -57,12 +57,35 @@ export const DEFAULT_FILTER: Filter = {
   significant_magnitude: 4.5,
 };
 
+/** How the map is drawn when there are many events (setup.sql's map_view): not a filter. */
+export interface MapView {
+  strong_magnitude: number;
+  cell_degrees: number;
+  west: number | null; // the area map_area.sql reads; null: the whole world
+  south: number | null;
+  east: number | null; // east - west is 0 to 360: above 180 across the antimeridian
+  north: number | null;
+  area_limit: number;
+}
+
+// The parameter order of set_map_view.sql.
+const MAP_VIEW_ORDER: (keyof MapView)[] = [
+  "strong_magnitude",
+  "cell_degrees",
+  "west",
+  "south",
+  "east",
+  "north",
+  "area_limit",
+];
+
 export type Row = Record<string, string | number | boolean | null>;
 
 export class Db {
   private constructor(
     private readonly conn: duckdb.AsyncDuckDBConnection,
     private readonly setFilterStatement: duckdb.AsyncPreparedStatement,
+    private readonly setMapViewStatement: duckdb.AsyncPreparedStatement,
   ) {}
 
   /** Starts DuckDB at once and attaches the snapshot when it arrives: compiling DuckDB's
@@ -95,12 +118,17 @@ export class Db {
     mark("duckdb_attach_ms");
     await step("setup.sql", () => conn.query(sql("setup")));
     const statement = await step("set_filter.sql", () => conn.prepare(sql("set_filter")));
+    const mapView = await step("set_map_view.sql", () => conn.prepare(sql("set_map_view")));
     mark("duckdb_setup_ms");
-    return new Db(conn, statement);
+    return new Db(conn, statement, mapView);
   }
 
   async setFilter(filter: Filter): Promise<void> {
     await this.setFilterStatement.query(...FILTER_ORDER.map((name) => filter[name]));
+  }
+
+  async setMapView(view: MapView): Promise<void> {
+    await this.setMapViewStatement.query(...MAP_VIEW_ORDER.map((name) => view[name]));
   }
 
   async query(name: string): Promise<Row[]> {

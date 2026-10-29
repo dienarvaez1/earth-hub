@@ -32,7 +32,8 @@ SIZES = {"115k": 115_000, "1M": 1_000_000}
 # (Last 3 years), the heaviest drawing; filter and bucket changes are over every event.
 LIMITS = {
     "115k": {"first_map_ms": 8_000, "all_events_ms": 3_000, "filter_ms": 300, "bucket_ms": 300},
-    "1M": {"first_map_ms": 8_000, "all_events_ms": 12_000, "filter_ms": 1_500, "bucket_ms": 1_500},
+    # Above 25,000 events the map gets cells (map_grid.sql): every event of 1M took 4.2 s.
+    "1M": {"first_map_ms": 8_000, "all_events_ms": 3_000, "filter_ms": 1_500, "bucket_ms": 1_500},
 }
 NOW = datetime(2026, 1, 1, 12, tzinfo=UTC)  # the synthetic events cover 2025
 SPREAD = 0.15  # each run within ±15% of the median,

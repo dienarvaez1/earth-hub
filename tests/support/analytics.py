@@ -31,6 +31,26 @@ DEFAULT_FILTER = {
     "top_n": 10,
     "significant_magnitude": 4.5,
 }
+# set_map_view.sql's parameters, in order, and the values setup.sql starts with (the page's
+# own are in dashboard/src/map.ts: STRONG_MAGNITUDE, CELL_DEGREES, AREA_LIMIT).
+MAP_VIEW_ORDER = (
+    "strong_magnitude",
+    "cell_degrees",
+    "west",
+    "south",
+    "east",
+    "north",
+    "area_limit",
+)
+DEFAULT_MAP_VIEW = {
+    "strong_magnitude": 6.0,
+    "cell_degrees": 0.25,
+    "west": None,
+    "south": None,
+    "east": None,
+    "north": None,
+    "area_limit": 25_000,
+}
 
 
 class Dashboard:
@@ -44,6 +64,12 @@ class Dashboard:
         assert not unknown, unknown
         merged = DEFAULT_FILTER | values
         self.con.execute(sql("set_filter"), [merged[name] for name in FILTER_ORDER])
+
+    def set_map_view(self, **values) -> None:
+        unknown = set(values) - set(MAP_VIEW_ORDER)
+        assert not unknown, unknown
+        merged = DEFAULT_MAP_VIEW | values
+        self.con.execute(sql("set_map_view"), [merged[name] for name in MAP_VIEW_ORDER])
 
     def query(self, name: str) -> list[dict]:
         relation = self.con.execute(sql(name))
