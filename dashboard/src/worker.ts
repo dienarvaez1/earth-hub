@@ -21,6 +21,9 @@ const JOB = "round";
 // The daily reconcile's trigger (the other one starts a round), and the job it runs.
 const RECONCILE_CRON = "41 5 * * *";
 const RECONCILE = "reconcile";
+// `make trigger-check` fires the handler with this "cron", which no deployed trigger has,
+// under `wrangler dev --remote --test-scheduled`: the deployed token, asked about, starts nothing.
+const CHECK_CRON = "check";
 // Who asked for the round, for its audit record (src/earth_hub/direct/audit.py).
 const STARTED_BY = "cloudflare-trigger";
 
@@ -51,7 +54,8 @@ export default {
   },
 
   async scheduled(controller: ScheduledController, env: Env): Promise<void> {
-    if (controller.cron === RECONCILE_CRON) await dispatch(env, RECONCILE, {});
+    if (controller.cron === CHECK_CRON) await checkToken(env, new Date(controller.scheduledTime));
+    else if (controller.cron === RECONCILE_CRON) await dispatch(env, RECONCILE, {});
     else await startRound(env, new Date(controller.scheduledTime));
   },
 } satisfies ExportedHandler<Env>;
@@ -85,6 +89,18 @@ async function dispatch(env: Env, job: string, extra: Record<string, string>): P
     throw new Error(`trigger: GitHub answered ${response.status}: ${detail}`);
   }
   console.log(`trigger: direct ${job} started`);
+}
+
+/** Asks GitHub about direct.yml with the token, as the daily check does, and logs the answer
+ * and the days left; a refusal, or no token, throws. Reading the workflow starts nothing. */
+async function checkToken(env: Env, now: Date): Promise<void> {
+  if (!env.GITHUB_TOKEN) throw new Error("trigger check: GITHUB_TOKEN is not set");
+  const response = await github(env, "GET", "");
+  await response.body?.cancel();
+  if (!response.ok) throw new Error(`trigger check: GitHub answered ${response.status}`);
+  const expiry = parseExpiry(response.headers.get("GitHub-Authentication-Token-Expiration"));
+  const days = expiry === null ? "never expires" : `${Math.floor((expiry - now.getTime()) / DAY_MS)} days left`;
+  console.log(`trigger check: OK, GitHub accepts the token for ${WORKFLOW} (${days})`);
 }
 
 /** The days until the token expires, from the date GitHub states on every reply to a token

@@ -41,8 +41,9 @@ As of 2026-10-29. The plan below is the original, with Milestone 7 revised; the 
 | The check against USGS measures each feed by when USGS generated it, not when a round read it or ended (DEF-054) | Done | #49 |
 | Dashboard: a link to the project on GitHub in the footer | Done | #50 |
 | No schedule in `direct.yml`: the Worker starts the daily reconcile too, and a watchdog workflow holds the only schedule (DEF-056) | Done | #52 |
+| `make trigger-check`: whether the Worker's deployed token works, asked on Cloudflare, starting nothing | Done | #54 |
 
-Current numbers: 186 requirements, all covered by a passing test; 56 defects, all fixed; about 1,200 tests in the full regression.
+Current numbers: 187 requirements, all covered by a passing test; 56 defects, all fixed; about 1,200 tests in the full regression.
 
 ## 1. Project vision
 

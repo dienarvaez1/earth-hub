@@ -23,6 +23,7 @@ class FakeGitHub:
     def __init__(self):
         self.requests: list[dict] = []
         self.status = 204
+        self.get_status = 200
         self.expiry: str | None = None
         fake = self
 
@@ -31,7 +32,7 @@ class FakeGitHub:
                 fake.requests.append(
                     {"method": "GET", "path": self.path, "headers": dict(self.headers)}
                 )
-                self.send_response(200)
+                self.send_response(fake.get_status)
                 if fake.expiry is not None:
                     self.send_header("GitHub-Authentication-Token-Expiration", fake.expiry)
                 self.send_header("Content-Type", "application/json")
@@ -165,6 +166,41 @@ def test_the_daily_trigger_asks_github_for_the_reconcile(with_token, github):
         "ref": "main",
         "inputs": {"job": "reconcile", "started_by": "cloudflare-trigger"},
     }
+
+
+@pytest.mark.req("REQ-CI-010")
+def test_the_check_reads_the_workflow_and_starts_nothing(with_token, github):
+    github.requests.clear()
+    github.expiry = "2027-10-29 07:00:00 UTC"
+    try:
+        assert fire(with_token, at="2026-10-29T21:00:00+00:00", cron="check").is_success
+    finally:
+        github.expiry = None
+    (request,) = github.requests  # a read: no dispatch
+    assert request["method"] == "GET" and request["path"] == WORKFLOW
+    assert request["headers"]["Authorization"] == "Bearer t0ken"
+
+
+@pytest.mark.req("REQ-CI-010")
+def test_the_check_fails_when_github_refuses_the_token(with_token, github):
+    github.requests.clear()
+    github.get_status = 401
+    try:
+        assert fire(with_token, cron="check").status_code >= 500
+    finally:
+        github.get_status = 200
+    assert [r["method"] for r in github.requests] == ["GET"]
+
+
+@pytest.mark.req("REQ-CI-010")
+def test_the_check_fails_without_a_token(built, github, tmp_path):
+    local = worker(tmp_path, github)
+    try:
+        github.requests.clear()
+        assert fire(local, cron="check").status_code >= 500
+        assert github.requests == []
+    finally:
+        local.stop()
 
 
 def test_a_refusal_fails_the_trigger(with_token, github):

@@ -51,6 +51,7 @@ Local-first earthquake data platform: USGS GeoJSON feed → Python poller → Ka
 - Skills: `.claude/skills/eh*` (`/eh-status`, `/eh-kafka`, `/eh-db`, …), indexed in `docs/overview/cheatsheet.md`. A new skill or make target used in them goes in the cheat sheet; `tests/unit/test_cheatsheet.py` checks both exist.
 - `make release [DRY_RUN=1]`: the public release (`scripts/release.py`), interactive: run by the user in a terminal, never by Claude or the tests.
 - `make trigger-token`: the dashboard trigger's GitHub token (`scripts/trigger_token.py`), interactive: run by the user in a terminal, never by Claude or the tests. The token must never be shown, written to a file or put on a command line.
+- `make trigger-check`: whether the Worker's deployed token works (`scripts/trigger_check.py`): `wrangler dev --remote --test-scheduled` fires the handler's `check` "cron" on Cloudflare, which reads `direct.yml` with the token and starts nothing. Read-only, safe to run; never part of the tests.
 - `make api` / `make api-dev`: serve the API (container / host with reload) at http://127.0.0.1:8000/docs.
 
 Add dependencies with `uv add <pkg>` (or `uv add --dev <pkg>`); never edit `uv.lock` by hand.
