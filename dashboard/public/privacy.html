@@ -1,0 +1,163 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Privacy Notice · Earth-Hub</title>
+    <!-- Shared by link, not promoted: kept out of search engines, like the dashboard. -->
+    <meta name="robots" content="noindex, nofollow" />
+    <meta name="description" content="What the Earth-Hub earthquake dashboard collects about its visitors: nothing." />
+    <style>
+      :root {
+        --bg: #f7f6f3;
+        --text: #1c1917;
+        --muted: #57534e;
+        --line: #e7e5e4;
+        --accent: #c2410c;
+        color-scheme: light;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --bg: #161412;
+          --text: #f5f5f4;
+          --muted: #a8a29e;
+          --line: #3a3531;
+          --accent: #fb923c;
+          color-scheme: dark;
+        }
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--text);
+        font: 15px/1.6 system-ui, -apple-system, "Segoe UI", sans-serif;
+      }
+      main {
+        max-width: 760px;
+        margin: 0 auto;
+        padding: 24px 16px 48px;
+      }
+      h1 {
+        font-size: 1.6rem;
+        margin: 0 0 4px;
+      }
+      h2 {
+        font-size: 1.05rem;
+        margin: 28px 0 8px;
+        padding-top: 16px;
+        border-top: 1px solid var(--line);
+      }
+      p,
+      li {
+        overflow-wrap: anywhere;
+      }
+      .effective {
+        color: var(--muted);
+        margin: 0 0 20px;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <p><a href="/" id="back">← Back to the dashboard</a></p>
+      <h1>Privacy Notice</h1>
+      <p class="effective">Effective date: 29 October 2026</p>
+
+      <p>
+        This Privacy Notice describes how the Earth-Hub earthquake dashboard (the "Service"), available at
+        earth-hub.diego-narvaez.workers.dev and operated by the author of the Earth-Hub project as an independent
+        research project (the "Operator", "we", "us"), handles information about the persons who visit it ("you").
+        By using the Service, you acknowledge this Notice.
+      </p>
+
+      <h2 id="location">1. No collection of your location</h2>
+      <p>
+        The Service does not request, access, collect, record or store the geographic location of your device. It
+        never invokes your browser's Geolocation API, and your browser will therefore never ask you for permission to
+        share your location. The Operator does not record your IP address or any location derived from it, and the
+        request logging that would record them is disabled. The locations shown on the map are those of earthquakes,
+        published by the U.S. Geological Survey, and not those of visitors.
+      </p>
+
+      <h2 id="not-collected">2. Information we do not collect</h2>
+      <p>The Service does not:</p>
+      <ul>
+        <li>require or offer accounts, registration, sign-in or forms of any kind;</li>
+        <li>set, read or use cookies;</li>
+        <li>store any information in your browser's local storage, session storage, IndexedDB or other site storage;</li>
+        <li>
+          use analytics, advertising, social-media plug-ins, tracking pixels, fingerprinting or any other technology
+          to identify, profile or track you;
+        </li>
+        <li>sell, rent, share or otherwise disclose information about you to anyone.</li>
+      </ul>
+
+      <h2 id="providers">3. Information processed by service providers</h2>
+      <p>
+        Delivering any website over the internet requires that your device's IP address and standard request
+        information (such as the address requested, your browser's user-agent and the time of the request) be
+        transmitted to the servers that deliver its content. The Service relies on the following independent
+        providers, each of which processes such information under its own privacy policy and not on the Operator's
+        instructions:
+      </p>
+      <ul>
+        <li>
+          <strong>Cloudflare, Inc.</strong>, which hosts the Service. Cloudflare processes your IP address and request
+          information to deliver, protect and operate the Service, and may determine an approximate location from
+          your IP address for routing and security purposes; it may also receive reports from your browser about
+          failed connections (Network Error Logging). See
+          <a href="https://www.cloudflare.com/privacypolicy/" rel="noopener">Cloudflare's Privacy Policy</a>.
+        </li>
+        <li>
+          <strong>jsDelivr</strong>, a public content-delivery network from which your browser loads the DuckDB
+          database engine that the dashboard uses. See
+          <a href="https://www.jsdelivr.com/terms" rel="noopener">jsDelivr's terms and privacy policy</a>.
+        </li>
+        <li>
+          <strong>OpenFreeMap</strong>, which serves the map tiles. Because tiles are requested for the area of the
+          map you view, OpenFreeMap receives your IP address and the map areas requested. See
+          <a href="https://openfreemap.org/" rel="noopener">OpenFreeMap</a>.
+        </li>
+      </ul>
+      <p>
+        The Operator does not receive, access or control the information these providers process, beyond the
+        aggregate, non-identifying usage figures that a hosting provider reports to its customers.
+      </p>
+
+      <h2 id="cache">4. Browser caching</h2>
+      <p>
+        Your browser may keep copies of the Service's files, its earthquake data and map tiles in its ordinary HTTP
+        cache, as it does for any website, so that pages load faster. These copies contain no information about you
+        and remain on your device under your control; you can remove them at any time by clearing your browser's
+        cache.
+      </p>
+
+      <h2 id="data">5. The data the Service displays</h2>
+      <p>
+        The Service displays public earthquake data from the U.S. Geological Survey. That data contains no personal
+        information about visitors to the Service.
+      </p>
+
+      <h2 id="changes">6. Changes to this Notice</h2>
+      <p>
+        The Operator may update this Notice from time to time. Any change takes effect when the updated Notice is
+        published on this page, as shown by its effective date. The history of every change is public in the
+        project's source code.
+      </p>
+
+      <h2 id="contact">7. Contact</h2>
+      <p>
+        Questions about this Notice may be raised by opening an issue on the
+        <a href="https://github.com/dienarvaez1/earth-hub/issues" id="contact-link" rel="noopener"
+          >Earth-Hub project's GitHub page</a
+        >.
+      </p>
+    </main>
+  </body>
+</html>

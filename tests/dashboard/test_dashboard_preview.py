@@ -94,6 +94,65 @@ def test_the_footer_credits_usgs_and_says_what_the_data_is_not(dash):
         assert phrase in text, phrase
 
 
+# Records any use of the browser's location or site storage, before the page's own scripts run.
+WATCH_PRIVACY = """
+window.__privacy = [];
+const record = (what) => window.__privacy.push(what);
+for (const name of ["getCurrentPosition", "watchPosition"]) {
+  navigator.geolocation[name] = () => record("geolocation." + name);
+}
+for (const area of ["localStorage", "sessionStorage"]) {
+  const store = window[area];
+  store.setItem = () => record(area + ".setItem");
+}
+const open = indexedDB.open.bind(indexedDB);
+indexedDB.open = (...args) => (record("indexedDB.open"), open(...args));
+"""
+
+
+@pytest.mark.req("REQ-DASH-034")
+def test_a_visit_sets_no_cookie_stores_nothing_and_never_asks_for_the_location(dash, server):
+    page = dash.page
+    page.context.add_init_script(WATCH_PRIVACY)  # from the next load on
+    dash.open(server.url)  # loaded again, watched this time, then filtered and redrawn
+    dash.after_update(lambda: page.select_option("select[name=period]", "last_3_years"))
+    assert dash.status()["error"] is None
+    link = page.locator("footer a#privacy")
+    assert link.get_attribute("href") == "/privacy" and "location is never requested" in (
+        page.inner_text("footer")
+    )
+    assert page.evaluate("window.__privacy") == []  # no location, no storage
+    assert page.evaluate("[localStorage.length, sessionStorage.length]") == [0, 0]
+    assert page.evaluate("document.cookie") == ""
+    assert page.context.cookies() == []
+
+
+@pytest.mark.req("REQ-DASH-034")
+def test_the_privacy_notice_says_what_is_and_is_not_collected(browser_page, server):
+    response = browser_page.page.goto(f"{server.url}/privacy")
+    assert response.ok and response.headers["x-robots-tag"] == "noindex, nofollow"
+    assert "set-cookie" not in response.headers
+    page = browser_page.page
+    assert page.title() == "Privacy Notice · Earth-Hub"
+    text = " ".join(page.inner_text("main").split())
+    for phrase in (
+        "Effective date: 29 October 2026",
+        "does not request, access, collect, record or store the geographic location of your device",
+        "never invokes your browser's Geolocation API",
+        "does not record your IP address or any location derived from it",
+        "set, read or use cookies",
+        "Cloudflare, Inc.",
+        "jsDelivr",
+        "OpenFreeMap",
+        "clearing your browser's cache",
+    ):
+        assert phrase in text, phrase
+    assert page.locator("a#back").get_attribute("href") == "/"
+    assert page.locator("a#contact-link").get_attribute("href") == (
+        "https://github.com/dienarvaez1/earth-hub/issues"
+    )
+
+
 @pytest.mark.req("REQ-DASH-016")
 def test_a_package_without_a_license_text_fails_the_build(built, tmp_path):
     result = subprocess.run(

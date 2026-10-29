@@ -49,7 +49,7 @@ stateDiagram-v2
 
 | | |
 | --- | --- |
-| **Requirements** | 188 requirements, each with a stable ID and at least one passing test that names it (`@pytest.mark.req`). A test naming an unknown ID fails at collection, and `make traceability` fails if any requirement has no passing test |
+| **Requirements** | 190 requirements, each with a stable ID and at least one passing test that names it (`@pytest.mark.req`). A test naming an unknown ID fails at collection, and `make traceability` fails if any requirement has no passing test |
 | **Tests** | About 1,100, in eight layers: unit, integration, API, contract (Schemathesis), end-to-end, dashboard (in Chromium), disruptive (real outages) and performance. About 92% coverage across all layers |
 | **Defects** | 56 defects found and fixed, each with its milestone, severity, how it was found and the commit that fixed it; [six written up in full](docs/progress/defects.md) with root cause and prevention (kept in the git history) |
 | **CI** | On every pull request and push to `main`, lint and unit tests, then the regression of every layer except performance, from the example settings and with no secrets ([docs/technical/ci.md](docs/technical/ci.md)) |
@@ -160,7 +160,7 @@ It writes `reports/regression-summary.md`, JUnit XML for each layer, a coverage 
 
 **QA documents** in `docs/`:
 - the [test strategy](docs/progress/test-strategy.md): risks, levels, techniques, scope, reports and testing by milestone;
-- the [requirements](docs/progress/requirements.md), 188 of them, and the [traceability matrix](docs/progress/traceability-matrix.md);
+- the [requirements](docs/progress/requirements.md), 190 of them, and the [traceability matrix](docs/progress/traceability-matrix.md);
 - the [defect log](docs/progress/defects.md): 56 defects found and fixed, 6 with full reports in the git history;
 - the [data-quality rules](docs/technical/data-quality-rules.md) and the [known limitations](docs/overview/limitations.md).
 
@@ -224,6 +224,10 @@ Earthquake data courtesy of the [U.S. Geological Survey](https://earthquake.usgs
 - **No warranty.** The software and the data it shows are provided as is, without warranty of any kind ([MIT License](LICENSE)).
 
 The dashboard repeats this in its footer, beside the map credits (© OpenFreeMap, © OpenMapTiles, data © OpenStreetMap contributors). Its DuckDB engine is loaded from jsDelivr, and its bundled packages' licenses are in `third-party-licenses.txt`.
+
+## Privacy
+
+The dashboard collects nothing about its visitors ([privacy notice](dashboard/public/privacy.html), at `/privacy` on the page). It sets no cookies, keeps nothing in the browser's storage, has no accounts, analytics or tracking, and never asks for the device's location (it does not use the Geolocation API). The Worker's request logs, which would record each visitor's IP address and the location Cloudflare derives from it, are switched off (`invocation_logs: false` in `dashboard/wrangler.template.jsonc`). The hosting provider (Cloudflare) and the two content providers the page loads from (jsDelivr for the DuckDB engine, OpenFreeMap for the map tiles) receive visitors' IP addresses as part of delivering content, under their own privacy policies.
 
 ## License
 

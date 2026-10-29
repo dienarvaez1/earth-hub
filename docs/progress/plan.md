@@ -43,8 +43,9 @@ As of 2026-10-29. The plan below is the original, with Milestone 7 revised; the 
 | No schedule in `direct.yml`: the Worker starts the daily reconcile too, and a watchdog workflow holds the only schedule (DEF-056) | Done | #52 |
 | `make trigger-check`: whether the Worker's deployed token works, asked on Cloudflare, starting nothing | Done | #54 |
 | The USGS credit and a disclaimer (research purposes, not affiliated with or endorsed by USGS, data that may be late or inaccurate when a part fails, no warranty, not for emergencies) in the dashboard's footer and the README | Done | #57 |
+| A privacy notice (`/privacy`, linked from the footer): no cookies, storage, tracking or location; the Worker's invocation logs, which recorded visitors' IP addresses and IP-derived locations, switched off | Done | #58 |
 
-Current numbers: 188 requirements, all covered by a passing test; 56 defects, all fixed; about 1,200 tests in the full regression.
+Current numbers: 190 requirements, all covered by a passing test; 56 defects, all fixed; about 1,200 tests in the full regression.
 
 ## 1. Project vision
 
