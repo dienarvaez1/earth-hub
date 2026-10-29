@@ -97,7 +97,7 @@ def synthetic(directory: Path, rows: int) -> Path:
         "depth_km": "((h // 13) % 70000) / 100.0",
         "event_type": "CASE WHEN h % 50 = 0 THEN 'quarry blast' ELSE 'earthquake' END",
         "review_status": "CASE WHEN h % 200 = 0 THEN 'deleted' ELSE 'reviewed' END",
-        "tsunami": "h % 1000 = 0",
+        "tsunami": "h % 1000 = 7",  # not 0: those are quarry blasts (h % 50) and deletions
         "felt": "NULL",
         "cdi": "NULL",
         "mmi": "NULL",

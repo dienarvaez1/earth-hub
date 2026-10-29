@@ -31,8 +31,12 @@ search engines).
 - **The trigger's token** (`GITHUB_TOKEN`, a Worker secret) is the user's: `make trigger-token` in a terminal creates,
   checks and stores it, and replaces it before it expires (GitHub e-mails a failed `Trigger token` run from 14 days
   before). Never run it for them, never ask for or print the token.
-- The page opens on This week, per hour, all magnitudes, stacked columns; its menus count under the other filters
-  (docs/technical/architecture.md#dashboard).
+- The page opens on This week, per hour, all magnitudes, stacked columns, the map at zoom 1 (closest 15); its menus
+  count under the other filters, the Tsunami box (Flagged only) included. Under the map, the significant events
+  (10, 25 or 50 from Show): a row flies the map to its event at zoom 5 and opens its popup. A popup gives the time to
+  the second in UTC and where it happened, as `AKDT (UTC-8)` or, without an abbreviation, `(UTC+9)`, and
+  `tsunami flagged` when it is. Above 25,000 filtered events the map shows cells counted in SQL, and the visible
+  area's events once zoomed in to 4 (docs/technical/architecture.md#dashboard).
 
 ## Report
 

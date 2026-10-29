@@ -249,8 +249,20 @@ def test_largest_events_strongest_first(dash):
         (1, 2.49),
         (8, 1.0),
     ]
-    dash.set_filter(significant_magnitude=1.0, top_n=2)
+    dash.set_filter(significant_magnitude=1.0, significant_n=2)
     assert [number(r) for r in dash.query("largest")] == [6, 3]
+
+
+@pytest.mark.req("REQ-DASH-029")
+def test_the_table_and_the_rankings_have_their_own_lengths(dash):
+    """significant_n limits the significant events, top_n the top countries and regions."""
+    dash.set_filter(significant_magnitude=1.0, significant_n=3, top_n=1)
+    assert [number(r) for r in dash.query("largest")] == [6, 3, 2]
+    assert [number(r) for r in dash.query("significant")] == [8, 6, 3]
+    assert len(dash.query("top_countries")) == len(dash.query("top_regions")) == 1
+    dash.set_filter(significant_magnitude=1.0, significant_n=50, top_n=2)
+    assert len(dash.query("largest")) == 5  # every event at 1.0 and above
+    assert len(dash.query("top_countries")) == 2
 
 
 @pytest.mark.req("REQ-DASH-005")
@@ -285,7 +297,18 @@ def test_map_points_carry_what_the_map_shows(dash):
         "title": EVENTS[0]["title"],
         "url": EVENTS[0]["url"],
         "review_status": "reviewed",
+        "tsunami": False,
     }
+
+
+@pytest.mark.req("REQ-DASH-027")
+@pytest.mark.parametrize("report", ["significant", "largest"])
+def test_significant_events_carry_what_their_popup_shows(dash, report):
+    """A row of the table opens its event's popup, so it has map_points.sql's columns."""
+    dash.set_filter()
+    points = {p["key"]: p for p in dash.query("map_points")}
+    for row in dash.query(report):
+        assert {k: row[k] for k in points[row["key"]]} == points[row["key"]]
 
 
 @pytest.mark.req("REQ-DASH-005")
@@ -561,4 +584,29 @@ def test_cells_strong_events_and_areas_agree_with_every_point(tmp_path, seed):
             and south <= p["latitude"] <= north
         }
         assert {r["key"] for r in dash.query("map_area")} == inside
+    dash.close()
+
+
+@pytest.mark.req("REQ-DASH-031")
+def test_the_tsunami_filter_keeps_the_flagged_events(tmp_path):
+    rows = [
+        event(1, "2024-03-01T00:00:00", 7.1, "Japan", None, tsunami=True),
+        event(2, "2024-03-02T00:00:00", 6.4, "Japan", None),
+        event(3, "2024-03-03T00:00:00", 6.9, "Chile", None, tsunami=True),
+        event(4, "2024-03-04T00:00:00", 5.0, "Chile", None, tsunami=True, review_status="deleted"),
+        event(5, "2024-03-05T00:00:00", 2.0, "United States", "Alaska"),
+    ]
+    dash = Dashboard(build(tmp_path, rows))
+    dash.set_filter()
+    assert dash.query("summary")[0]["events"] == 4
+    dash.set_filter(tsunami_only=True)
+    assert [number(p) for p in dash.query("map_points")] == [1, 3]  # the deletion stays out
+    (summary,) = dash.query("summary")
+    assert summary["events"] == summary["tsunami_flagged"] == 2
+    # The menus count under it too, as under every other part of the filter.
+    assert {r["country"]: r["events"] for r in dash.query("countries")} == {
+        "Chile": 1, "Japan": 1, "United States": 0,
+    }  # fmt: skip
+    dash.set_filter(tsunami_only=True, include_deleted=True, country="Chile")
+    assert [number(p) for p in dash.query("map_points")] == [3, 4]
     dash.close()

@@ -151,7 +151,7 @@ make dashboard-install && make dashboard-dev     # http://127.0.0.1:8787, over t
 
 **With Claude Code:** `/eh-export` (a dry run), `/eh-export run`, `/eh-dashboard dev`, `/eh-dashboard test`; `/eh-dashboard` checks the live page.
 
-The page opens on This week, per hour: try the period, the magnitude band and the place menus (their counts follow the other choices), the chart's Style (columns, areas, lines, trendlines), and the top countries and regions, each bar split by magnitude.
+The page opens on This week, per hour: try the period, the magnitude band, the place menus (their counts follow the other choices) and the Tsunami box; select a significant event under the map (show 10, 25 or 50) to fly to it and open its popup, with its time where it happened; pick Last 3 years to see the map's cells, then zoom in for single events; then the chart's Style (columns, areas, lines, trendlines), and the top countries and regions, each bar split by magnitude.
 
 Without an account, `make test-dashboard` runs the page in Chromium against a simulated R2, offline. It compares the browser's answers with Python's on every report. The page's queries, with results, are in [the SQL examples](../technical/sql-examples.md#dashboard-reports).
 

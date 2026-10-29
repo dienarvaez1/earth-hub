@@ -1,5 +1,6 @@
 -- Parameters, in order: start_time, end_time, min_magnitude, max_magnitude, country,
--- region, event_type, include_deleted, time_bucket, top_n, significant_magnitude.
+-- region, event_type, include_deleted, time_bucket, top_n, significant_magnitude,
+-- significant_n, tsunami_only.
 UPDATE filter SET
     start_time = ?::TIMESTAMP,
     end_time = ?::TIMESTAMP,
@@ -11,4 +12,6 @@ UPDATE filter SET
     include_deleted = ?::BOOLEAN,
     time_bucket = ?::VARCHAR,
     top_n = ?::INTEGER,
-    significant_magnitude = ?::DOUBLE;
+    significant_magnitude = ?::DOUBLE,
+    significant_n = ?::INTEGER,
+    tsunami_only = ?::BOOLEAN;

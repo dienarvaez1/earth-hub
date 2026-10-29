@@ -5,6 +5,7 @@ import * as charts from "./charts";
 import { DEFAULT_FILTER, Db, type Filter, type Row } from "./db";
 import { AREA_LIMIT, EventMap, GRID_ABOVE, WORLD, legend } from "./map";
 import { BUCKET, DEFAULT_PERIOD, type Period, day, firstDay, lastDay } from "./periods";
+import { type LocalTime, localTime, utcTime } from "./times";
 import { countryLabel, countryOrder, regionLabel, regionOrder } from "./places";
 
 interface Meta {
@@ -37,6 +38,11 @@ interface Status {
   openPopup?: (key: string) => boolean;
   // Moves the map at once; mapMoves counts up once its area is shown.
   mapJumpTo?: (longitude: number, latitude: number, zoom: number) => void;
+  // Where the map looks.
+  mapView?: () => { longitude: number; latitude: number; zoom: number; maxZoom: number };
+  // The popup's two times for any moment and place (times.ts), beyond the data's own places.
+  utcTime?: (ms: number) => string;
+  localTime?: (ms: number, latitude: number, longitude: number) => LocalTime | null;
 }
 declare global {
   interface Window {
@@ -115,6 +121,16 @@ async function start(): Promise<void> {
   status.mapIdle = () => map.idle();
   status.openPopup = (key) => map.openPopup(key);
   status.mapJumpTo = (longitude, latitude, zoom) => map.jumpTo(longitude, latitude, zoom);
+  status.mapView = () => map.view();
+  status.utcTime = utcTime;
+  status.localTime = localTime;
+  showOnMap = (row) => {
+    const box = $("#map").getBoundingClientRect();
+    if (box.top < 0 || box.bottom > window.innerHeight) {
+      $("#map").scrollIntoView({ block: "center", behavior: "smooth" });
+    }
+    map.focusEvent(row);
+  };
   let moved: number | undefined;
   map.onMoveEnd(() => {
     window.clearTimeout(moved);
@@ -278,7 +294,9 @@ function readFilter(): Filter {
     region: text("region"),
     event_type: text("event_type"),
     include_deleted: data.get("include_deleted") === "on",
+    tsunami_only: data.get("tsunami_only") === "on",
     time_bucket: (text("time_bucket") ?? "month") as Filter["time_bucket"],
+    significant_n: Number(text("significant_n") ?? DEFAULT_FILTER.significant_n),
   };
 }
 
@@ -316,7 +334,7 @@ async function render(db: Db, map: EventMap): Promise<void> {
   fillCountries(countryOptions);
   fill("event_type", typeOptions, (r) => String(r.event_type), DEFAULT_EVENT_TYPE);
   fillRegions(regionOptions);
-  showSummary(summary);
+  showSummary(summary, filter.country);
   if (grid) {
     await map.showGrid(cells, points);
     await showArea(db, map);
@@ -342,6 +360,7 @@ async function render(db: Db, map: EventMap): Promise<void> {
     "Top regions by share of their events, split by magnitude level",
     "region",
   );
+  $("#significant-note").textContent = `(magnitude 4.5 and above, top ${filter.significant_n})`;
   showSignificant(significant);
 
   status.timings.last_update_ms = performance.now() - t0;
@@ -355,13 +374,22 @@ async function render(db: Db, map: EventMap): Promise<void> {
   status.updates += 1;
 }
 
-function showSummary(s: Row): void {
+/** The Countries card: with one country chosen, its name as the menu shows it (Unknown as
+ * "Unknown country"); with All, how many countries the events are in. */
+function countriesCard(count: number, country: string | null): [string, string] {
+  if (country === "Unknown") return ["Country", "Unknown country"];
+  if (country !== null) return ["Country", countryLabel(country)];
+  return ["Countries", `${numbers.format(count)} ${count === 1 ? "country" : "countries"}`];
+}
+
+function showSummary(s: Row, country: string | null): void {
   const day = (ms: unknown) => (ms === null ? "–" : new Date(ms as number).toISOString().slice(0, 10));
+  const [countriesLabel, countriesValue] = countriesCard(s.countries as number, country);
   const cards: [string, string, string, string][] = [
     ["events", "Events", numbers.format(s.events as number), `${numbers.format(s.with_magnitude as number)} with a magnitude`],
     ["max", "Largest", s.max_magnitude === null ? "–" : `M ${s.max_magnitude}`, String(s.max_magnitude_place ?? "")],
     ["range", "First and last", s.first_event === null ? "–" : `${day(s.first_event)}`, s.last_event === null ? "" : `to ${day(s.last_event)}`],
-    ["countries", "Countries", numbers.format(s.countries as number), `${numbers.format(s.tsunami_flagged as number)} flagged for tsunami`],
+    ["countries", countriesLabel, countriesValue, `${numbers.format(s.tsunami_flagged as number)} flagged for tsunami`],
   ];
   $("#summary").replaceChildren(
     ...cards.map(([id, label, value, detail]) => {
@@ -371,6 +399,7 @@ function showSummary(s: Row): void {
       for (const [cls, text] of [["label", label], ["value", value], ["detail", detail]]) {
         const part = document.createElement("div");
         part.className = cls;
+        if (id === "countries" && cls === "value") part.classList.add("wraps"); // a country's name
         part.textContent = text;
         card.append(part);
       }
@@ -393,6 +422,8 @@ const COLUMNS: [string, SortKey | null, string][] = [
 let tableSort: TableSort | null = null;
 let shownOrder = "significant";
 let shownRows: Row[] = [];
+// A row of the table: the map flies to its event and opens its popup (set once the map exists).
+let showOnMap: (row: Row) => void = () => undefined;
 
 function sorted(rows: Row[], sort: TableSort | null): Row[] {
   if (sort === null) return rows;
@@ -456,6 +487,19 @@ function showSignificant(rows: Row[]): void {
   const body = table.createTBody();
   for (const r of sorted(rows, tableSort)) {
     const row = body.insertRow();
+    row.className = "event-row";
+    row.tabIndex = 0;
+    row.title = "Show on the map";
+    row.dataset.key = String(r.key);
+    row.addEventListener("click", (event) => {
+      if ((event.target as Element).closest("a")) return; // the USGS link opens its page
+      showOnMap(r);
+    });
+    row.addEventListener("keydown", (event) => {
+      if (event.target !== row || (event.key !== "Enter" && event.key !== " ")) return;
+      event.preventDefault(); // Space would scroll the page
+      showOnMap(r);
+    });
     const cell = (text: string, cls = "") => {
       const td = row.insertCell();
       td.textContent = text;

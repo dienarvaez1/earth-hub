@@ -46,8 +46,9 @@ def server(built, snapshot, tmp_path_factory):
 
 
 class LargeServer:
-    def __init__(self, server, events: int, strong: int, latest: list, largest: list):
-        self.server, self.events, self.strong = server, events, strong
+    def __init__(self, server, points: list, strong: int, latest: list, largest: list):
+        self.server, self.points, self.strong = server, points, strong
+        self.events = len(points)
         self.latest, self.largest = latest, largest  # the table's two orders, from Python
 
 
@@ -64,14 +65,15 @@ def large_server(built, tmp_path_factory):
     local = LocalDashboard(tmp_path_factory.mktemp("r2-large"))
     local.seed(snapshot, META | {"rows": 6_000})
     local.start()
-    yield LargeServer(local, len(points), strong, latest, largest)
+    yield LargeServer(local, points, strong, latest, largest)
     local.stop()
 
 
 class GridServer:
-    def __init__(self, server, events: list, cells: list, strong: list):
+    def __init__(self, server, events: list, cells: list, strong: list, latest: list):
         self.server = server
         self.events, self.cells, self.strong = events, cells, strong  # from Python, as the page
+        self.latest = latest  # the table, Latest first
 
 
 @pytest.fixture(scope="session")
@@ -81,12 +83,12 @@ def grid_server(built, tmp_path_factory):
     dashboard = Dashboard(snapshot)
     dashboard.set_filter(event_type="earthquake")  # the page's default type
     events, cells = dashboard.query("map_points"), dashboard.query("map_grid")
-    strong = dashboard.query("map_strong")
+    strong, latest = dashboard.query("map_strong"), dashboard.query("significant")
     dashboard.close()
     local = LocalDashboard(tmp_path_factory.mktemp("r2-grid"))
     local.seed(snapshot, META | {"rows": 30_000})
     local.start()
-    yield GridServer(local, events, cells, strong)
+    yield GridServer(local, events, cells, strong, latest)
     local.stop()
 
 

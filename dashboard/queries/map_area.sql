@@ -4,7 +4,7 @@
 -- crossing the antimeridian (east above 180) wraps. At most area_limit + 1 rows: more than
 -- area_limit means the area still holds too many events to draw one by one.
 SELECT e.key, e.longitude, e.latitude, e.depth_km, e.magnitude, e.event_time_ms, e.place,
-       e.title, e.url, e.review_status
+       e.title, e.url, e.review_status, e.tsunami
 FROM filtered AS e, map_view AS v
 WHERE (e.magnitude IS NULL OR e.magnitude < v.strong_magnitude)
     AND (v.west IS NULL OR (

@@ -49,7 +49,7 @@ stateDiagram-v2
 
 | | |
 | --- | --- |
-| **Requirements** | 175 requirements, each with a stable ID and at least one passing test that names it (`@pytest.mark.req`). A test naming an unknown ID fails at collection, and `make traceability` fails if any requirement has no passing test |
+| **Requirements** | 181 requirements, each with a stable ID and at least one passing test that names it (`@pytest.mark.req`). A test naming an unknown ID fails at collection, and `make traceability` fails if any requirement has no passing test |
 | **Tests** | About 1,100, in eight layers: unit, integration, API, contract (Schemathesis), end-to-end, dashboard (in Chromium), disruptive (real outages) and performance. About 92% coverage across all layers |
 | **Defects** | 53 defects found and fixed, each with its milestone, severity, how it was found and the commit that fixed it; [six written up in full](docs/progress/defects.md) with root cause and prevention (kept in the git history) |
 | **CI** | On every pull request and push to `main`, lint and unit tests, then the regression of every layer except performance, from the example settings and with no secrets ([docs/technical/ci.md](docs/technical/ci.md)) |
@@ -135,7 +135,7 @@ The [demo walkthrough](docs/overview/demo.md) goes through these with what to lo
 | **REST API** | Read-only, over PostgreSQL: events, lookups by any former ID, statistics, hourly and magnitude summaries, with one error format | [API reference](docs/technical/api.md) |
 | **Export** | `make export-r2` copies the table to R2 on demand, uploading only what changed, then writes a Parquet snapshot | [Architecture](docs/technical/architecture.md#export-to-r2) |
 | **Direct mode** | The same poller and catch-up straight to R2, with no Docker, Kafka or PostgreSQL: the bucket full mode's export would write, byte for byte, which tests check against full mode. A marker in the bucket says which mode writes it; the handovers replay direct mode's log into Kafka and check both sides agree before switching. GitHub Actions runs it every hour, started by the dashboard Worker's Cloudflare cron trigger (GitHub's own schedule skipped runs, DEF-052), so the dashboard stays current with no machine on; each run leaves an audit record in the bucket (Milestone 8) | [Architecture](docs/technical/architecture.md#direct-mode) |
-| **Dashboard** | A Cloudflare Worker serves the page and the snapshot; the browser runs the reports itself with DuckDB-WASM, and draws the map and charts: menus that recount under the other filters, events over time as columns, areas, lines or trends (per hour to month), and the top countries and regions as shares split by magnitude | [Architecture](docs/technical/architecture.md#dashboard), [SQL](docs/technical/sql-examples.md#dashboard-reports) |
+| **Dashboard** | A Cloudflare Worker serves the page and the snapshot; the browser runs the reports itself with DuckDB-WASM, and draws the map and charts: menus that recount under the other filters (a tsunami filter among them), a map that counts cells in SQL above 25,000 events and shows each event's time to the second where it happened, the significant events under it (10, 25 or 50, each opening on the map), events over time as columns, areas, lines or trends (per hour to month), and the top countries and regions as shares split by magnitude | [Architecture](docs/technical/architecture.md#dashboard), [SQL](docs/technical/sql-examples.md#dashboard-reports) |
 | **Observability** | JSON logs where every pipeline line has a `stage` and every line about an event its `event_id`, plus a consumer summary every minute | [Observability](docs/technical/architecture.md#observability) |
 
 ## Tests and QA
@@ -154,13 +154,13 @@ It writes `reports/regression-summary.md`, JUnit XML for each layer, a coverage 
 | API | `tests/api/` | Every endpoint over a fixed set of 20 events stored through the real consumer code, with aggregates checked against separately written SQL, and the documented examples replayed |
 | Contract | `tests/api/test_contract.py` | Schemathesis generates requests from the OpenAPI schema (`CONTRACT_EXAMPLES=1000` for a deeper run) |
 | End-to-end | `tests/e2e/` | A mock USGS feed → the real poller → Kafka → the real consumer → PostgreSQL → the API, checked only through the API: new, duplicate, revised, invalid, merged and deleted events, restarts, backfill and catch-up |
-| Dashboard | `tests/dashboard/` | The built page and Worker under `wrangler dev`, over a simulated R2, in Chromium, offline. It checks the Worker's headers and ranges, DuckDB-WASM's answers against Python's on every report, and the page's controls, charts, empty results and phone layout; it fails on any console error |
+| Dashboard | `tests/dashboard/` | The built page and Worker under `wrangler dev`, over a simulated R2, in Chromium, offline. It checks the Worker's headers and ranges, DuckDB-WASM's answers against Python's on every report, and the page's controls, charts, map (cells, zooming in, popups and their time zones), table, empty results and phone layout; it fails on any console error |
 | Disruptive | `tests/disruptive/` | Stops and starts the shared containers: PostgreSQL stopped while events arrive, a Kafka restart, data surviving a restart of both |
 | Performance | `tests/performance/` | A full year of synthetic history (139,579 events) through backfill, Kafka, the consumer and the API in about 42 s; the dashboard at 115,000 and 1,000,000 rows; the API under load with Locust (50 users over 140,000 events, a p95 budget per endpoint). Local only: shared CI runners can't repeat the timings |
 
 **QA documents** in `docs/`:
 - the [test strategy](docs/progress/test-strategy.md): risks, levels, techniques, scope, reports and testing by milestone;
-- the [requirements](docs/progress/requirements.md), 175 of them, and the [traceability matrix](docs/progress/traceability-matrix.md);
+- the [requirements](docs/progress/requirements.md), 181 of them, and the [traceability matrix](docs/progress/traceability-matrix.md);
 - the [defect log](docs/progress/defects.md): 53 defects found and fixed, 6 with full reports in the git history;
 - the [data-quality rules](docs/technical/data-quality-rules.md) and the [known limitations](docs/overview/limitations.md).
 

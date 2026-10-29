@@ -2,7 +2,8 @@
 -- filter (time, magnitude, country, region, deletions). Most common first over all the
 -- events, so the order stays put while the counts follow the other choices.
 SELECT event_type,
-       count(*) FILTER (WHERE in_time AND in_magnitude AND in_country AND in_region AND in_deleted)
+       count(*) FILTER (WHERE in_time AND in_magnitude AND in_country AND in_region AND in_deleted
+                              AND in_tsunami)
            AS events
 FROM matched
 GROUP BY event_type

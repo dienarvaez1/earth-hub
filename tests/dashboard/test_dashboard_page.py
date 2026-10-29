@@ -61,6 +61,7 @@ def as_page(value):
         {"event_type": "quarry blast", "significant_magnitude": 0.5},
         {"min_magnitude": 6.0},
         {"max_magnitude": 2.5},
+        {"tsunami_only": True, "include_deleted": True},
     ],
     ids=lambda f: ",".join(f) or "defaults",
 )
@@ -86,7 +87,7 @@ def test_the_page_shows_the_snapshot(dash):
     assert "6\n5 with a magnitude" in cards["summary-events"]
     assert "M 5.2\nplace 6" in cards["summary-max"]
     assert "2024-02-28\nto 2024-03-10" in cards["summary-range"]
-    assert "4" in cards["summary-countries"]
+    assert "Countries\n4 countries" in cards["summary-countries"]
     assert dash.status()["mapFeatures"] == 6
     rows = page.query_selector_all("#significant tbody tr")
     assert [r.query_selector("td").inner_text() for r in rows] == [
@@ -292,13 +293,233 @@ def test_a_popup_gives_the_time_in_utc_and_where_the_event_happened(browser_page
         page.click(".maplibregl-popup-close-button")
         return lines
 
+    first = popup(EVENTS[0]["key"])  # 2024-02-28 23:59:59.999 UTC: seconds, not rounded up
+    assert first["utc"] == "2024-02-28 23:59:59 UTC"
+    assert first["local"] == "2024-02-28 14:59:59 AKST (UTC-9)"
     before = popup(EVENTS[1]["key"])  # 2024-02-29 00:00 UTC
-    assert before["utc"] == "2024-02-29 00:00 UTC"
-    assert before["local"] == "2024-02-28 15:00 AKST"
+    assert before["utc"] == "2024-02-29 00:00:00 UTC"
+    assert before["local"] == "2024-02-28 15:00:00 AKST (UTC-9)"
     assert before["zone"] == "America/Anchorage"
     after = popup(EVENTS[5]["key"])  # 2024-03-10 23:00 UTC, after the change
-    assert (after["utc"], after["local"]) == ("2024-03-10 23:00 UTC", "2024-03-10 15:00 AKDT")
-    assert after["details"].startswith("M 5.2 · ")  # magnitude and depth on their own line
+    assert (after["utc"], after["local"]) == (
+        "2024-03-10 23:00:00 UTC",
+        "2024-03-10 15:00:00 AKDT (UTC-8)",
+    )
+    assert after["details"] == "M 5.2 · 10 km deep"  # magnitude and depth on their own line
+    assert browser_page.errors == [] and browser_page.blocked == []
+
+
+@pytest.mark.req("REQ-DASH-019")
+@pytest.mark.parametrize(
+    ("when", "latitude", "longitude", "local", "zone"),
+    [
+        # The browser's own abbreviation where it has one, then the offset in parentheses.
+        (
+            "2026-10-28T23:45:17Z",
+            61.2,
+            -149.9,
+            "2026-10-28 15:45:17 AKDT (UTC-8)",
+            "America/Anchorage",
+        ),
+        (
+            "2026-10-28T23:45:17Z",
+            21.3,
+            -157.86,
+            "2026-10-28 13:45:17 HST (UTC-10)",
+            "Pacific/Honolulu",
+        ),
+        # No abbreviation: only the offset, half and three-quarter hours included.
+        ("2026-10-28T23:45:17Z", 35.68, 139.69, "2026-10-29 08:45:17 (UTC+9)", "Asia/Tokyo"),
+        ("2026-10-28T23:45:17Z", 22.57, 88.36, "2026-10-29 05:15:17 (UTC+5:30)", "Asia/Kolkata"),
+        ("2026-10-28T23:45:17Z", 27.7, 85.32, "2026-10-29 05:30:17 (UTC+5:45)", "Asia/Kathmandu"),
+        ("2026-07-01T12:00:05Z", 48.86, 2.35, "2026-07-01 14:00:05 (UTC+2)", "Europe/Paris"),
+        ("2026-01-15T12:00:05Z", 51.5, -0.12, "2026-01-15 12:00:05 (UTC)", "Europe/London"),
+        # At sea, a nautical zone: Etc/GMT+10 is ten hours behind UTC.
+        ("2026-10-28T23:45:17Z", -40.0, -150.0, "2026-10-28 13:45:17 (UTC-10)", "Etc/GMT+10"),
+    ],
+)
+def test_local_times_give_seconds_the_abbreviation_and_the_offset(
+    dash, when, latitude, longitude, local, zone
+):
+    ms = int(datetime.fromisoformat(when).timestamp() * 1000)
+    got = dash.page.evaluate(
+        "([ms, lat, lon]) => window.__earthHub.localTime(ms, lat, lon)", [ms, latitude, longitude]
+    )
+    assert got == {"text": local, "zone": zone}
+    utc = dash.page.evaluate("ms => window.__earthHub.utcTime(ms)", ms)
+    assert utc == when.replace("T", " ").replace("Z", " UTC")
+
+
+def js_number(value: float) -> str:
+    """A number as JavaScript writes it in text: 10, not 10.0."""
+    return str(int(value)) if float(value).is_integer() else repr(value)
+
+
+def popups(page) -> int:
+    return page.locator(".maplibregl-popup").count()
+
+
+@pytest.mark.req("REQ-DASH-026")
+def test_a_popup_flags_a_tsunami(browser_page, large_server):
+    browser_page.open(large_server.server.url, now=LARGE_NOW, period="last_3_years")
+    page = browser_page.page
+    flagged = next(p for p in large_server.points if p["tsunami"])
+    calm = next(p for p in large_server.points if not p["tsunami"])
+    for point, flag in ((flagged, True), (calm, False)):
+        assert page.evaluate("key => window.__earthHub.openPopup(key)", point["key"])
+        details = page.inner_text(".maplibregl-popup [data-testid=popup-details]")
+        assert details.split(" · ")[1] == f"{js_number(point['depth_km'])} km deep"
+        assert ("tsunami flagged" in details) is flag
+    assert browser_page.errors == [] and browser_page.blocked == []
+
+
+@pytest.mark.req("REQ-DASH-026")
+def test_one_popup_at_a_time_closed_by_a_map_click_or_a_new_width(dash):
+    page = dash.page
+
+    def open_popup(event) -> None:
+        assert page.evaluate("key => window.__earthHub.openPopup(key)", event["key"])
+
+    open_popup(EVENTS[1])
+    open_popup(EVENTS[5])
+    assert popups(page) == 1
+    assert "M 5.2" in page.inner_text(".maplibregl-popup")
+
+    page.locator("#map").scroll_into_view_if_needed()
+    box = page.locator("#map").bounding_box()
+    page.mouse.click(box["x"] + 20, box["y"] + box["height"] - 20)  # the empty south-west
+    assert popups(page) == 0
+
+    open_popup(EVENTS[5])
+    size = page.viewport_size
+    page.set_viewport_size({"width": size["width"], "height": size["height"] - 120})
+    page.wait_for_timeout(300)
+    assert popups(page) == 1  # a new height alone, as a phone's address bar makes: kept
+    page.set_viewport_size({"width": size["width"] - 200, "height": size["height"]})
+    page.wait_for_function("document.querySelectorAll('.maplibregl-popup').length === 0")
+
+
+@pytest.mark.req("REQ-DASH-028")
+def test_the_map_opens_at_zoom_1_and_goes_no_closer_than_15(dash):
+    view = dash.page.evaluate("window.__earthHub.mapView()")
+    assert view["zoom"] == 1 and view["maxZoom"] == 15
+    dash.page.evaluate("window.__earthHub.mapJumpTo(-150, 60, 20)")
+    assert dash.page.evaluate("window.__earthHub.mapView()")["zoom"] == 15
+
+
+@pytest.mark.req("REQ-DASH-029")
+def test_the_table_shows_10_25_or_50_events(browser_page, large_server):
+    browser_page.open(large_server.server.url, now=LARGE_NOW, period="last_3_years")
+    page = browser_page.page
+    significant = sum(1 for p in large_server.points if (p["magnitude"] or 0) >= 4.5)
+    assert significant > 50  # so each length shows in full
+
+    def shown() -> tuple[int, str, int]:
+        rows = page.locator("#significant tbody tr").count()
+        bars = page.locator('#chart-countries g[aria-label="bar"] rect').count()
+        return rows, page.inner_text("#significant-note"), bars
+
+    rows, note, bars = shown()
+    assert (rows, note) == (10, "(magnitude 4.5 and above, top 10)")
+    first = page.eval_on_selector_all("#significant tbody tr", "rs => rs.map(r => r.dataset.key)")
+    assert first == [r["key"] for r in large_server.latest]
+    for length in (25, 50):
+        browser_page.after_update(
+            lambda n=length: page.select_option("select[name=significant_n]", str(n))
+        )
+        assert shown() == (length, f"(magnitude 4.5 and above, top {length})", bars)
+        keys = page.eval_on_selector_all(
+            "#significant tbody tr", "rs => rs.map(r => r.dataset.key)"
+        )
+        assert keys[:10] == first  # the same order, longer
+    browser_page.after_update(lambda: page.click("button[type=reset]"))
+    assert page.input_value("select[name=significant_n]") == "10"
+    # Reset also returns the period to This week, which holds fewer events.
+    assert shown()[1] == "(magnitude 4.5 and above, top 10)"
+    assert browser_page.errors == [] and browser_page.blocked == []
+
+
+@pytest.mark.req("REQ-DASH-031")
+def test_the_tsunami_box_keeps_the_flagged_events(browser_page, large_server):
+    browser_page.open(large_server.server.url, now=LARGE_NOW, period="last_3_years")
+    page = browser_page.page
+    flagged = sum(1 for p in large_server.points if p["tsunami"])
+    assert 0 < flagged < large_server.events
+    browser_page.after_update(lambda: page.check("input[name=tsunami_only]"))
+    status = browser_page.status()
+    assert status["summary"]["events"] == status["summary"]["tsunami_flagged"] == flagged
+    assert status["mapFeatures"] == flagged
+    assert (
+        page.inner_text("[data-testid=summary-countries] .detail")
+        == f"{flagged} flagged for tsunami"
+    )
+    browser_page.after_update(lambda: page.click("button[type=reset]"))
+    assert page.is_checked("input[name=tsunami_only]") is False
+    assert browser_page.errors == [] and browser_page.blocked == []
+
+
+@pytest.mark.req("REQ-DASH-031")
+def test_the_tsunami_box_is_as_large_as_the_magnitude_box(dash):
+    def size(legend: str) -> tuple[float, float]:
+        box = dash.page.locator(f"#filters fieldset:has(legend:text-is('{legend}'))").bounding_box()
+        return box["width"], box["height"]
+
+    assert size("Tsunami") == size("Magnitude")
+    legends = dash.page.eval_on_selector_all("#filters legend", "ls => ls.map(l => l.textContent)")
+    assert legends.index("Tsunami") == legends.index("Events") + 1
+
+
+@pytest.mark.req("REQ-DASH-030")
+def test_the_countries_card_names_the_chosen_country(dash):
+    page = dash.page
+
+    def card() -> tuple[str, str]:
+        label = page.inner_text("[data-testid=summary-countries] .label")
+        return label, page.inner_text("[data-testid=summary-countries] .value")
+
+    assert card() == ("Countries", "4 countries")  # All: how many, Unknown counted as one
+    dash.after_update(lambda: page.select_option("select[name=country]", "Mexico"))
+    assert card() == ("Country", "Mexico")
+    dash.after_update(lambda: page.select_option("select[name=country]", "Unknown"))
+    assert card() == ("Country", "Unknown country")
+    dash.after_update(lambda: page.select_option("select[name=country]", ""))
+    dash.after_update(lambda: page.select_option("select[name=region]", "Alaska"))
+    assert card() == ("Countries", "1 country")
+
+
+@pytest.mark.req("REQ-DASH-027")
+def test_the_significant_events_come_right_after_the_map(dash):
+    headings = dash.page.eval_on_selector_all("main h2", "hs => hs.map(h => h.textContent)")
+    assert headings[0] == "Map"
+    assert headings[1].startswith("Significant events")
+    assert headings[2] == "Events over time"
+
+
+@pytest.mark.req("REQ-DASH-027")
+def test_a_significant_event_opens_on_the_map(browser_page, grid_server):
+    """On 30,000 events, where the map shows cells: the event's popup opens all the same."""
+    browser_page.open(grid_server.server.url, now=LARGE_NOW, period="last_3_years")
+    page = browser_page.page
+    assert browser_page.status()["mapGrid"] is True
+    first, second = grid_server.latest[0], grid_server.latest[1]
+
+    def shown_at(event) -> None:
+        page.wait_for_function(
+            "title => document.querySelector('.maplibregl-popup strong')?.textContent === title",
+            arg=event["title"],
+        )
+        page.evaluate("window.__earthHub.mapIdle()")
+        view = page.evaluate("window.__earthHub.mapView()")
+        assert view["longitude"] == pytest.approx(event["longitude"], abs=0.01)
+        assert view["latitude"] == pytest.approx(event["latitude"], abs=0.01)
+        assert view["zoom"] == pytest.approx(5)
+        assert popups(page) == 1
+
+    page.click(f"#significant tr[data-key={first['key']}] td:nth-child(3)")  # its place
+    shown_at(first)
+    page.focus(f"#significant tr[data-key={second['key']}]")
+    page.keyboard.press("Enter")
+    shown_at(second)
     assert browser_page.errors == [] and browser_page.blocked == []
 
 
@@ -630,11 +851,15 @@ def test_the_magnitude_bands_are_the_legends(dash):
 
 
 @pytest.mark.req("REQ-DASH-020")
-def test_the_rankings_say_what_drives_their_counts(dash):
+def test_the_rankings_say_what_their_bars_are(dash):
     page = dash.page
     countries = page.inner_text("#chart-countries + .note")
-    assert "seismic networks" in countries and "magnitude 4.5" in countries
-    assert "Unknown" in page.inner_text("#chart-regions + .note")
+    assert "share of the events in the ten bars shown" in countries
+    assert "without a country count as Unknown" in countries
+    regions = page.inner_text("#chart-regions + .note")
+    assert "the area USGS names in an event's place" in regions and "Unknown" in regions
+    for note in (countries, regions):
+        assert "United States" not in note and "network" not in note
 
 
 @pytest.mark.req("REQ-DASH-021")
