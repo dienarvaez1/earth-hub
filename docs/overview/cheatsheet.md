@@ -26,7 +26,7 @@ Commands that **call live services or change state** are marked ⚠. The skills 
 | `/eh-dashboard [check\|dev\|build\|test\|deployments\|deploy\|trigger]` | The live page and its data, a local server, tests, deploys, and the Worker's hourly trigger | `make dashboard-dev`, `make dashboard-deploy`, `wrangler secret list` |
 | `/eh-status [reconcile]` | Health of every service, consumer lag, newest event, API, last export, the mode and direct mode's latest executions | `docker compose ps`, `make reconcile`, `make reconcile-usgs`, `make mode`, `make direct-runs` |
 | `/eh-logs [service\|ID\|errors\|rejected\|summary]` | Reads the JSON logs with `jq`, follows one event | `docker compose logs … \| jq` |
-| `/eh-test [layer\|regression\|flake\|REQ-…\|keyword]` | Runs the tests by layer, or everything | `make test`, `make regression` |
+| `/eh-test [layer\|security\|regression\|flake\|REQ-…\|keyword]` | Runs the tests by layer, or everything; GitHub's open security alerts | `make test`, `make regression` |
 | `/eh-stop [pipeline\|api\|ui\|all\|reset]` | Stops services, keeping data (or wipes it, after asking) | `make ingest-stop`, `make down`, `make reset` |
 
 ## 1. Start the services
@@ -180,6 +180,7 @@ Only while `make mode` says `direct`. The hourly rounds (a Cloudflare cron trigg
 | `/eh-mode once` | `make direct-once` ⚠ | One direct round from your machine (and catch-up if due) |
 | `/eh-mode run` | `make direct-run` ⚠ | Direct mode from your machine until Ctrl-C: a round a minute instead of an hour. Not while the schedule is on |
 | `/eh-mode runs` | `make direct-runs [LIMIT=20]` | Direct mode's audit trail: each execution's status, who started it (Cloudflare trigger, GitHub schedule or by hand, `direct-run`, local), the mode, messages by part and outcome, elapsed time (read-only) |
+| | `gh run list --workflow watchdog.yml --limit 3` | The watchdog, every 3 hours: it fails, and GitHub e-mails, when no `direct.yml` run started for 2 hours ([CI](../technical/ci.md#the-watchdog)) |
 | `/eh-mode catchup` | `make catchup-now` ⚠ | Catch up now: a direct round with the day feed, the month feed and the deletions, whether due or not |
 | `/eh-mode reconcile` | `make reconcile-direct [DEEP=1]` | Rows, manifest, snapshot, ID map and log agree, read-only ([direct mode](../technical/architecture.md#direct-mode)) |
 | `/eh-r2 count` | `make r2-get KEY=analytics/meta.json \| jq '{run_id, written_at, rows}'` | Rows in the bucket now (PostgreSQL falls behind until `make mode-full`) |
@@ -200,7 +201,7 @@ Only while `make mode` says `direct`. The hourly rounds (a Cloudflare cron trigg
 | `/eh-dashboard test` | `make test-dashboard` | The page in Chromium, against a simulated R2 |
 | `/eh-dashboard deploy` | `make dashboard-deploy` ⚠ | Publishes to Cloudflare Workers |
 | `/eh-dashboard deployments` | `cd dashboard && npx --no-install wrangler deployments list 2>&1 \| grep -v '@'` | Past deploys and their versions |
-| `/eh-dashboard trigger` | `cd dashboard && npx --no-install wrangler secret list` and `make direct-runs LIMIT=3` | The hourly trigger: its token stored (never shown), and the latest rounds it started |
+| `/eh-dashboard trigger` | `make trigger-check`, `cd dashboard && npx --no-install wrangler secret list` and `make direct-runs LIMIT=3` | The hourly trigger: its token stored (never shown), and the latest rounds it started |
 | | `make dashboard-install` | Once: Node dependencies and the test browser |
 | | `make trigger-token` ⚠ | The hourly trigger's GitHub token: opens GitHub's form, checks the token you paste (never shown), stores it on the Worker, prints its expiry; run it in a terminal, again before the token expires: GitHub e-mails you from 14 days before ([CI](../technical/ci.md#the-trigger)) |
 | | `make trigger-check` | Whether the Worker's deployed token works now: asks GitHub with it, on Cloudflare, and prints `OK … (N days left)`; starts nothing, and the token never leaves Cloudflare |
@@ -226,7 +227,8 @@ Only while `make mode` says `direct`. The hourly rounds (a Cloudflare cron trigg
 
 | Skill | Command | What it runs |
 | --- | --- | --- |
-| `/eh-test lint` | `make lint` | Ruff checks and formatting (`make format` fixes) |
+| `/eh-test lint` | `make lint` | Ruff: style, formatting, complexity, security, simplification and Pylint rules (`make format` fixes formatting) |
+| `/eh-test security` | `gh api 'repos/dienarvaez1/earth-hub/code-scanning/alerts?state=open'` (also `dependabot/alerts`, `secret-scanning/alerts`) | GitHub's open CodeQL, Dependabot and secret-scanning alerts (read-only) |
 | `/eh-test` | `make test` | Unit tests: no Docker, no network |
 | `/eh-test integration` | `uv run pytest tests/integration -m integration` | Real Kafka and PostgreSQL (`make up`) |
 | `/eh-test api` | `uv run pytest tests/api -m integration --deselect tests/api/test_contract.py` | Every endpoint on a fixed dataset |

@@ -21,11 +21,15 @@ Read-only. Run from the repository root.
   `grep -q '^R2_BUCKET=.' .env`; never print `.env`).
 - Mode (same condition): `make -s mode`; in direct mode also its latest executions from the audit trail,
   `make -s direct-runs LIMIT=3` (status, who started each: `cloudflare-trigger` for the hourly rounds, and
-  what it processed), and `gh run list --workflow direct.yml --limit 3` for the GitHub runs, the daily
-  reconcile and the `Trigger token` check included (filter lines with `@`).
+  what it processed), `gh run list --workflow direct.yml --limit 3` for the GitHub runs, the daily
+  reconcile and the `Trigger token` check included, and `gh run list --workflow watchdog.yml --limit 1` (filter
+  lines with `@`).
+- GitHub's scanning: the open alerts, `gh api 'repos/dienarvaez1/earth-hub/code-scanning/alerts?state=open' -q length`,
+  and the same for `dependabot/alerts` and `secret-scanning/alerts`.
 
 With the argument `reconcile`: also run `make reconcile` (read-only; about 10 s) and `make reconcile-usgs`
-(read-only, a few FDSN requests: Earth-Hub against USGS for the last 3 days).
+(read-only, a few FDSN requests: Earth-Hub against USGS for the last 3 days), and `make -s trigger-check 2>&1 |
+grep -v '@' | tail -1` (the trigger's token, asked on Cloudflare; starts nothing, about 20 s).
 
 If Kafka or PostgreSQL isn't running, say so and suggest `/eh-start`; skip the checks that need it.
 
@@ -42,5 +46,5 @@ the mode (and in direct mode, the latest executions from `make direct-runs` and 
 With `reconcile`: each topic's RESULT, and any lost or pending messages. Flag anything wrong first: an
 unhealthy service, lag that isn't 0, a newest event older than ~15 minutes while the poller runs, lost messages,
 a `failed` or `interrupted` execution, a failed `Trigger token` run (the trigger's token expires within 14 days:
-the user runs `make trigger-token`), or a last direct round older than ~2 hours in direct mode (the trigger may
-have stopped: `/eh-dashboard trigger`).
+the user runs `make trigger-token`), a failed `Watchdog` run or a last direct round older than ~2 hours (the
+trigger may have stopped: `/eh-dashboard trigger`), or any open scanning alert (`/eh-test security`).

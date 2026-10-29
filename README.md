@@ -50,11 +50,13 @@ stateDiagram-v2
 | | |
 | --- | --- |
 | **Requirements** | 190 requirements, each with a stable ID and at least one passing test that names it (`@pytest.mark.req`). A test naming an unknown ID fails at collection, and `make traceability` fails if any requirement has no passing test |
-| **Tests** | About 1,100, in eight layers: unit, integration, API, contract (Schemathesis), end-to-end, dashboard (in Chromium), disruptive (real outages) and performance. About 92% coverage across all layers |
+| **Tests** | About 1,200, in eight layers: unit, integration, API, contract (Schemathesis), end-to-end, dashboard (in Chromium), disruptive (real outages) and performance. About 92% coverage across all layers |
 | **Defects** | 56 defects found and fixed, each with its milestone, severity, how it was found and the commit that fixed it; [six written up in full](docs/progress/defects.md) with root cause and prevention (kept in the git history) |
-| **CI** | On every pull request and push to `main`, lint and unit tests, then the regression of every layer except performance, from the example settings and with no secrets ([docs/technical/ci.md](docs/technical/ci.md)) |
+| **CI** | On every pull request and push to `main`, lint and unit tests, then the regression of every layer except performance in parallel parts (about 10 minutes), from the example settings and with no secrets; `main` accepts only changes that pass ([docs/technical/ci.md](docs/technical/ci.md)) |
 | **Data integrity** | Kafka offsets committed only after the database; idempotent upserts; newer revisions win; `make reconcile` compares each topic with the database. The guarantee claimed is at-least-once, never exactly-once |
 | **Recovery** | PostgreSQL stopped while events arrive, a Kafka restart, crashes between the two commits, poller and consumer restarts: each tested, and each ending in a reconciliation |
+| **Static analysis and security** | Ruff with complexity, security, simplification and Pylint rules in `make lint`; GitHub's CodeQL code scanning, Dependabot alerts and secret scanning with push protection, with every finding triaged |
+| **Privacy** | The dashboard sets no cookies, stores nothing in the browser, has no tracking and never asks for the visitor's location; its Worker logs no visitor requests ([privacy](#privacy)) |
 | **Docs that can't drift** | The [API examples](docs/technical/api.md) and [SQL examples](docs/technical/sql-examples.md) are replayed by tests; the [schema](docs/technical/schema.md) is checked against the models; every relative link in the docs is checked |
 
 **Some things the testing found:**

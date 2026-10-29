@@ -50,6 +50,8 @@ Each layer uses throwaway resources: a temporary Kafka topic, a temporary databa
 - **Independent oracles.** Aggregates are checked against SQL written separately in the test, or against values computed from the test's own input. Never against the code under test.
 - **Mutation spot checks.** Before trusting a new test suite, key safeguards are deliberately broken one at a time to confirm the tests fail. In Milestones 2–4 that was 19 deliberate breaks (5, 6 and 8), every one caught; later suites were checked the same way, for example the documentation replays, the cheat sheet check, and the regression tests of DEF-036, DEF-037 and DEF-039, each shown to fail without its fix.
 - **Repetition and combination.** Intermittent failures are treated as defects. `make flake-check` runs the end-to-end suite 5 times, and `make test-all` runs suites together to expose interactions between them (DEF-006).
+- **Static analysis.** `make lint` runs Ruff with the style and bug rules plus complexity (`C90`), security (`S`, Bandit's rules), simplification (`SIM`) and Pylint's (`PL`); false alarms are marked on their line with the reason, and the functions already over the complexity limits are listed in the plan to refactor. GitHub adds CodeQL code scanning (Python, TypeScript, the workflows), Dependabot alerts on `uv.lock` and `dashboard/package-lock.json`, and secret scanning with push protection; their findings are triaged, not ignored (a false positive is dismissed with its reason).
+- **Privacy checks.** A browser test watches for the Geolocation API and site storage from before the page's own scripts run, and checks that a visit and a filter change use neither and set no cookie (REQ-DASH-034); a unit test keeps the Worker's invocation logs off (REQ-DASH-035).
 - **Reconciliation.** Every end-to-end test ends by checking that every message in the topic has a database row with an outcome, with lost and pending messages kept apart.
 
 ## Test data
@@ -157,7 +159,7 @@ Claude Code writes and runs the tests, and the project owner approves each miles
 
 ## Tooling
 
-pytest, pytest-cov, Schemathesis (with Hypothesis), httpx `MockTransport`, FastAPI `TestClient`, real Kafka and PostgreSQL through Docker Compose, Ruff, and the project's own `scripts/regression.py` and `scripts/traceability.py`.
+pytest, pytest-cov, Schemathesis (with Hypothesis), httpx `MockTransport`, FastAPI `TestClient`, real Kafka and PostgreSQL through Docker Compose, Playwright, Ruff, GitHub's CodeQL, Dependabot and secret scanning, and the project's own `scripts/regression.py` and `scripts/traceability.py`.
 
 ## AI-assisted development
 
