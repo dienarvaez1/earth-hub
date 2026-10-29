@@ -247,3 +247,62 @@ def test_the_command_reports_in_json_free_lines(check, s3, capsys):
     lines = capsys.readouterr().out.splitlines()
     assert lines[0].startswith("Earth-Hub (direct mode, the bucket) against USGS")
     assert all(not line.startswith("{") for line in lines)  # plain text, for the run page
+
+
+@pytest.mark.req("REQ-REC-004")
+def test_direct_mode_measures_each_feed_by_when_usgs_generated_it(s3, tmp_path, make_envelope,
+                                                                  make_feature):  # fmt: skip
+    # DEF-054: the 11:17 round of 2026-10-29. USGS generated the day feed at 11:16:53, the round
+    # fetched it at 11:17:38, its catch-up finished at 11:18:10; nc75459342 changed at 11:18:08.
+    # The day feed was taken as read at 11:18:10, so the change looked missed.
+    from earth_hub.direct.runner import DirectRunner
+    from earth_hub.export.bucket import Bucket
+
+    day = datetime(2026, 10, 29, tzinfo=UTC)
+    feed_generated, catchup_generated = (
+        day.replace(hour=11, minute=16, second=53),
+        day.replace(hour=11, minute=17, second=42),
+    )
+    start_direct(s3)
+    runner = DirectRunner(Bucket(s3, BUCKET), workdir=tmp_path, workers=2)
+
+    def message(event_id, source, generated):
+        ms = None if generated is None else int(generated.timestamp() * 1000)
+        return make_envelope(make_feature(event_id), source=source, feed_generated_ms=ms)
+
+    runner.process([message("ak1", "feed", feed_generated)], now=day.replace(hour=11, minute=17))
+    runner.process(
+        [message("ci2", "catchup", catchup_generated)], now=day.replace(hour=11, minute=18)
+    )
+    # A later round naming an older copy, or none, takes nothing back.
+    runner.process(
+        [message("ak3", "feed", feed_generated - timedelta(hours=1)), message("ak4", "feed", None)],
+        now=day.replace(hour=11, minute=19),
+    )
+
+    _, marks, last_round = u.from_bucket(runner.bucket)
+    assert (marks.day_feed, marks.month_feed) == (feed_generated, catchup_generated)
+    assert last_round == day.replace(hour=11, minute=19)  # the freshness check keeps the end
+    usgs = [
+        u.Event("nc75459342", frozenset({"nc75459342"}), at(day.replace(hour=10)),
+                at(day.replace(hour=11, minute=18, second=8))),  # after the feed was generated
+        u.Event("nc1", frozenset({"nc1"}), at(day.replace(hour=10)),
+                at(feed_generated - timedelta(seconds=1))),  # before it: a real miss
+    ]  # fmt: skip
+    report = u.compare([], usgs, [], marks, start=day, end=day + u.DAY)
+    assert sorted(kinds(report)) == [("missing", "nc1", False), ("missing", "nc75459342", True)]
+
+
+@pytest.mark.req("REQ-REC-004")
+def test_without_a_generation_time_the_last_round_and_the_checkpoint_stand_in(
+    s3, tmp_path, make_envelope, make_feature
+):
+    from earth_hub.direct.runner import DirectRunner
+    from earth_hub.export.bucket import Bucket
+
+    start_direct(s3)
+    runner = DirectRunner(Bucket(s3, BUCKET), workdir=tmp_path, workers=2)
+    runner.process([make_envelope(make_feature("ak1"))], now=NOW)  # feed_generated_ms: None
+    runner.set_checkpoint("catchup", NOW - timedelta(minutes=5))
+    _, marks, _ = u.from_bucket(runner.bucket)
+    assert (marks.day_feed, marks.month_feed) == (NOW, NOW - timedelta(minutes=5))

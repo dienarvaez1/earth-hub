@@ -192,7 +192,7 @@ Milestone 8: the same pipeline without Docker, Kafka or PostgreSQL. The real pol
 | --- | --- |
 | `_state/ids.json.gz` | The ID map: every USGS ID ever seen → its record's key and when the ID was first seen (`earthquake_ids`); and each record's creation number, full mode's `id` order, which decides the survivor of a merge |
 | `_state/mode.json` | Which mode writes the bucket (`full` or `direct`), and the log's sequence number at the last handover. No marker means full mode |
-| `_state/direct.json` | The last sequence number, the poller's 26-hour state (rebuilt from `earthquakes.raw` in full mode) and catch-up's checkpoints |
+| `_state/direct.json` | The last sequence number, the poller's 26-hour state (rebuilt from `earthquakes.raw` in full mode), catch-up's checkpoints, and when USGS generated the newest copy of each feed a round processed (`generated`, for the check against USGS) |
 | `_state/direct-pending.json` | A round's writes, while they are being made |
 | `audit/direct/<date>/<run_id>.json` | One record per execution of direct mode (`direct/audit.py`): the command; who started it (`cloudflare-trigger`, `github-schedule`, `github-manual`, `direct-run`, `local`); the mode when it started; its status (running, succeeded, failed, skipped; `interrupted` when a `running` record has not been saved for 30 minutes); start, end and elapsed seconds; messages by part (feed, catchup, deleted) and outcome, rows written and removed; the log's sequence numbers; the errors logged and the rejected messages. Written at the start and the end (and every 10 minutes for `run`); a failure to write it never fails a round. `make direct-runs` lists the latest |
 | `log/<date>/<first>-<last>.ndjson` | Every message processed, in order: sequence number, processing time, source, outcome, rule, reason, record key and envelope (`raw_events`) |
@@ -330,14 +330,14 @@ The other checks compare Earth-Hub with itself: `make reconcile` Kafka with Post
 | Earth-Hub has it, USGS has never heard of it (`unknown at USGS`) | never | unexplained |
 | USGS lists apart two events Earth-Hub merged into one record (`split at USGS`) | never: Earth-Hub never splits a record | unexplained |
 
-- **The source that brings an event** is the day feed for events of the 24 hours before it was last read, and catch-up's month feed for older ones; deletions come only from the deleted-events check. When each was last read: in full mode, the live topic's last delivery to PostgreSQL and catch-up's checkpoints in `ingestion_checkpoints`; in direct mode, the last direct round and the checkpoints in `_state/direct.json`.
+- **The source that brings an event** is the day feed for events of the 24 hours before it was last read, and catch-up's month feed for older ones; deletions come only from the deleted-events check. A feed counts as read when USGS generated the newest copy of it Earth-Hub processed (`metadata.generated`, in every message's envelope as `feed_generated_ms`), since that is what its content is as of. The feed is fetched up to a minute after it was generated, and the round ends a minute or two later. Taking either of those as the read reported updates in between as missed (DEF-054). In full mode the times are the newest among `raw_events`' feed and catch-up messages; in direct mode each round keeps them in `_state/direct.json` (`generated`, per feed). Without one, the live topic's last delivery or the last round's end stands in for the day feed, and catch-up's checkpoint for the month feed. The deleted-events check counts from its checkpoint.
 - **Events are matched by any of their IDs**, so a merged event counts once. One whose time USGS moved out of the window since is looked up by ID (at most 25 a run).
 - **Revision times within 60 seconds are the same revision.** For `uw` events FDSN reports `updated` 5 to 9 seconds later than the summary feeds the poller and catch-up read (measured 2026-10-21, 19 events in 3 days); without the tolerance each would look like a missed revision.
 - **Requests:** two FDSN queries a day (live and deleted events), with `FDSN_PAUSE_SECONDS` between them, and the lookups. It exits 1 if any difference is unexplained, 2 on missing settings or during a handover.
 
 ```text
 Earth-Hub (direct mode, the bucket) against USGS, by UTC day of the event
-  last read: day feed 2026-10-21 03:37:44, month feed 2026-10-21 03:18:38, deletions 2026-10-20 10:50:58
+  last read (as USGS generated it): day feed 2026-10-21 03:37:44, month feed 2026-10-21 03:18:38; deletions checked 2026-10-20 10:50:58
   2026-10-20: USGS 230, Earth-Hub 230; 7 pending, 0 unexplained
     pending     2026-10-20 deleted at USGS ci41349567: USGS deleted it at 2026-10-20 13:09:04, after the last deleted-events check
     pending     2026-10-20 missing         uw714122812: USGS updated it at 2026-10-21 04:04:36, after the day feed was last read

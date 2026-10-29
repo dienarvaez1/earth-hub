@@ -38,3 +38,27 @@ def test_postgresql_gives_every_event_with_all_its_ids_and_the_watermarks(
     # catch-up's checkpoints for the rest.
     assert marks.day_feed is not None
     assert (marks.month_feed, marks.deletions) == (NOW, NOW.replace(hour=1))
+
+
+@pytest.mark.req("REQ-REC-004")
+def test_full_mode_measures_each_feed_by_when_usgs_generated_it(db, make_envelope, make_feature):
+    # DEF-054: the newest generation time among each feed's messages, not their delivery.
+    feed, catchup = 1793272613000, 1793272662000
+    messages = [
+        ("earthquakes.raw", make_envelope(make_feature("ak1"), feed_generated_ms=feed - 3_600_000)),
+        ("earthquakes.raw", make_envelope(make_feature("ak2"), feed_generated_ms=feed)),
+        ("earthquakes.raw", make_envelope(make_feature("ak3"))),  # no generation time
+        (
+            "earthquakes.backfill",
+            make_envelope(make_feature("ci4"), source="catchup", feed_generated_ms=catchup),
+        ),
+        ("earthquakes.backfill", b'{"source": "feed", "feed_generated_ms": "soon"}'),  # rejected
+    ]
+    with db.begin() as conn:
+        for offset, (topic, value) in enumerate(messages):
+            process_message(conn, IncomingMessage(topic, 0, offset, b"k", value), now=NOW)
+    Progress(db).set_checkpoint("catchup", NOW)
+
+    _, marks = u.from_postgres(db, "earthquakes.raw")
+    assert marks.day_feed == datetime.fromtimestamp(feed / 1000, UTC)
+    assert marks.month_feed == datetime.fromtimestamp(catchup / 1000, UTC)

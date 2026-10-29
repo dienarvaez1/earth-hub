@@ -13,7 +13,8 @@ mode wrote it:
                                            record's creation number (its identity in the
                                            store, as full mode's id is)
     _state/direct.json                     the last sequence number, the poller's 26-hour
-                                           state and the catch-up checkpoints
+                                           state, the catch-up checkpoints and the feeds'
+                                           generation times (runner.FEEDS)
     _state/direct-pending.json             a round's writes, while they are being made
     log/<date>/<first>-<last>.ndjson       every message processed, in order: sequence,
                                            time, source, outcome and envelope (raw_events)
