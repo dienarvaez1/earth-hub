@@ -379,6 +379,11 @@ footer {
   padding-bottom: 24px;
 }
 
+#disclaimer {
+  margin: 0 0 8px;
+  max-width: 80ch;
+}
+
 .maplibregl-popup-content {
   color: #1c1917;
   font-size: 0.85rem;

@@ -202,6 +202,7 @@ The dashboard's SQL lives in `dashboard/queries/`; the page runs it in the brows
 | REQ-DASH-030 | The summary's Countries card names the country when one is chosen in the country menu, as the menu shows it (`US-` for US territories), and says `Unknown country` for Unknown; with All it says how many countries the events are in (`1 country`, `4 countries`), Unknown counting as one |
 | REQ-DASH-031 | A Tsunami box after Events in the filter bar, the same size as the Magnitude box, has a Flagged only checkbox (`tsunami_only`, off by default and after Reset): checked, every report keeps only the events USGS flags for tsunami, the menus' counts included |
 | REQ-DASH-032 | The page's footer shows the build it was made from (`git describe --tags --always --dirty`: `v1.0.0`, or `v1.0.0-4-g790aa4b` after it) as a link to it on GitHub: a tag's release, any other build's commit; without git, `Earth-Hub on GitHub` and the repository |
+| REQ-DASH-033 | The page's footer credits the U.S. Geological Survey as the data's source, with a link, and says Earth-Hub is an independent research project, not affiliated with or endorsed by USGS and not a complete or exact copy of its service; that events may be revised, late, or missing or inaccurate if any part of the system fails; that city, region and country are derived by Earth-Hub; that it comes without warranty; and that it is not for emergency or safety decisions, linking to USGS's own map. The README says the same |
 
 ## End-to-end scenarios
 
