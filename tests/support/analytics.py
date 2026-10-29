@@ -17,6 +17,8 @@ FILTER_ORDER = (
     "time_bucket",
     "top_n",
     "significant_magnitude",
+    "significant_n",
+    "tsunami_only",
 )
 DEFAULT_FILTER = {
     "start_time": None,
@@ -30,6 +32,8 @@ DEFAULT_FILTER = {
     "time_bucket": "month",
     "top_n": 10,
     "significant_magnitude": 4.5,
+    "significant_n": 10,
+    "tsunami_only": False,
 }
 # set_map_view.sql's parameters, in order, and the values setup.sql starts with (the page's
 # own are in dashboard/src/map.ts: STRONG_MAGNITUDE, CELL_DEGREES, AREA_LIMIT).

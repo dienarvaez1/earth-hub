@@ -1,5 +1,5 @@
 -- One point per filtered event, for the map and the depth-against-magnitude chart.
 SELECT key, longitude, latitude, depth_km, magnitude, event_time_ms, place, title, url,
-       review_status
+       review_status, tsunami
 FROM filtered
 ORDER BY key;

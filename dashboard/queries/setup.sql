@@ -15,10 +15,12 @@ CREATE OR REPLACE TABLE filter (
     event_type VARCHAR,
     include_deleted BOOLEAN NOT NULL,
     time_bucket VARCHAR NOT NULL CHECK (time_bucket IN ('hour', 'day', 'week', 'month')),
-    top_n INTEGER NOT NULL CHECK (top_n > 0),
-    significant_magnitude DOUBLE NOT NULL
+    top_n INTEGER NOT NULL CHECK (top_n > 0),  -- the top countries' and regions' bars
+    significant_magnitude DOUBLE NOT NULL,
+    significant_n INTEGER NOT NULL CHECK (significant_n > 0),  -- the significant events' rows
+    tsunami_only BOOLEAN NOT NULL     -- only the events USGS flags for tsunami
 );
-INSERT INTO filter VALUES (NULL, NULL, NULL, NULL, NULL, NULL, NULL, false, 'month', 10, 4.5);
+INSERT INTO filter VALUES (NULL, NULL, NULL, NULL, NULL, NULL, NULL, false, 'month', 10, 4.5, 10, false);
 
 -- How the map is drawn when there are many events: one row, changed only through
 -- set_map_view.sql. It filters nothing: map_grid.sql, map_strong.sql, map_area.sql and
@@ -56,10 +58,12 @@ SELECT
     (f.country IS NULL OR e.country_name = f.country) AS in_country,
     (f.region IS NULL OR e.region_name = f.region) AS in_region,
     (f.event_type IS NULL OR e.event_type = f.event_type) AS in_type,
-    (f.include_deleted OR e.review_status <> 'deleted') AS in_deleted
+    (f.include_deleted OR e.review_status <> 'deleted') AS in_deleted,
+    (NOT f.tsunami_only OR e.tsunami) AS in_tsunami
 FROM events AS e, filter AS f;
 
 CREATE OR REPLACE VIEW filtered AS
-SELECT * EXCLUDE (in_time, in_magnitude, in_country, in_region, in_type, in_deleted)
+SELECT * EXCLUDE (in_time, in_magnitude, in_country, in_region, in_type, in_deleted, in_tsunami)
 FROM matched
-WHERE in_time AND in_magnitude AND in_country AND in_region AND in_type AND in_deleted;
+WHERE in_time AND in_magnitude AND in_country AND in_region AND in_type AND in_deleted
+    AND in_tsunami;

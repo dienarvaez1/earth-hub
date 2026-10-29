@@ -2,12 +2,26 @@
 //
 // The time zone comes from the event's coordinates (tz-lookup bundles the world's time-zone
 // boundaries, and the nautical zones Etc/GMT±N at sea); the browser's Intl does the rest,
-// summer time included. Abbreviations are the browser's for the zone (EDT, CET, ...), or
-// GMT±h where it has none.
+// summer time included. The zone shows as its abbreviation where the browser has one (AKDT,
+// HST, ...), then its offset from UTC in parentheses: "AKDT (UTC-8)". Where it has none,
+// only the offset: "(UTC+9)".
 
 import tzlookup from "@photostructure/tz-lookup";
 
 export type LocalTime = { text: string; zone: string };
+
+function zoneName(ms: number, timeZone: string, style: "short" | "shortOffset"): string {
+  const parts = new Intl.DateTimeFormat("en-US", { timeZone, timeZoneName: style }).formatToParts(
+    new Date(ms),
+  );
+  return parts.find((p) => p.type === "timeZoneName")?.value ?? "";
+}
+
+/** "GMT-8" or "GMT+5:30" as "UTC-8" or "UTC+5:30"; UTC itself ("GMT" or "GMT+0") as "UTC". */
+function offset(ms: number, timeZone: string): string {
+  const name = zoneName(ms, timeZone, "shortOffset");
+  return name === "GMT" || name === "GMT+0" ? "UTC" : name.replace(/^GMT/, "UTC");
+}
 
 function format(ms: number, timeZone: string): string {
   const parts = Object.fromEntries(
@@ -18,17 +32,21 @@ function format(ms: number, timeZone: string): string {
       day: "2-digit",
       hour: "2-digit",
       minute: "2-digit",
+      second: "2-digit",
       hourCycle: "h23",
-      timeZoneName: "short",
     })
       .formatToParts(new Date(ms))
       .map((p) => [p.type, p.value]),
   );
-  return `${parts.year}-${parts.month}-${parts.day} ${parts.hour}:${parts.minute} ${parts.timeZoneName}`;
+  // Without an abbreviation of its own, the browser names the zone by its offset (GMT+9).
+  const short = zoneName(ms, timeZone, "short");
+  const abbreviation = short.startsWith("GMT") ? "" : `${short} `;
+  const when = `${parts.year}-${parts.month}-${parts.day} ${parts.hour}:${parts.minute}:${parts.second}`;
+  return `${when} ${abbreviation}(${offset(ms, timeZone)})`;
 }
 
 export function utcTime(ms: number): string {
-  return new Date(ms).toISOString().slice(0, 16).replace("T", " ") + " UTC";
+  return new Date(ms).toISOString().slice(0, 19).replace("T", " ") + " UTC";
 }
 
 /** The time where the event happened, or null if its coordinates name no zone. */

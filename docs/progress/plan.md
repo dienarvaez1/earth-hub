@@ -8,7 +8,7 @@ The project is designed to showcase your experience in software quality assuranc
 
 ## Status
 
-As of 2026-10-22. The plan below is the original, with Milestone 7 revised; the work as built is described in the [architecture](../technical/architecture.md), and what each step found in the [defect log](defects.md).
+As of 2026-10-29. The plan below is the original, with Milestone 7 revised; the work as built is described in the [architecture](../technical/architecture.md), and what each step found in the [defect log](defects.md).
 
 | Milestone | Status | Merged in |
 | --- | --- | --- |
@@ -18,7 +18,7 @@ As of 2026-10-22. The plan below is the original, with Milestone 7 revised; the 
 | 3. Consumer, validation and PostgreSQL | Done | #4 |
 | 4. REST API (and the read-only Kafka UI) | Done | `4d2748f`, `620b8c7` |
 | 5. End-to-end QA and regression automation | Done | #6 |
-| Backfill and catch-up, between 5 and 6 | Done | #7, #8; place-derived location #9 |
+| Backfill and catch-up, between 5 and 6 | Done | #7, #8; place-derived location #9; an end after now cut to now (DEF-053) #45 |
 | R2 export, before 6 | Done | #10, #11 |
 | 6. Analytics dashboard from R2, observability, performance | Done | #12, #13, #14, #15 |
 | 7.1 CI, third-party licenses, preview marking | Done | #16 |
@@ -34,8 +34,11 @@ As of 2026-10-22. The plan below is the original, with Milestone 7 revised; the 
 | Dashboard: opens on This week per hour; menus that recount; top countries and regions as shares by magnitude, with a note on network density; US- places; events over time as columns, areas, lines or trends | Done | #39 |
 | Load test of the API with Locust, after 8 | Done | #26 |
 | Reconciliation with USGS, catching up after each switch | Done | #32 |
+| One command each to switch modes and to backfill in full mode (`make to-full`, `make to-direct`, `make backfill-full`) | Done | #44 |
+| Dashboard map above 25,000 events: cells counted in SQL, the visible area's events once zoomed in (history back to 2024 loaded) | Done | #46 |
+| Dashboard: popups with the time to the second and the UTC offset, tsunami flag, closing on a click or resize; significant events under the map, 10, 25 or 50, each opening on the map; zoom 1 to 15; the Countries card naming the chosen country; a Tsunami filter; ranking notes on what a bar is | Done | #47 |
 
-Current numbers: 175 requirements, all covered by a passing test; 53 defects, all fixed; about 1,100 tests in the full regression.
+Current numbers: 181 requirements, all covered by a passing test; 53 defects, all fixed; about 1,100 tests in the full regression.
 
 ## 1. Project vision
 

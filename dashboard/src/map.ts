@@ -28,6 +28,11 @@ export const CELL_DEGREES = 0.25;
  * most AREA_LIMIT of them. */
 export const AREA_ZOOM = 4;
 export const AREA_LIMIT = 25000;
+/** The zoom the page opens at, the closest it goes, and the zoom a significant event chosen in
+ * the table is shown at. */
+export const START_ZOOM = 1;
+export const MAX_ZOOM = 15;
+export const FOCUS_ZOOM = 5;
 /** setup.sql's map_view for the whole world: what map_grid.sql and map_strong.sql read. */
 export const WORLD: MapView = {
   strong_magnitude: STRONG_MAGNITUDE,
@@ -63,6 +68,7 @@ function eventFeature(p: Row): Feature {
       title: p.title,
       url: p.url,
       deleted: p.review_status === "deleted",
+      tsunami: p.tsunami === true,
       n: 1,
     },
   };
@@ -126,17 +132,27 @@ export class EventMap {
   private shown: Feature[] = [];
   private strong: Feature[] = [];
   private cells: Feature[] = [];
+  private popup: maplibregl.Popup | null = null; // one at a time
 
   constructor(container: HTMLElement) {
     this.map = new maplibregl.Map({
       container,
       style: STYLE_URL,
       center: [-120, 40],
-      zoom: 1.4,
+      zoom: START_ZOOM,
+      maxZoom: MAX_ZOOM,
       attributionControl: { compact: true },
       cooperativeGestures: true, // scrolling the page does not zoom the map
     });
     this.map.addControl(new maplibregl.NavigationControl({ showCompass: false }));
+    // A resized page closes the popup. Only a change of width does: on phones the address bar
+    // changes the height while scrolling.
+    let width = window.innerWidth;
+    window.addEventListener("resize", () => {
+      if (window.innerWidth === width) return;
+      width = window.innerWidth;
+      this.closePopup();
+    });
     this.ready = new Promise((resolve) => this.map.on("load", () => this.addLayers(resolve)));
   }
 
@@ -279,6 +295,25 @@ export class EventMap {
     this.map.on("moveend", callback);
   }
 
+  /** A significant event from the table: flies to it at FOCUS_ZOOM and opens its popup,
+   * whatever the map shows (its point, a cluster or a cell). */
+  focusEvent(row: Row): void {
+    const feature = eventFeature(row);
+    this.map.flyTo({ center: feature.geometry.coordinates as [number, number], zoom: FOCUS_ZOOM });
+    this.showPopup(feature as unknown as MapGeoJSONFeature);
+  }
+
+  /** Where the map looks (for the tests). */
+  view(): { longitude: number; latitude: number; zoom: number; maxZoom: number } {
+    const center = this.map.getCenter();
+    return { longitude: center.lng, latitude: center.lat, zoom: this.map.getZoom(), maxZoom: this.map.getMaxZoom() };
+  }
+
+  closePopup(): void {
+    this.popup?.remove();
+    this.popup = null;
+  }
+
   /** Moves the map at once (for the tests). */
   jumpTo(longitude: number, latitude: number, zoom: number): void {
     this.map.jumpTo({ center: [longitude, latitude], zoom });
@@ -337,7 +372,10 @@ export class EventMap {
     };
     const magnitude = p.magnitude === null || p.magnitude === undefined ? "no magnitude" : `M ${p.magnitude}`;
     body.append(title);
-    line(`${magnitude} · ${p.depth_km} km deep` + (p.deleted ? " · deleted by USGS" : ""), "popup-details");
+    line(
+      `${magnitude} · ${p.depth_km} km deep` + (p.tsunami ? " · tsunami flagged" : "") + (p.deleted ? " · deleted by USGS" : ""),
+      "popup-details",
+    );
     // The time in UTC, then where it happened (the zone's name on hover).
     line(utcTime(p.time as number), "popup-utc");
     const local = localTime(p.time as number, lat, lon);
@@ -349,6 +387,12 @@ export class EventMap {
       link.textContent = "USGS event page";
       body.append(link);
     }
-    new maplibregl.Popup({ maxWidth: "280px" }).setLngLat([lon, lat]).setDOMContent(body).addTo(this.map);
+    this.closePopup();
+    // closeOnClick: a click elsewhere on the map closes it (a click on a point opens that one's).
+    const popup = new maplibregl.Popup({ maxWidth: "280px", closeOnClick: true });
+    popup.on("close", () => {
+      if (this.popup === popup) this.popup = null;
+    });
+    this.popup = popup.setLngLat([lon, lat]).setDOMContent(body).addTo(this.map);
   }
 }

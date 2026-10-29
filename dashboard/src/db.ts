@@ -24,8 +24,10 @@ export interface Filter {
   event_type: string | null;
   include_deleted: boolean;
   time_bucket: "hour" | "day" | "week" | "month";
-  top_n: number;
+  top_n: number; // the top countries' and regions' bars
   significant_magnitude: number;
+  significant_n: number; // the significant events' rows
+  tsunami_only: boolean;
 }
 
 // The parameter order of set_filter.sql.
@@ -41,6 +43,8 @@ const FILTER_ORDER: (keyof Filter)[] = [
   "time_bucket",
   "top_n",
   "significant_magnitude",
+  "significant_n",
+  "tsunami_only",
 ];
 
 export const DEFAULT_FILTER: Filter = {
@@ -55,6 +59,8 @@ export const DEFAULT_FILTER: Filter = {
   time_bucket: "month",
   top_n: 10,
   significant_magnitude: 4.5,
+  significant_n: 10,
+  tsunami_only: false,
 };
 
 /** How the map is drawn when there are many events (setup.sql's map_view): not a filter. */

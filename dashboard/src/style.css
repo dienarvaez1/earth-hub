@@ -112,6 +112,17 @@ label[hidden] {
   display: none;
 }
 
+/* Magnitude and Tsunami: one control each, the same size. */
+fieldset.narrow {
+  width: 8rem;
+  box-sizing: border-box;
+  align-self: stretch; /* as tall as the row's other boxes */
+}
+
+fieldset.narrow select {
+  width: 100%;
+}
+
 label.check {
   flex-direction: row;
   align-items: center;
@@ -167,6 +178,12 @@ button {
   font-size: 1.5rem;
   font-weight: 600;
   font-variant-numeric: tabular-nums;
+}
+
+/* A country's name may be long: it wraps, where numbers stay on one line. */
+.card .value.wraps {
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 .card .detail {
@@ -337,6 +354,20 @@ button.sort .arrow {
   font-size: 0.75em;
 }
 
+/* A row opens its event on the map. */
+tr.event-row {
+  cursor: pointer;
+}
+
+tr.event-row:hover td {
+  background: var(--bg);
+}
+
+tr.event-row:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
 th[aria-sort="ascending"] .arrow,
 th[aria-sort="descending"] .arrow {
   color: inherit;
@@ -366,6 +397,10 @@ footer {
   .card .value {
     font-size: 1.2rem;
     white-space: nowrap;
+  }
+
+  .card .value.wraps {
+    white-space: normal;
   }
   .top {
     flex-direction: column;

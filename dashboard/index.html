@@ -44,7 +44,7 @@
           <label class="custom-date" hidden>From <input type="date" name="start" /></label>
           <label class="custom-date" hidden>To <input type="date" name="end" /></label>
         </fieldset>
-        <fieldset>
+        <fieldset class="narrow">
           <legend>Magnitude</legend>
           <!-- The bands of the map's legend, as "min:max": min inclusive, max exclusive, an
                empty side no limit. A band leaves out events without a magnitude; All keeps them. -->
@@ -68,6 +68,10 @@
           <label>Type <select name="event_type"><option value="">All</option></select></label>
           <label class="check"><input type="checkbox" name="include_deleted" /> Include deleted</label>
         </fieldset>
+        <fieldset class="narrow">
+          <legend>Tsunami</legend>
+          <label class="check"><input type="checkbox" name="tsunami_only" /> Flagged only</label>
+        </fieldset>
         <button type="reset">Reset</button>
       </form>
 
@@ -80,6 +84,28 @@
           <p class="note">Clusters show counts; zoom in for single events, then select one for details.</p>
           <div id="legend"></div>
         </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head">
+          <h2>Significant events <span class="note" id="significant-note">(magnitude 4.5 and above, top 10)</span></h2>
+          <div class="panel-controls">
+            <label>Show
+              <select name="significant_n" form="filters">
+                <option value="10" selected>10</option>
+                <option value="25">25</option>
+                <option value="50">50</option>
+              </select>
+            </label>
+            <fieldset class="toggle">
+              <legend class="visually-hidden">Order</legend>
+              <label class="check"><input type="radio" name="order" value="latest" form="filters" checked /> Latest</label>
+              <label class="check"><input type="radio" name="order" value="largest" form="filters" /> Largest</label>
+            </fieldset>
+          </div>
+        </div>
+        <div class="table-wrap"><table id="significant"></table></div>
+        <p class="note">Select an event to show it on the map.</p>
       </section>
 
       <section class="panel">
@@ -120,32 +146,23 @@
           <h2>Top 10 countries</h2>
           <figure id="chart-countries"></figure>
           <p class="note" id="rankings-note">
-            Counts follow how dense the seismic networks are, not only how often the ground
-            shakes: the United States records earthquakes too small to feel, most of the world
-            only from about magnitude 4.5.
+            Each bar is a country's share of the events in the ten bars shown, which add up to
+            100%, split by magnitude level in the map's colors; the number at its end is how many
+            events it had. The ranking follows the filters above, and events without a country
+            count as Unknown.
           </p>
         </section>
         <section class="panel">
           <h2>Top 10 regions</h2>
           <figure id="chart-regions"></figure>
           <p class="note" id="regions-note">
-            Regions are US states, or the area the USGS place names: outside the United
-            States most places name only a country, so their events count under Unknown.
+            Each bar is a region's share of the events in the ten bars shown, split by magnitude
+            level; the number at its end is how many events it had. A region is the area USGS
+            names in an event's place, such as a state or province; events whose place names
+            only a country count under Unknown, beside that country.
           </p>
         </section>
       </div>
-
-      <section class="panel">
-        <div class="panel-head">
-          <h2>Significant events <span class="note">(magnitude 4.5 and above, top 10)</span></h2>
-          <fieldset class="toggle">
-            <legend class="visually-hidden">Order</legend>
-            <label class="check"><input type="radio" name="order" value="latest" form="filters" checked /> Latest</label>
-            <label class="check"><input type="radio" name="order" value="largest" form="filters" /> Largest</label>
-          </fieldset>
-        </div>
-        <div class="table-wrap"><table id="significant"></table></div>
-      </section>
     </main>
 
     <footer>

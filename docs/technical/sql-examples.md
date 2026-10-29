@@ -182,7 +182,7 @@ The page runs every report unchanged. All filters live in one `filter` table, se
 | File | Answers | Filtered |
 | --- | --- | --- |
 | `setup.sql` | Creates the `filter` and `map_view` tables and the `events`, `matched` and `filtered` views | |
-| `set_filter.sql` | Sets every filter at once (11 parameters, in order) | |
+| `set_filter.sql` | Sets every filter at once (13 parameters, in order) | |
 | `set_map_view.sql` | Sets the map's view at once (7 parameters, in order) | |
 | `summary.sql` | The headline numbers: events, strongest, first and last, countries, tsunami flags | yes |
 | `over_time.sql` | Events per hour, day, ISO week or month, empty periods included, split by magnitude level | yes |
@@ -192,7 +192,7 @@ The page runs every report unchanged. All filters live in one `filter` table, se
 | `map_area.sql` | With the cells, once zoomed in: the other events in the visible area, one by one, at most `area_limit` + 1 | yes |
 | `depth_bins.sql` | With the cells: the depth chart's events counted per 0.1 magnitude by 5 km | yes |
 | `top_countries.sql`, `top_regions.sql` | The `top_n` countries and regions by events, split by magnitude level | yes |
-| `significant.sql`, `largest.sql` | The latest and the strongest `top_n` events at or above `significant_magnitude` | yes |
+| `significant.sql`, `largest.sql` | The latest and the strongest `significant_n` events (10, 25 or 50 on the page) at or above `significant_magnitude` | yes |
 | `countries.sql`, `regions.sql`, `event_types.sql` | The options of the filter's menus, counted under the rest of the filter | yes, except each menu's own choice (regions: listed for the chosen country) |
 | `date_range.sql` | The first and last event, the custom calendar's limits | no |
 
@@ -222,7 +222,7 @@ The examples run on the 8 events of `tests/support/dashboard_data.py`, chosen fo
 | us0007 | 2024-03-10 08:00:00 | 3.0 | United States | Alaska | deleted |
 | us0008 | 2024-04-02 10:00:00 | 1.0 | United States | Alaska | quarry blast |
 
-The filter is the default (no limits, deleted events left out, per month, `top_n` 10, `significant_magnitude` 4.5) except where an example says otherwise.
+The filter is the default (no limits, deleted events left out, per month, `top_n` 10, `significant_magnitude` 4.5, `significant_n` 10, every event whether flagged for tsunami or not) except where an example says otherwise.
 
 ### The headline numbers
 
@@ -317,20 +317,20 @@ Per ISO week, from Monday. Weeks without events are listed with 0, so a chart's 
 
 <!-- replay: dashboard significant -->
 
-| key | event_ts | magnitude | place | country | depth_km | url |
-| --- | --- | --- | --- | --- | --- | --- |
-| us0006 | 2024-03-10 23:00:00 | 5.2 | place 6 | Japan | 10.0 | https://earthquake.usgs.gov/earthquakes/eventpage/ak0001 |
-| us0003 | 2024-02-29 12:00:00 | 4.5 | place 3 | Mexico | 10.0 | https://earthquake.usgs.gov/earthquakes/eventpage/ak0001 |
+| key | event_ts | magnitude | place | country | depth_km | url | longitude | latitude | event_time_ms | title | review_status | tsunami |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| us0006 | 2024-03-10 23:00:00 | 5.2 | place 6 | Japan | 10.0 | https://earthquake.usgs.gov/earthquakes/eventpage/ak0001 | -155.6123 | 57.4401 | 1710111600000 | M 2.4 - 86 km E of Ugashik, Alaska | reviewed | false |
+| us0003 | 2024-02-29 12:00:00 | 4.5 | place 3 | Mexico | 10.0 | https://earthquake.usgs.gov/earthquakes/eventpage/ak0001 | -155.6123 | 57.4401 | 1709208000000 | M 2.4 - 86 km E of Ugashik, Alaska | reviewed | false |
 
-`largest.sql`: the strongest, here at 1.0 and above with `top_n = 3`; equal magnitudes would be newest first.
+`largest.sql`: the strongest, here at 1.0 and above with `significant_n = 3`; equal magnitudes would be newest first.
 
-<!-- replay: dashboard largest significant_magnitude=1.0 top_n=3 -->
+<!-- replay: dashboard largest significant_magnitude=1.0 significant_n=3 -->
 
-| key | event_ts | magnitude | place | country | depth_km | url |
-| --- | --- | --- | --- | --- | --- | --- |
-| us0006 | 2024-03-10 23:00:00 | 5.2 | place 6 | Japan | 10.0 | https://earthquake.usgs.gov/earthquakes/eventpage/ak0001 |
-| us0003 | 2024-02-29 12:00:00 | 4.5 | place 3 | Mexico | 10.0 | https://earthquake.usgs.gov/earthquakes/eventpage/ak0001 |
-| us0002 | 2024-02-29 00:00:00 | 2.5 | place 2 | United States | 10.0 | https://earthquake.usgs.gov/earthquakes/eventpage/ak0001 |
+| key | event_ts | magnitude | place | country | depth_km | url | longitude | latitude | event_time_ms | title | review_status | tsunami |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| us0006 | 2024-03-10 23:00:00 | 5.2 | place 6 | Japan | 10.0 | https://earthquake.usgs.gov/earthquakes/eventpage/ak0001 | -155.6123 | 57.4401 | 1710111600000 | M 2.4 - 86 km E of Ugashik, Alaska | reviewed | false |
+| us0003 | 2024-02-29 12:00:00 | 4.5 | place 3 | Mexico | 10.0 | https://earthquake.usgs.gov/earthquakes/eventpage/ak0001 | -155.6123 | 57.4401 | 1709208000000 | M 2.4 - 86 km E of Ugashik, Alaska | reviewed | false |
+| us0002 | 2024-02-29 00:00:00 | 2.5 | place 2 | United States | 10.0 | https://earthquake.usgs.gov/earthquakes/eventpage/ak0001 | -155.6123 | 57.4401 | 1709164800000 | M 2.4 - 86 km E of Ugashik, Alaska | reviewed | false |
 
 ### A filtered map
 
@@ -338,10 +338,10 @@ Per ISO week, from Monday. Weeks without events are listed with 0, so a chart's 
 
 <!-- replay: dashboard map_points start_time="2024-02-29" end_time="2024-03-01" -->
 
-| key | longitude | latitude | depth_km | magnitude | event_time_ms | place | title | url | review_status |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| us0002 | -155.6123 | 57.4401 | 10.0 | 2.5 | 1709164800000 | place 2 | M 2.4 - 86 km E of Ugashik, Alaska | https://earthquake.usgs.gov/earthquakes/eventpage/ak0001 | reviewed |
-| us0003 | -155.6123 | 57.4401 | 10.0 | 4.5 | 1709208000000 | place 3 | M 2.4 - 86 km E of Ugashik, Alaska | https://earthquake.usgs.gov/earthquakes/eventpage/ak0001 | reviewed |
+| key | longitude | latitude | depth_km | magnitude | event_time_ms | place | title | url | review_status | tsunami |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| us0002 | -155.6123 | 57.4401 | 10.0 | 2.5 | 1709164800000 | place 2 | M 2.4 - 86 km E of Ugashik, Alaska | https://earthquake.usgs.gov/earthquakes/eventpage/ak0001 | reviewed | false |
+| us0003 | -155.6123 | 57.4401 | 10.0 | 4.5 | 1709208000000 | place 3 | M 2.4 - 86 km E of Ugashik, Alaska | https://earthquake.usgs.gov/earthquakes/eventpage/ak0001 | reviewed | false |
 
 ### The map with too many events to draw one by one
 
@@ -357,21 +357,21 @@ Above 25,000 filtered events the page draws cells instead of `map_points.sql`'s 
 
 <!-- replay: dashboard map_strong strong_magnitude=4.5 -->
 
-| key | longitude | latitude | depth_km | magnitude | event_time_ms | place | title | url | review_status |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| us0003 | -155.6123 | 57.4401 | 10.0 | 4.5 | 1709208000000 | place 3 | M 2.4 - 86 km E of Ugashik, Alaska | https://earthquake.usgs.gov/earthquakes/eventpage/ak0001 | reviewed |
-| us0006 | -155.6123 | 57.4401 | 10.0 | 5.2 | 1710111600000 | place 6 | M 2.4 - 86 km E of Ugashik, Alaska | https://earthquake.usgs.gov/earthquakes/eventpage/ak0001 | reviewed |
+| key | longitude | latitude | depth_km | magnitude | event_time_ms | place | title | url | review_status | tsunami |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| us0003 | -155.6123 | 57.4401 | 10.0 | 4.5 | 1709208000000 | place 3 | M 2.4 - 86 km E of Ugashik, Alaska | https://earthquake.usgs.gov/earthquakes/eventpage/ak0001 | reviewed | false |
+| us0006 | -155.6123 | 57.4401 | 10.0 | 5.2 | 1710111600000 | place 6 | M 2.4 - 86 km E of Ugashik, Alaska | https://earthquake.usgs.gov/earthquakes/eventpage/ak0001 | reviewed | false |
 
 Once zoomed in, `map_area.sql` gives the events in `map_view`'s area (edges included; an `east` above 180 wraps across the antimeridian) one by one, in place of the cells, leaving out the strong ones. Here the area around Alaska, from 1 March 2024:
 
 <!-- replay: dashboard map_area start_time="2024-03-01" west=-160 south=50 east=-150 north=60 -->
 
-| key | longitude | latitude | depth_km | magnitude | event_time_ms | place | title | url | review_status |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| us0004 | -155.6123 | 57.4401 | 10.0 | NULL | 1709251200000 | place 4 | M 2.4 - 86 km E of Ugashik, Alaska | https://earthquake.usgs.gov/earthquakes/eventpage/ak0001 | reviewed |
-| us0005 | -155.6123 | 57.4401 | 10.0 | -0.43 | 1709532000000 | place 5 | M 2.4 - 86 km E of Ugashik, Alaska | https://earthquake.usgs.gov/earthquakes/eventpage/ak0001 | reviewed |
-| us0006 | -155.6123 | 57.4401 | 10.0 | 5.2 | 1710111600000 | place 6 | M 2.4 - 86 km E of Ugashik, Alaska | https://earthquake.usgs.gov/earthquakes/eventpage/ak0001 | reviewed |
-| us0008 | -155.6123 | 57.4401 | 10.0 | 1.0 | 1712052000000 | place 8 | M 2.4 - 86 km E of Ugashik, Alaska | https://earthquake.usgs.gov/earthquakes/eventpage/ak0001 | reviewed |
+| key | longitude | latitude | depth_km | magnitude | event_time_ms | place | title | url | review_status | tsunami |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| us0004 | -155.6123 | 57.4401 | 10.0 | NULL | 1709251200000 | place 4 | M 2.4 - 86 km E of Ugashik, Alaska | https://earthquake.usgs.gov/earthquakes/eventpage/ak0001 | reviewed | false |
+| us0005 | -155.6123 | 57.4401 | 10.0 | -0.43 | 1709532000000 | place 5 | M 2.4 - 86 km E of Ugashik, Alaska | https://earthquake.usgs.gov/earthquakes/eventpage/ak0001 | reviewed | false |
+| us0006 | -155.6123 | 57.4401 | 10.0 | 5.2 | 1710111600000 | place 6 | M 2.4 - 86 km E of Ugashik, Alaska | https://earthquake.usgs.gov/earthquakes/eventpage/ak0001 | reviewed | false |
+| us0008 | -155.6123 | 57.4401 | 10.0 | 1.0 | 1712052000000 | place 8 | M 2.4 - 86 km E of Ugashik, Alaska | https://earthquake.usgs.gov/earthquakes/eventpage/ak0001 | reviewed | false |
 
 `depth_bins.sql` counts the same events for the depth chart, per 0.1 magnitude (`magnitude_from <= magnitude < magnitude_from + 0.1`) by 5 km; events without a magnitude are left out.
 
