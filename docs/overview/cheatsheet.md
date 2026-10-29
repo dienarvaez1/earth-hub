@@ -180,7 +180,7 @@ Only while `make mode` says `direct`. The hourly rounds (a Cloudflare cron trigg
 | `/eh-mode once` | `make direct-once` ⚠ | One direct round from your machine (and catch-up if due) |
 | `/eh-mode run` | `make direct-run` ⚠ | Direct mode from your machine until Ctrl-C: a round a minute instead of an hour. Not while the schedule is on |
 | `/eh-mode runs` | `make direct-runs [LIMIT=20]` | Direct mode's audit trail: each execution's status, who started it (Cloudflare trigger, GitHub schedule or by hand, `direct-run`, local), the mode, messages by part and outcome, elapsed time (read-only) |
-| | `gh run list --workflow watchdog.yml --limit 3` | The watchdog, every 3 hours: it fails, and GitHub e-mails, when no `direct.yml` run started for 2 hours ([CI](../technical/ci.md#the-watchdog)) |
+| | `gh run list --workflow watchdog.yml --limit 3` | The watchdog, hourly: it fails, and GitHub e-mails, when no `direct.yml` run started for 2 hours ([CI](../technical/ci.md#the-watchdog)) |
 | `/eh-mode catchup` | `make catchup-now` ⚠ | Catch up now: a direct round with the day feed, the month feed and the deletions, whether due or not |
 | `/eh-mode reconcile` | `make reconcile-direct [DEEP=1]` | Rows, manifest, snapshot, ID map and log agree, read-only ([direct mode](../technical/architecture.md#direct-mode)) |
 | `/eh-r2 count` | `make r2-get KEY=analytics/meta.json \| jq '{run_id, written_at, rows}'` | Rows in the bucket now (PostgreSQL falls behind until `make mode-full`) |
