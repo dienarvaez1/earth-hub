@@ -82,6 +82,8 @@ The dashboard's Worker (`dashboard/src/worker.ts`) has two cron triggers in `das
 
 To set it up, once, then again before the token expires: run `make trigger-token` in a terminal (`scripts/trigger_token.py`), then `make dashboard-deploy` the first time.
 
+**To check the stored token now** (REQ-CI-010): `make trigger-check`. A Worker secret cannot be read back, so it asks the Worker: `scripts/trigger_check.py` runs it on Cloudflare with the deployed Worker's secrets (`wrangler dev --remote --test-scheduled`, a preview that leaves the deployed Worker alone) and fires its scheduled handler with the "cron" `check`, which no deployed trigger has. The handler reads `direct.yml` with the token, as the daily expiry check does, starts nothing, and logs `trigger check: OK, GitHub accepts the token for direct.yml (N days left)`; a refused or missing token fails it. The token never leaves Cloudflare. It needs `npx wrangler login`.
+
 1. It opens GitHub's form for a fine-grained token with its name, description and **Actions: Read and write** filled in; you pick repository access (only `earth-hub`) and the expiry, and note the date: rounds stop when it passes.
 2. It reads the token without showing it and checks it can see `direct.yml` (a read, which starts nothing): a token GitHub refuses, or one without access to the repository, is not stored.
 3. It stores it as the Worker's `GITHUB_TOKEN` secret through `wrangler secret put`'s standard input: never printed, written to a file or put on a command line.

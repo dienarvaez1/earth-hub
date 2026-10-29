@@ -16,8 +16,8 @@ search engines).
 | `build` | `make dashboard-build` (writes `dashboard/dist`, with `third-party-licenses.txt`) |
 | `test` | `make test-dashboard`: the page in Chromium against a simulated R2, offline (~3–6 min) |
 | `deployments` | `cd dashboard && npx --no-install wrangler deployments list 2>&1 \| grep -v '@'` (needs `npx wrangler login` once) |
-| `deploy` | `make dashboard-deploy` (the page, the Worker and its cron trigger, `17 * * * *`) |
-| `trigger` | `cd dashboard && npx --no-install wrangler secret list 2>&1 \| grep -v '@'` (`GITHUB_TOKEN` listed, never its value), `make -s direct-runs LIMIT=3` (the latest rounds, `cloudflare-trigger`), and `gh run list --workflow direct.yml --limit 5`. Its live log: `cd dashboard && npx --no-install wrangler tail earth-hub --format json` in the background over the next :17 (`trigger: direct round started`, or GitHub's refusal) |
+| `deploy` | `make dashboard-deploy` (the page, the Worker and its cron triggers, `17 * * * *` and `41 5 * * *`) |
+| `trigger` | `make -s trigger-check 2>&1 \| grep -v '@' \| tail -1` (on Cloudflare, with the deployed token: `trigger check: OK … (N days left)`, or why not; starts nothing), `cd dashboard && npx --no-install wrangler secret list 2>&1 \| grep -v '@'` (`GITHUB_TOKEN` listed, never its value), `make -s direct-runs LIMIT=3` (the latest rounds, `cloudflare-trigger`), and `gh run list --workflow direct.yml --limit 5`. Its live log: `cd dashboard && npx --no-install wrangler tail earth-hub --format json` in the background over the next :17 (`trigger: direct round started`, or GitHub's refusal) |
 
 (In the table `\|` is a pipe; run it as `|`.)
 

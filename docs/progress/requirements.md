@@ -262,6 +262,7 @@ The scenarios from Milestone 5 of the plan, verified through the API on the whol
 | REQ-CI-007 | Once a day (the 08:17 UTC trigger) the Worker reads the token's expiry from GitHub's reply and passes the days left to the workflow; its token job, with no secrets, fails within 14 days, so GitHub e-mails the token's owner to run `make trigger-token`, while the round still runs; the Worker logs a warning too, and `make trigger-token` prints the new token's expiry |
 | REQ-CI-008 | CI runs the regression in parallel parts: the layers that need Docker in one job, the dashboard layer split in two shards that together run each of its tests once; the check a merge requires merges the parts' results, traces and coverage and checks traceability over all of them, runs unless the run was cancelled, and fails when a part, or a shard of one, failed or never reported |
 | REQ-CI-009 | A watchdog workflow, the repository's only schedule (every 3 hours), fails when no `direct.yml` run was started in the last 2 hours, saying to check the trigger and its token; it holds no secrets and its token can only read the repository and its Actions runs |
+| REQ-CI-010 | `make trigger-check` says whether the Worker's deployed GitHub token works, without starting anything: it runs the Worker on Cloudflare with its deployed secrets and fires the handler's `check`, which reads `direct.yml` with the token and logs the days left; a refused or missing token fails it. The token never leaves Cloudflare, and no deployed trigger and no HTTP path reaches the check |
 
 ## Documentation
 

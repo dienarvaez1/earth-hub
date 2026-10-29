@@ -203,6 +203,7 @@ Only while `make mode` says `direct`. The hourly rounds (a Cloudflare cron trigg
 | `/eh-dashboard trigger` | `cd dashboard && npx --no-install wrangler secret list` and `make direct-runs LIMIT=3` | The hourly trigger: its token stored (never shown), and the latest rounds it started |
 | | `make dashboard-install` | Once: Node dependencies and the test browser |
 | | `make trigger-token` ⚠ | The hourly trigger's GitHub token: opens GitHub's form, checks the token you paste (never shown), stores it on the Worker, prints its expiry; run it in a terminal, again before the token expires: GitHub e-mails you from 14 days before ([CI](../technical/ci.md#the-trigger)) |
+| | `make trigger-check` | Whether the Worker's deployed token works now: asks GitHub with it, on Cloudflare, and prints `OK … (N days left)`; starts nothing, and the token never leaves Cloudflare |
 
 ## 11. Containers and logs: watching it run
 
