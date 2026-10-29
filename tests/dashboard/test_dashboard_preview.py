@@ -50,11 +50,26 @@ def test_the_footer_links_to_the_licenses(dash):
     assert link.get_attribute("href") == NOTICES
 
 
+def git(*args: str) -> str:
+    return subprocess.run(
+        ["git", *args], cwd=DASHBOARD, capture_output=True, text=True
+    ).stdout.strip()
+
+
 @pytest.mark.req("REQ-DASH-032")
-def test_the_footer_links_to_the_project_on_github(dash):
+def test_the_footer_shows_the_build_and_links_to_it_on_github(dash):
+    # The page was built from this checkout (the `built` fixture): git describes the same.
+    repo = "https://github.com/dienarvaez1/earth-hub"
+    described = git("describe", "--tags", "--always", "--dirty")
     link = dash.page.locator("footer a#source")
-    assert link.is_visible() and link.inner_text() == "Earth-Hub on GitHub"
-    assert link.get_attribute("href") == "https://github.com/dienarvaez1/earth-hub"
+    assert link.is_visible() and link.inner_text() == described
+    expected = (
+        f"{repo}/releases/tag/{described}"
+        if re.fullmatch(r"v\d+\.\d+\.\d+", described)
+        else f"{repo}/commit/{git('rev-parse', 'HEAD')}"
+    )
+    assert link.get_attribute("href") == expected
+    assert link.get_attribute("title") == "Earth-Hub on GitHub"
     assert link.get_attribute("rel") == "noopener"
 
 

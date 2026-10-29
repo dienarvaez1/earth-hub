@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -61,6 +62,38 @@ function notices(): Plugin {
   };
 }
 
+// The footer's version, from git when the page is built: `git describe --tags --always --dirty`,
+// so v1.0.0 for a tagged build, v1.0.0-4-g790aa4b four commits after it (just the commit with
+// no tags, as in CI's shallow checkout). A tag links to its release, anything else to its
+// commit; without git, the project itself.
+const REPO_URL = "https://github.com/dienarvaez1/earth-hub";
+const TAG = /^v\d+\.\d+\.\d+$/;
+
+function git(...args: string[]): string {
+  return execFileSync("git", args, { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
+}
+
+export function build(): { text: string; url: string } {
+  try {
+    const text = git("describe", "--tags", "--always", "--dirty");
+    const url = TAG.test(text) ? `${REPO_URL}/releases/tag/${text}` : `${REPO_URL}/commit/${git("rev-parse", "HEAD")}`;
+    return { text, url };
+  } catch {
+    return { text: "Earth-Hub on GitHub", url: REPO_URL };
+  }
+}
+
+function version(): Plugin {
+  const { text, url } = build();
+  return {
+    name: "earth-hub-version",
+    transformIndexHtml: {
+      order: "pre",
+      handler: (html) => html.replaceAll("%EARTH_HUB_BUILD_URL%", url).replaceAll("%EARTH_HUB_BUILD%", text),
+    },
+  };
+}
+
 // The page only: src/worker.ts is built by wrangler.
 export default defineConfig({
   build: {
@@ -69,6 +102,6 @@ export default defineConfig({
     chunkSizeWarningLimit: 2000,
     license: { fileName: LIST },
   },
-  plugins: [notices()],
+  plugins: [notices(), version()],
   server: { fs: { allow: [".."] } }, // the SQL files live in dashboard/queries
 });
