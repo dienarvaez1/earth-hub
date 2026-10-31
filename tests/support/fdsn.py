@@ -6,7 +6,10 @@ Measured against the real service (2026-10-17):
 - a query matching more than 20,000 events is refused with 400;
 - includedeleted is false, true or only, and /count honours it the same way as /query;
 - query?eventid=X answers one GeoJSON Feature, found by any of its IDs, or 404 (also for a
-  deleted event unless includedeleted is true or only).
+  deleted event unless includedeleted is true or only);
+- a deletion can keep no `id`, `time`, `updated` or `ids`, only its products' `code` and
+  `updateTime` (tx2026pfurqq, 2026-10-30): no search by time returns it, a lookup by that code
+  does (DEF-066).
 """
 
 import copy
@@ -18,6 +21,12 @@ from urllib.parse import parse_qs
 import httpx
 
 CAP = 20_000
+
+
+def _codes(event: dict) -> list[str]:
+    """The `code` of each of an event's products, as USGS lists them."""
+    products = event["properties"].get("products") or {}
+    return [p["code"] for kind in products.values() for p in kind if p.get("code")]
 
 
 def _seconds(value: str) -> int:
@@ -41,7 +50,10 @@ class FdsnServer:
 
     def put(self, *events: dict) -> None:
         for event in events:
-            self._events[event["id"]] = copy.deepcopy(event)
+            # A deletion USGS kept no `id` for is known by its products' code (DEF-066), or by
+            # nothing at all (REQ-BF-014): then only a search by time finds it.
+            key = event["id"] or next(iter(_codes(event)), f"(no id #{len(self._events)})")
+            self._events[key] = copy.deepcopy(event)
 
     def matching(self, params: dict[str, str]) -> list[dict]:
         start = _seconds(params["starttime"]) * 1000
@@ -55,6 +67,8 @@ class FdsnServer:
             props = event["properties"]
             is_deleted = props.get("status") == "deleted"
             if deleted == "false" and is_deleted or deleted == "only" and not is_deleted:
+                continue
+            if props.get("time") is None:  # no search by time returns it, only its ID
                 continue
             if not start <= props["time"] <= end:
                 continue
@@ -97,7 +111,7 @@ class FdsnServer:
         wanted = params["eventid"]
         for event in self._events.values():
             ids = {i for i in (event["properties"].get("ids") or "").split(",") if i}
-            if wanted == event["id"] or wanted in ids:
+            if wanted == event["id"] or wanted in ids or wanted in _codes(event):
                 deleted = event["properties"].get("status") == "deleted"
                 if deleted and params.get("includedeleted", "false") == "false":
                     break

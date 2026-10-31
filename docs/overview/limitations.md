@@ -16,8 +16,8 @@ What Earth-Hub doesn't do, or does only within limits. These are deliberate trad
 ## Freshness
 
 - **Live events arrive 1–2 minutes** after USGS publishes them: the feed is regenerated every minute, and the poller waits for its `Expires` time.
-- **Revisions and outages up to 30 days** are caught up hourly, from the `all_month` feed. Anything older needs `make backfill` (`/eh-backfill`).
-- **Deletions arrive within a day,** with catch-up's daily deleted-events check. Until then, a deleted event is still served.
+- **Revisions and outages up to 30 days** are caught up hourly, from the `all_month` feed. Older revisions and additions arrive within a day, with catch-up's daily history pass over all stored history (DEF-067); an outage longer than the time since its last pass needs `make backfill` (`/eh-backfill`).
+- **Deletions arrive within a day,** with catch-up's daily deleted-events check, over all stored history. Until then, a deleted event is still served. A deletion FDSN keeps no time for (rare: 3 in 2026's 117,000 events) arrives only when the daily audit reaches its month, within about 5 weeks (DEF-066).
 - **The dashboard shows the last export,** not the database: `make export-r2` (`/eh-export run`) runs on demand only, with no schedule.
 
 ## Processing guarantees

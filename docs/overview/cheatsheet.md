@@ -65,7 +65,7 @@ Always send a User-Agent: `UA="earth-hub (manual check)"`.
 | `/eh-poller health` | `docker compose exec -T poller python -m earth_hub.healthcheck poller` | 0 if a round succeeded within 3 poll intervals |
 | `/eh-backfill 2026-01-01` | `make backfill-full START=2026-01-01 [END=2026-06-01]` ⚠ | History from FDSN in full mode, in one command: starts the pipeline, backfills (one week per request; re-runs skip finished weeks), waits for the consumer, reconciles, exports to R2 for the dashboard. Refused in direct mode |
 | | `make backfill START=… [END=…]` ⚠ | The backfill alone, without the waiting, the reconcile and the export |
-| `/eh-backfill catchup` | `make catchup-once` ⚠ | One `all_month` pass and one deleted-events check (full mode) |
+| `/eh-backfill catchup` | `make catchup-once` ⚠ | One `all_month` pass, deleted-events check, history pass and audit (full mode) |
 | `/eh-mode catchup` | `make catchup-now` ⚠ | The same in whichever mode writes the bucket; in direct mode a round with the day feed too |
 | `/eh-backfill progress` | `docker compose exec -T postgres psql -U earth_hub_app earth_hub -c "SELECT job, status, count(*), sum(fetched), sum(rejected) FROM backfill_windows GROUP BY 1, 2"` | Which weeks are done, and the features dropped before Kafka |
 | `/eh-status reconcile` | `make reconcile` | Every Kafka message has a database row; 5 invariants hold |

@@ -12,7 +12,7 @@ flowchart TB
 
     subgraph docker["full mode: Docker Compose"]
         poller["poller<br/>all_day, every minute"]
-        catchup["catchup<br/>all_month hourly,<br/>deletions daily"]
+        catchup["catchup<br/>all_month hourly,<br/>deletions, history<br/>and audit daily"]
         backfill["make backfill<br/>(on the host),<br/>one week per request"]
         raw[["earthquakes.raw"]]
         bf[["earthquakes.backfill"]]
@@ -75,7 +75,7 @@ Each arrow is the only way data moves between those two parts:
 | `poller` | `make ingest` | Live feed → `earthquakes.raw` | a successful round within 3 poll intervals |
 | `consumer` | `make ingest` | `earthquakes.raw` → PostgreSQL, one message at a time | heartbeat |
 | `consumer-backfill` | `make ingest` | `earthquakes.backfill` → PostgreSQL, in batches of up to `CONSUMER_BATCH_SIZE` (500) | heartbeat |
-| `catchup` | `make ingest` | `all_month` hourly and deleted events daily → `earthquakes.backfill` | heartbeat |
+| `catchup` | `make ingest` | `all_month` hourly; deleted events, the history pass and the audit daily → `earthquakes.backfill` | heartbeat |
 | `exporter` | `make ingest` | PostgreSQL → R2 through the API, as the bucket's owner, then direct mode's state ([the standby](#the-standby)); stops (exit 0) when the bucket is not full mode's or another host owns it | |
 | `api` | `make api` | The REST API on port 8000 | `/api/v1/health` |
 | `kafka-ui` | `make kafka-ui` | A read-only web viewer for the topics, on port 8080 | |
@@ -106,7 +106,7 @@ The poller (`src/earth_hub/ingestion/`) fetches the USGS `all_day` feed and publ
 ```bash
 make backfill START=2026-01-01            # 2026 up to now, one request per week
 make backfill START=2026-01-01 END=2026-06-01
-make catchup-once                         # one all_month pass and one deleted-events check
+make catchup-once                         # one all_month pass, deleted-events check, history pass and audit
 ```
 
 **With Claude Code:** `/eh-backfill 2026-01-01`, `/eh-backfill catchup`, and `/eh-backfill progress` for the finished windows.
@@ -117,7 +117,7 @@ make catchup-once                         # one all_month pass and one deleted-e
 - **Weeks are split into days** when USGS times out on them, or when they hold more than 20,000 events; a day that is still too slow is halved, down to an hour. A `504` is not retried: the gateway caches it.
 - **A final sweep** picks up events that USGS added or revised while the backfill ran.
 - **Requests go one at a time,** with a 1-second pause between them.
-- **The `catchup` service** reads the `all_month` feed hourly, which covers revisions and outages of up to 30 days, and checks FDSN daily for deleted events.
+- **The `catchup` service** reads the `all_month` feed hourly, which covers revisions and outages of up to 30 days. Three daily checks (`DELETED_CHECK_INTERVAL_SECONDS`) cover all stored history, from the oldest stored event's month (at least the last year): the **deleted-events check** (FDSN events marked deleted since its last run); the **history pass** (events USGS added or revised since its last pass, which the month feed's 30 days miss, DEF-067); and the **audit**, one month of stored history a day in turn, which compares per UTC day how many events USGS lists with how many are stored, and on a day that differs looks up by ID the stored events USGS no longer lists (at most 50 a day). USGS can delete an event so thoroughly that FDSN keeps no `id`, `time` or `updated` for it, only its products' `code` and `updateTime`; no search by time returns it. For such a deletion the audit publishes an ordinary one, built from the stored event (its time, geometry, type and place) with the product `code` as its ID and the latest `updateTime` as its `updated`, USGS's products kept (`ingestion/history.py`, DEF-066). Direct mode runs the same checks in its rounds.
 - **Both publish to `earthquakes.backfill`,** and only events that are new or newer than what is stored. A year of history (139,579 events) goes through in about 42 seconds.
 
 ## Topics and consumer groups
@@ -343,14 +343,14 @@ The other checks compare Earth-Hub with itself: `make reconcile` Kafka with Post
 | Difference | Pending (explained) when | Otherwise |
 | --- | --- | --- |
 | USGS has the event, Earth-Hub doesn't (`missing`) | USGS updated it after that source was last read | unexplained |
-| Earth-Hub has it, USGS deleted it (`deleted at USGS`) | USGS deleted it after the last deleted-events check | unexplained |
+| Earth-Hub has it, USGS deleted it (`deleted at USGS`) | USGS deleted it after the last deleted-events check; for a deletion FDSN kept no time for, after the audit last covered the event's month (or it has not yet) | unexplained |
 | Both have it, USGS's revision is newer (`older revision`) | USGS revised it after that source was last read | unexplained |
 | Earth-Hub has it deleted, USGS lists it (`deleted here`) | USGS revised it after the deletion and after that source was read | unexplained |
 | Earth-Hub has it, FDSN lists it without an origin at the revision Earth-Hub holds (`no origin at FDSN`) | always (`explained`, not pending): FDSN's search by time leaves out an event with no origin, which the summary feeds still list with one (DEF-064) | unexplained when FDSN's revision is newer: USGS dropped the origin |
 | Earth-Hub has it, USGS has never heard of it, or its search by time leaves it out (`unknown at USGS`) | never | unexplained |
 | USGS lists apart two events Earth-Hub merged into one record (`split at USGS`) | never: Earth-Hub never splits a record | unexplained |
 
-- **The source that brings an event** is the day feed for events of the 24 hours before it was last read, and catch-up's month feed for older ones; deletions come only from the deleted-events check. A feed counts as read when USGS generated the newest copy of it Earth-Hub processed (`metadata.generated`, in every message's envelope as `feed_generated_ms`), since that is what its content is as of. The feed is fetched up to a minute after it was generated, and the round ends a minute or two later. Taking either of those as the read reported updates in between as missed (DEF-054). In full mode the times are the newest among `raw_events`' feed and catch-up messages; in direct mode each round keeps them in `_state/direct.json` (`generated`, per feed). Without one, the live topic's last delivery or the last round's end stands in for the day feed, and catch-up's checkpoint for the month feed. The deleted-events check counts from its checkpoint.
+- **The source that brings an event** is the day feed for events of the 24 hours before it was last read, catch-up's month feed for the 30 days before that, and the daily history pass for anything older (DEF-067); deletions come from the deleted-events check, and those FDSN kept no time for from the audit (DEF-066). A feed counts as read when USGS generated the newest copy of it Earth-Hub processed (`metadata.generated`, in every message's envelope as `feed_generated_ms`), since that is what its content is as of. The feed is fetched up to a minute after it was generated, and the round ends a minute or two later. Taking either of those as the read reported updates in between as missed (DEF-054). In full mode the times are the newest among `raw_events`' feed and catch-up messages; in direct mode each round keeps them in `_state/direct.json` (`generated`, per feed). Without one, the live topic's last delivery or the last round's end stands in for the day feed, and catch-up's checkpoint for the month feed. The deleted-events check counts from its checkpoint.
 - **Events are matched by any of their IDs**, so a merged event counts once. One whose time USGS moved out of the window since is looked up by ID (at most 25 a run).
 - **Revision times within 60 seconds are the same revision.** For `uw` events FDSN reports `updated` 5 to 9 seconds later than the summary feeds the poller and catch-up read (measured 2026-10-21, 19 events in 3 days); without the tolerance each would look like a missed revision.
 - **One snapshot.** In full mode the events and the marks are read from PostgreSQL in one `REPEATABLE READ` transaction: read apart, a message stored in between counted its feed as read but not its event, a false `missing` (DEF-065).
@@ -469,7 +469,7 @@ sequenceDiagram
 | Consumer killed mid-stream | Uncommitted offsets are delivered again and recognized | `tests/e2e/test_scenarios.py`, `tests/integration/test_pipeline.py` |
 | Poller restarted | It rebuilds what it sent from the topic, and resends nothing | `tests/e2e/test_scenarios.py`, `tests/integration/test_ingestion.py` |
 | A message that keeps failing | After 3 attempts for a reason other than the database, it's stored with `outcome = 'error'`, so one bad message can't stall a partition | `tests/unit/test_consumer.py` |
-| An outage longer than the live feed's day | Catch-up's hourly `all_month` pass covers up to 30 days; beyond that, `make backfill` | `tests/e2e/test_backfill.py` |
+| An outage longer than the live feed's day | Catch-up's hourly `all_month` pass covers up to 30 days; beyond that, the daily history pass brings what USGS changed since its last pass, or `make backfill` | `tests/e2e/test_backfill.py` |
 | Both services restarted | The data survives | `tests/disruptive/test_outages.py`, `make smoke-restart` |
 | An export interrupted | The next run carries on from its last checkpoint; objects are named by each record's key, so they are never duplicated | `tests/unit/test_export_r2.py` |
 | A handover to full mode interrupted while replaying | The bucket stays frozen; run again, the handover sends only the log entries not yet in the topic | `tests/e2e/test_mode_handover.py` |

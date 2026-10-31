@@ -44,12 +44,14 @@ from datetime import UTC, date, datetime, timedelta
 from datetime import time as clock
 from pathlib import Path
 
+from earth_hub.ingestion import history
 from earth_hub.validation.earthquake_rules import review_status
 
 logger = logging.getLogger(__spec__.name)  # the module name, also under `python -m`
 
 DAY = timedelta(days=1)
 DAY_FEED = timedelta(hours=24)  # what all_day lists, before the moment it was read
+MONTH_FEED = timedelta(days=30)  # what all_month lists, before the moment it was read
 LOOKUPS = 25  # events looked up again by ID, at most, per run
 # The same revision can carry different `updated` times: for `uw` events FDSN says 5 to 9 s later
 # than the summary feeds the poller and catch-up read (measured 2026-10-21).
@@ -69,6 +71,9 @@ class Event:
     # Whether USGS lists an `origin` product for it. FDSN's searches by time leave out an event
     # without one; its summary feeds may still list it with one (DEF-064).
     origin: bool = True
+    # A deletion FDSN kept no time for: only a lookup by ID finds it, and only the audit
+    # brings it (DEF-066).
+    timeless: bool = False
 
 
 @dataclass(frozen=True)
@@ -78,11 +83,17 @@ class Marks:
     day_feed: datetime | None
     month_feed: datetime | None
     deletions: datetime | None
+    history: datetime | None = None  # the last history pass (DEF-067)
+    audits: dict[str, datetime] = field(default_factory=dict)  # YYYY-MM -> last audited
 
     def feed_for(self, event: Event) -> tuple[str, datetime | None]:
         if self.day_feed is not None and event.time_ms >= _ms(self.day_feed - DAY_FEED):
             return "day feed", self.day_feed
-        return "month feed", self.month_feed
+        if self.month_feed is not None and event.time_ms >= _ms(self.month_feed - MONTH_FEED):
+            return "month feed", self.month_feed
+        if self.month_feed is None and self.history is None:
+            return "month feed", None
+        return "history pass", self.history  # older than the month feed lists (DEF-067)
 
 
 @dataclass
@@ -285,21 +296,7 @@ def compare(  # noqa: C901, PLR0912 (to refactor: docs/progress/plan.md)
                 report.differences.append(_left_out(mine, gone))
                 continue
         if gone is not None and gone.deleted:
-            pending = _after(gone, marks.deletions)
-            report.differences.append(
-                Difference(
-                    _day(mine.time_ms),
-                    "deleted at USGS",
-                    mine.id,
-                    pending,
-                    f"USGS deleted it at {_when(gone.updated_ms)}, "
-                    + (
-                        "after the last deleted-events check"
-                        if pending
-                        else "before the last deleted-events check"
-                    ),
-                )
-            )
+            report.differences.append(_deleted_at_usgs(mine, gone, marks))
             continue
         report.differences.append(
             Difference(
@@ -312,6 +309,28 @@ def compare(  # noqa: C901, PLR0912 (to refactor: docs/progress/plan.md)
             report.days.setdefault(_day(mine.time_ms), {"usgs": 0, "ours": 0})["ours"] += 1
     report.differences.sort(key=lambda d: (d.day, d.kind, d.event_id))
     return report
+
+
+def _deleted_at_usgs(mine: Event, gone: Event, marks: Marks) -> Difference:
+    """Earth-Hub has it, USGS deleted it: pending if the source that brings the deletion was
+    last read before USGS deleted it."""
+    if gone.timeless:  # only the audit, a month at a time, brings it (DEF-066)
+        month = _day(mine.time_ms)[:7]
+        mark, read = marks.audits.get(month), f"the audit last covered {month}"
+        if mark is None:
+            read = f"the audit covered {month}"  # not yet: pending
+    else:
+        mark, read = marks.deletions, "the last deleted-events check"
+    pending = _after(gone, mark)
+    return Difference(
+        _day(mine.time_ms),
+        "deleted at USGS",
+        mine.id,
+        pending,
+        f"USGS deleted it at {_when(gone.updated_ms)}"
+        + (", keeping no time for it," if gone.timeless else ",")
+        + (f" after {read}" if pending else f" before {read}"),
+    )
 
 
 def _left_out(mine: Event, gone: Event) -> Difference:
@@ -347,6 +366,10 @@ def from_feature(feature: dict) -> Event | None:
     event_id = feature.get("id") or ""
     ids = frozenset(i for i in (props.get("ids") or "").split(",") if i)
     if not event_id and not ids:
+        found = history.without_time(feature)  # named only by its products (DEF-066)
+        if found is not None:
+            code, deleted_ms = found
+            return Event(code, frozenset({code}), 0, deleted_ms, True, timeless=True)
         return None  # a deletion that names no event (REQ-BF-014)
     if not isinstance(props.get("time"), int) or not isinstance(props.get("updated"), int):
         return None
@@ -444,7 +467,18 @@ def from_postgres(engine, live_topic: str) -> tuple[list[Event], Marks]:
         _from_ms(generated.get("feed")) or delivered,
         _from_ms(generated.get("catchup")) or checkpoints.get("catchup"),
         checkpoints.get("deleted"),
+        checkpoints.get("revised"),
+        _audits(checkpoints),
     )
+
+
+def _audits(checkpoints: dict) -> dict[str, datetime]:
+    """When the audit last covered each month: its checkpoints `audit:YYYY-MM`."""
+    return {
+        name.removeprefix("audit:"): value
+        for name, value in checkpoints.items()
+        if name.startswith("audit:") and value is not None
+    }
 
 
 def from_bucket(bucket) -> tuple[list[Event], Marks, datetime | None]:
@@ -475,6 +509,8 @@ def from_bucket(bucket) -> tuple[list[Event], Marks, datetime | None]:
             parse(generated.get("feed")) or last_round,
             parse(generated.get("catchup")) or parse(checkpoints.get("catchup")),
             parse(checkpoints.get("deleted")),
+            parse(checkpoints.get("revised")),
+            _audits({name: parse(value) for name, value in checkpoints.items()}),
         ),
         last_round,
     )
@@ -490,7 +526,8 @@ def print_report(report: Report, marks: Marks, where: str, by: str = "day") -> N
     print(f"Earth-Hub ({where}) against USGS, by UTC {by} of the event")
     print(
         f"  last read (as USGS generated it): day feed {show(marks.day_feed)}, "
-        f"month feed {show(marks.month_feed)}; deletions checked {show(marks.deletions)}"
+        f"month feed {show(marks.month_feed)}; deletions checked {show(marks.deletions)}; "
+        f"history pass {show(marks.history)}, audit {len(marks.audits)} months"
     )
     rows = by_period(report, by)
     total = {key: sum(n[key] for n in rows.values()) for key in ("usgs", "ours", *STATUSES)}
