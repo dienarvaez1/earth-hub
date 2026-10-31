@@ -37,6 +37,8 @@ Moving full mode between hosts (Milestone 9; the /eh-host skill):
 - host-claim:    on any host: the bucket in direct mode (a host whose lease expired is taken over
                  first), make up, then make mode-full, which makes this host the owner; when its
                  database is empty, or differs from the bucket, it is rebuilt from it (below).
+                 Only the handover's own comparison counts as differing (reports/handover.json):
+                 any other failure of make mode-full stops it with nothing wiped (DEF-062).
 - host-rebuild:  what wiping this host's database would lose must be nothing (`rebuild check`),
                  a backup of PostgreSQL and the topics in reports/backup/ that restores, and the
                  machine ID typed; then make reset, make up, make migrate, make mode-full
@@ -45,6 +47,7 @@ Moving full mode between hosts (Milestone 9; the /eh-host skill):
 """
 
 import argparse
+import json
 import re
 import subprocess
 import sys
@@ -55,6 +58,7 @@ from datetime import date
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
+OUTCOME = REPO / "reports" / "handover.json"  # earth_hub.direct.handover.OUTCOME, from REPO
 GROUPS = ("earth-hub-consumer", "earth-hub-consumer-backfill")
 # kafka-consumer-groups --describe: GROUP TOPIC PARTITION CURRENT-OFFSET LOG-END-OFFSET LAG ...
 LAG = 5
@@ -343,6 +347,26 @@ def _ready_to_claim(shell: Shell) -> Marker:
     return current
 
 
+def _require_differs(shell: Shell) -> None:
+    """After `make mode-full` failed: go on to the rebuild only when the handover itself found
+    PostgreSQL and the bucket different, and the bucket is back in direct mode. Any other
+    failure (a build, Compose, the check against USGS after the switch) wipes nothing (DEF-062)."""
+    try:
+        outcome = json.loads(OUTCOME.read_text())
+    except (OSError, ValueError):
+        outcome = {}
+    now = marker(shell)
+    if outcome.get("command") == "full" and outcome.get("outcome") == "switched":
+        why = f"the handover switched, then a later step failed; the bucket: {now.line}"
+    elif outcome.get("command") != "full" or outcome.get("outcome") != "differs":
+        why = outcome.get("reason") or "it stopped before the handover's comparison"
+    elif not now.line.startswith(DIRECT):
+        why = f"the bucket is not back in direct mode: {now.line}"
+    else:
+        return
+    raise Failed(f"`make mode-full` failed, not over a difference ({why}); nothing was wiped")
+
+
 def _rebuild_database(shell: Shell, machine: str, confirm: Callable[[str], bool]) -> None:
     """Check, back up, confirm, wipe, migrate: this host's database ready for a load."""
     shell.run("make", "ingest-stop")
@@ -375,7 +399,11 @@ def host_claim(
     shell.run("make", "up")
     shell.run("make", "migrate")
     code, out = shell.read("uv", "run", "python", "-m", "earth_hub.direct.rebuild", "status")
+    # `rebuild status` exits 1 when the database was read and wiping it would lose data, as
+    # `check` does: read, not empty, so the handover is tried first (DEF-060).
     empty = code == 0 and "empty" in out
+    if code == 1:
+        code = 0
     step("Hand over to full mode, this host the owner (make mode-full)")
     if code != 0 and shell.dry_run:  # PostgreSQL not started in a dry run
         print("    would run: make mode-full REBUILD=1 if this host's database is empty; else make "
@@ -389,9 +417,11 @@ def host_claim(
         _rebuild_database(shell, current.this_host, confirm)
         shell.run("make", "mode-full", "REBUILD=1")
     else:
+        OUTCOME.unlink(missing_ok=True)
         try:
             shell.run("make", "mode-full")
         except Failed:
+            _require_differs(shell)
             print("    this host's database differs from the bucket: rebuilding it from the bucket")
             _rebuild_database(shell, current.this_host, confirm)
             shell.run("make", "mode-full", "REBUILD=1")
@@ -406,10 +436,14 @@ def host_claim(
 
 
 def ask(machine: str) -> bool:
-    answer = input(
-        f"Type this host's machine ID ({machine}) to wipe its Kafka and PostgreSQL "
-        "(the backup is above): "
-    )
+    try:
+        answer = input(
+            f"Type this host's machine ID ({machine}) to wipe its Kafka and PostgreSQL "
+            "(the backup is above): "
+        )
+    except EOFError:  # no input to read (DEF-059): not typed, so nothing is wiped
+        print("\nNo answer: run it in a terminal.")
+        return False
     return answer.strip() == machine
 
 

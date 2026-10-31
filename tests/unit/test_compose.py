@@ -72,3 +72,32 @@ def test_every_target_that_starts_our_services_builds_their_image_first(services
                 starting[target] = any(" build" in earlier for earlier in lines[:i])
     assert {"ingest", "api", "mode-full"} <= set(starting)
     assert [target for target, built in starting.items() if not built] == []
+
+
+def profile_sets() -> set[frozenset[str]]:
+    """Every set of profiles a `docker compose` command in the Makefile enables, and each
+    profile alone (as a skill or a person runs it, e.g. `--profile ingest restart poller`)."""
+    text = (REPO / "Makefile").read_text()
+    used = {
+        frozenset(re.findall(r"--profile (\S+)", line))
+        for line in text.splitlines()
+        if "docker compose" in line
+    }
+    return used | {frozenset({name}) for names in used for name in names}
+
+
+@pytest.mark.req("REQ-OPS-001")
+def test_every_profile_combination_in_use_is_a_valid_project(services):
+    # DEF-061: the exporter (ingest) depended on the api (api only), so every command with only
+    # `--profile ingest` failed: "service "exporter" depends on undefined service "api"".
+    assert frozenset({"ingest"}) in profile_sets()
+    for enabled in profile_sets():
+        on = {
+            name
+            for name, service in services.items()
+            if not service.get("profiles") or enabled & set(service["profiles"])
+        }
+        for name in on:
+            needs = services[name].get("depends_on", {})
+            missing = sorted(set(needs) - on)
+            assert not missing, f"{sorted(enabled)}: {name} depends on {missing}, not enabled"

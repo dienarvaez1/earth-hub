@@ -70,6 +70,25 @@ class HandoverFailed(Exception):
     """The handover stopped; the bucket is still in the mode it was in."""
 
 
+class HandoverDiffers(HandoverFailed):
+    """Direct -> full stopped because, after the replay and with reconciliation passing, an
+    export dry run found PostgreSQL and the bucket different: the one failure a rebuild of
+    PostgreSQL from the bucket is the remedy for (scripts/modes.py, DEF-062)."""
+
+
+# What the last `handover direct|full` ended with, for scripts/modes.py, which runs it through
+# make and so cannot tell one failure from another by its exit code (DEF-062).
+OUTCOME = Path("reports/handover.json")
+
+
+def write_outcome(path: Path, command: str, outcome: str, reason: str | None = None) -> None:
+    """`outcome`: switched, differs (HandoverDiffers) or failed."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    at = iso(datetime.now(UTC))
+    record = {"command": command, "outcome": outcome, "reason": reason, "at": at}
+    path.write_text(json.dumps(record) + "\n")
+
+
 @dataclass
 class Result:
     mode: str
@@ -352,9 +371,9 @@ def to_full(
     now = clock()
     run_id = _run_id(now)
 
-    def back_to_direct(reason: str) -> None:
+    def back_to_direct(reason: str, error: type[HandoverFailed] = HandoverFailed) -> None:
         mode.write(bucket, mode.read(bucket), state=mode.ACTIVE)
-        raise HandoverFailed(f"{reason}; the bucket is back in direct mode")
+        raise error(f"{reason}; the bucket is back in direct mode")
 
     with tempfile.TemporaryDirectory() as tmp:
         runner = DirectRunner(bucket, workdir=Path(tmp))
@@ -395,7 +414,9 @@ def to_full(
     if record.status != "succeeded" or c.new or c.updated or c.deleted or c.failed:
         back_to_direct(
             f"PostgreSQL differs from the bucket: new {c.new}, updated {c.updated}, deleted "
-            f"{c.deleted}, failed {c.failed} {record.errors[:3]}"
+            f"{c.deleted}, failed {c.failed} {record.errors[:3]}",
+            # A dry run that could not read a row says nothing about whether they differ.
+            HandoverDiffers if record.status == "succeeded" and not c.failed else HandoverFailed,
         )
     result.step("an export dry run finds PostgreSQL and the bucket the same")
 
@@ -429,6 +450,19 @@ def _print_status(current: mode.Mode, machine: str) -> None:
     print(f"this host: {machine}")
 
 
+def _parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description="Show or change which mode writes the bucket.")
+    parser.add_argument("command", choices=("status", "direct", "full"))
+    parser.add_argument("--timeout", type=float, default=600, help="full: seconds to wait")
+    parser.add_argument(
+        "--rebuild", action="store_true", help="full: load an empty PostgreSQL from the bucket"
+    )
+    parser.add_argument(
+        "--outcome", type=Path, default=OUTCOME, help="direct, full: where to record the outcome"
+    )
+    return parser
+
+
 def main(argv: list[str] | None = None) -> int:  # noqa: C901 (to refactor: docs/progress/plan.md)
     import time
 
@@ -439,13 +473,7 @@ def main(argv: list[str] | None = None) -> int:  # noqa: C901 (to refactor: docs
     from earth_hub.logging_config import configure_logging
     from earth_hub.reconcile import reconcile
 
-    parser = argparse.ArgumentParser(description="Show or change which mode writes the bucket.")
-    parser.add_argument("command", choices=("status", "direct", "full"))
-    parser.add_argument("--timeout", type=float, default=600, help="full: seconds to wait")
-    parser.add_argument(
-        "--rebuild", action="store_true", help="full: load an empty PostgreSQL from the bucket"
-    )
-    args = parser.parse_args(argv)
+    args = _parser().parse_args(argv)
     configure_logging()
     settings = get_settings()
     try:
@@ -511,8 +539,11 @@ def main(argv: list[str] | None = None) -> int:  # noqa: C901 (to refactor: docs
                     rebuild=args.rebuild,
                 )
     except (HandoverFailed, mode.WrongMode, lock.LockHeld) as exc:
+        differs = isinstance(exc, HandoverDiffers)
+        write_outcome(args.outcome, args.command, "differs" if differs else "failed", str(exc))
         print(f"mode: {exc}", file=sys.stderr)
         return 1
+    write_outcome(args.outcome, args.command, "switched")
     for line in result.steps:
         print(line)
     return 0

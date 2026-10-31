@@ -20,7 +20,13 @@ from sqlalchemy import select
 from earth_hub.api.main import create_app
 from earth_hub.database.models import Earthquake, EarthquakeId, RawEvent
 from earth_hub.database.repository import IncomingMessage, process_batch
-from earth_hub.direct.handover import HandoverFailed, ReplayTopic, to_direct, to_full
+from earth_hub.direct.handover import (
+    HandoverDiffers,
+    HandoverFailed,
+    ReplayTopic,
+    to_direct,
+    to_full,
+)
 from earth_hub.direct.runner import DirectRunner
 from earth_hub.export import mode
 from earth_hub.export.bucket import Bucket
@@ -246,8 +252,9 @@ def test_a_gap_in_the_log_stops_the_handover_in_direct_mode(trip):
     phase_two(trip, trip.runner())
     gone = next(k for k in trip.bucket.keys("log/") if "000000000003-" in k)
     trip.bucket.delete([gone])
-    with pytest.raises(HandoverFailed, match="the log lacks 1 entries"):
+    with pytest.raises(HandoverFailed, match="the log lacks 1 entries") as failed:
         trip.to_full()
+    assert not isinstance(failed.value, HandoverDiffers)  # not a reason to rebuild (DEF-062)
     marker = mode.read(trip.bucket)
     assert (marker.mode, marker.state) == (mode.DIRECT, mode.ACTIVE)
     assert trip.pipeline.messages_in_topic(trip.pipeline.backfill_topic) == 0  # nothing sent
@@ -278,7 +285,7 @@ def test_a_rule_broken_in_one_mode_stops_the_handover(trip, monkeypatch):
             [trip.feature("ak1dup", status="deleted", updated=UPDATED + 62_000)], now=trip.now()
         )
     with pytest.raises(
-        HandoverFailed, match="PostgreSQL differs from the bucket: new 0, updated 1"
+        HandoverDiffers, match="PostgreSQL differs from the bucket: new 0, updated 1"
     ):
         trip.to_full()
     assert (mode.read(trip.bucket).mode, mode.read(trip.bucket).state) == (mode.DIRECT, mode.ACTIVE)
@@ -380,7 +387,9 @@ def test_the_commands_hand_over_and_back_on_the_real_wiring(
     assert handover.main(["status"]) == 0
     assert capsys.readouterr().out.startswith("full (active)")
 
-    assert handover.main(["direct"]) == 0
+    outcome = tmp_path / "handover.json"
+    assert handover.main(["direct", "--outcome", str(outcome)]) == 0
+    assert json.loads(outcome.read_text())["outcome"] == "switched"
     out = capsys.readouterr().out
     assert "direct mode from sequence 0: 2 records, 2 IDs, 2 events in the poller's state" in out
 
@@ -402,7 +411,7 @@ def test_the_commands_hand_over_and_back_on_the_real_wiring(
     consumer = threading.Thread(target=consume, daemon=True)
     consumer.start()
     try:
-        assert handover.main(["full", "--timeout", "60"]) == 0
+        assert handover.main(["full", "--timeout", "60", "--outcome", str(outcome)]) == 0
     finally:
         stop.set()
         consumer.join(timeout=30)
@@ -413,8 +422,11 @@ def test_the_commands_hand_over_and_back_on_the_real_wiring(
 
     assert handover.main(["status"]) == 0
     assert "full (active)" in capsys.readouterr().out
-    assert handover.main(["full"]) == 1  # already in full mode
+    assert handover.main(["full", "--outcome", str(outcome)]) == 1  # already in full mode
     assert "not direct" in capsys.readouterr().err
+    recorded = json.loads(outcome.read_text())
+    assert (recorded["command"], recorded["outcome"]) == ("full", "failed")
+    assert "not direct" in recorded["reason"]
 
 
 def event_envelope(feature: dict) -> dict:

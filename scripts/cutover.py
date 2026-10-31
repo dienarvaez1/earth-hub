@@ -9,6 +9,7 @@ part 3:
 1. Pre-checks, read-only: every one is run and reported, then any failure stops it.
 2. A dry run: the steps it would take (scripts/modes.py's own dry run for the claim).
 3. `Proceed with the cutover? [y/N]` (`--dry-run` stops before it; `--yes` is for the tests).
+   A real run refuses to start without a terminal, and no answer is a no (DEF-059).
 4. The steps, then checks that they did what they should.
 
 A (cutover-a): R2 reachable and the mode readable; no local `make direct-run`; direct mode's
@@ -19,7 +20,8 @@ kept). Docker or Colima itself stays up, so A can claim again later.
 B (cutover-b): uv and Docker; `.env` with the R2 settings, USGS_CONTACT and the PostgreSQL
 settings, and EARTH_HUB_MACHINE_ID (the hostname is used when empty: a warning); R2 reachable,
 the USGS feed answering; the bucket claimable (direct mode, or a lease expired; not this host's
-already, not another host's live lease); no local `make direct-run`. Then make host-claim, which
+already, not another host's live lease); no local `make direct-run`; a warning when this host's
+database is ahead of the bucket, which a rebuild would lose (DEF-060). Then make host-claim, which
 asks for the machine ID to be typed if this host's database must be wiped. After: this host owns
 the bucket with a live lease, and the pipeline's services and the exporter run.
 
@@ -101,11 +103,42 @@ def latest_round(shell: modes.Shell) -> datetime | None:
     return None
 
 
+def database_ahead(shell: modes.Shell, check: Checks) -> None:
+    """A warning when this host's database holds what the bucket lacks: the claim would then
+    refuse to rebuild it, after starting Kafka and PostgreSQL (DEF-060). Usually a revision
+    stored here since direct mode's last round, which its next round stores too."""
+    name = "this host's database is not ahead of the bucket"
+    code, out = shell.read("docker", "compose", "ps", "--status", "running", "--services")
+    if code != 0 or "postgres" not in out.split():
+        check(name, True, "PostgreSQL not running: compared during the claim")
+        return
+    code, out = shell.read("uv", "run", "python", "-m", "earth_hub.direct.rebuild", "status")
+    said = [line.strip() for line in out.splitlines() if line.startswith(("rebuild:", "  "))]
+    if code == 0:
+        check(name, True, (said[-1] if said else "").removeprefix("rebuild: "))
+    elif code == 1:
+        lost = "; ".join(line for line in said if not line.startswith("rebuild:"))
+        advice = "wait for direct mode's next round (make host-status), or keep this database"
+        check(
+            name,
+            False,
+            f"{lost}. If the claim must rebuild it, it will refuse: {advice}",
+            warn=True,
+        )
+    else:
+        check(name, False, f"could not compare: {out.strip()[-200:]}", warn=True)
+
+
 def proceed(shell: modes.Shell, ask: Callable[[str], str]) -> bool:
     if shell.dry_run:
         print("Dry run: stopping here; nothing was changed.")
         return False
-    if ask("Proceed with the cutover? [y/N] ").strip().lower() not in ("y", "yes"):
+    try:
+        answer = ask("Proceed with the cutover? [y/N] ")
+    except EOFError:  # no input to read (DEF-059): the same as no
+        print("\nNo answer: nothing was changed. Run it in a terminal.")
+        return False
+    if answer.strip().lower() not in ("y", "yes"):
         print("Not confirmed: nothing was changed.")
         return False
     return True
@@ -180,6 +213,18 @@ def cutover_a(shell: modes.Shell, ask, now: Callable[[], datetime]) -> None:
 # B: the machine taking full mode.
 
 
+def claimable(current: modes.Marker, check: Checks) -> None:
+    if current.line.startswith(modes.FULL) and current.owner == current.this_host:
+        check("not the owner already", False, f"{current.this_host} owns the bucket")
+    elif current.line.startswith(modes.FULL) and current.owner and current.lease_live:
+        check("no other host's live lease", False,
+              f"{current.owner} owns it: run make cutover-a there first")  # fmt: skip
+    elif current.line.startswith(modes.FULL) and not current.owner:
+        check("full mode has an owner", False, "release it on the host that runs it")
+    else:
+        check("the bucket can be claimed", True, current.line)
+
+
 def cutover_b(shell: modes.Shell, ask, env: dict[str, str]) -> None:
     print("1. Pre-checks (read-only)")
     check = Checks()
@@ -202,15 +247,9 @@ def cutover_b(shell: modes.Shell, ask, env: dict[str, str]) -> None:
     check("the USGS feed answers", code == 0 and out.strip() in ("200", "304"), out.strip()[-80:])
     no_direct_run(shell, check)
     if current is not None:
-        if current.line.startswith(modes.FULL) and current.owner == current.this_host:
-            check("not the owner already", False, f"{current.this_host} owns the bucket")
-        elif current.line.startswith(modes.FULL) and current.owner and current.lease_live:
-            check("no other host's live lease", False,
-                  f"{current.owner} owns it: run make cutover-a there first")  # fmt: skip
-        elif current.line.startswith(modes.FULL) and not current.owner:
-            check("full mode has an owner", False, "release it on the host that runs it")
-        else:
-            check("the bucket can be claimed", True, current.line)
+        claimable(current, check)
+    if docker:
+        database_ahead(shell, check)
     check.done()
 
     print("2. Dry run (make host-claim DRY_RUN=1)")
@@ -247,6 +286,11 @@ def main(argv: list[str] | None = None, shell=None, ask=input, env=None, now=Non
     shell = shell or modes.Shell()
     shell.dry_run = shell.dry_run or args.dry_run
     answer = (lambda _: "y") if args.yes else ask
+    if not shell.dry_run and answer is input and not sys.stdin.isatty():
+        # It asks before it changes anything (and the claim for a typed machine ID): a prompt
+        # with no terminal behind it (`! make cutover-b`, a pipe) reads nothing (DEF-059).
+        print("Not started: run this in a terminal; it asks before it changes anything.")
+        return 2
     try:
         if args.machine == "a":
             cutover_a(shell, answer, now or (lambda: datetime.now(UTC)))

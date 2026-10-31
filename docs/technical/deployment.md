@@ -39,7 +39,7 @@ A runs full mode, or no machine does (the hourly rounds write the bucket); B is 
 3. **`Proceed with the cutover? [y/N]`**. Nothing changes unless the answer is yes. With `DRY_RUN=1` the command stops before the question: it is safe to run any time.
 4. **The steps**, then checks that they did what they should.
 
-Run both in a terminal: they ask for confirmation, and `make cutover-b` may ask for B's machine ID to be typed (below).
+Run both in a terminal: they ask for confirmation, and `make cutover-b` may ask for B's machine ID to be typed (below). Without a terminal (Claude Code's `!` prefix, a pipe) a real run refuses to start; a dry run works anywhere (DEF-059).
 
 ### On A
 
@@ -71,12 +71,13 @@ Run both in a terminal: they ask for confirmation, and `make cutover-b` may ask 
    | The USGS feed answers | no network, or USGS is down |
    | No `make direct-run` on this machine | as on A |
    | The bucket can be claimed | B owns it already; another machine owns it with a live lease (run `make cutover-a` there first); full mode with no owner |
+   | B's database is not ahead of the bucket | a warning only, when PostgreSQL runs on B: it holds an event or revision the bucket lacks, which a rebuild would lose, so the claim would refuse to rebuild it. Usually a revision B's own pipeline stored since the last hourly round: wait for the next round, and `make host-status` shows when it is gone (DEF-060) |
 
    The dry run is `make host-claim DRY_RUN=1`'s: start Kafka and PostgreSQL, hand over to full mode, wait for the consumers, `make reconcile`. It takes a minute or two, as comparing B's database with the bucket downloads the snapshot.
 3. `make cutover-b`, and answer `y`. It runs `make host-claim`, a few minutes:
    - Kafka and PostgreSQL start and are migrated;
    - the bucket is frozen (the hourly rounds pause);
-   - B's database is loaded from the bucket when it is empty, about 115,000 records. If it holds data that differs from the bucket, as on a machine that ran full mode before, it is rebuilt instead: `rebuild check` must find nothing the bucket lacks, a backup goes to `reports/backup/<time>/` and is checked to restore, and you type B's machine ID before Kafka and PostgreSQL are wiped;
+   - B's database is loaded from the bucket when it is empty, about 425,000 records (2026-10-31). If it holds data that differs from the bucket, as on a machine that ran full mode before, and the handover's comparison says so, it is rebuilt instead (any other failure stops with nothing wiped): `rebuild check` must find nothing the bucket lacks, a backup goes to `reports/backup/<time>/` and is checked to restore, and you type B's machine ID before Kafka and PostgreSQL are wiped;
    - `make reconcile` must pass, and an export dry run must find B's database and the bucket the same;
    - the bucket switches to full mode, owned by B with a live lease; the poller, catch-up and the `exporter` start; it catches up with USGS and checks against it.
 
