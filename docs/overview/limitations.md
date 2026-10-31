@@ -65,7 +65,7 @@ Milestone 8 ([architecture](../technical/architecture.md#direct-mode)).
 
 ## Testing and CI
 
-- **The performance layer runs only on a developer machine.** Shared CI runners can't repeat its timings within ±15%, so CI reports it as skipped, and its three requirements as not run (REQ-BF-011, REQ-DASH-008, REQ-API-014).
+- **The performance layer runs only on a developer machine.** Shared CI runners can't repeat its timings within ±15%, so CI reports it as skipped, and its requirements as not run (REQ-BF-011, REQ-DASH-008, REQ-API-014).
 - **The live feed is never part of the automated tests.** `make ingest` and `make reconcile` check the real feed by hand.
 - **Contract testing samples the inputs.** Schemathesis generates 60 requests per endpoint by default (`CONTRACT_EXAMPLES=1000` for a deeper run), which isn't an exhaustive search.
 - **Dependency and secret scanning are GitHub's, not CI's.** Since 2026-10-29 GitHub scans every push for secrets and refuses one that carries a recognizable secret (secret scanning, push protection), and Dependabot alerts on known vulnerabilities in `uv.lock` and `dashboard/package-lock.json`; CI itself runs neither. A full-history scan (gitleaks) found no secrets on 2026-10-29. Dependabot's first alerts were fixed in #56. One was `undici`, in Wrangler's local server, pinned with an npm `overrides` entry until Wrangler ships a fixed version.
