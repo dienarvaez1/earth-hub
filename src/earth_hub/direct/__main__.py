@@ -180,6 +180,8 @@ def _execute(args, settings, bucket, audit) -> tuple[int, str, str | None]:  # n
             for name, interval, job in (
                 ("catchup", settings.catchup_interval_seconds, catchup.catch_up),
                 ("deleted", settings.deleted_check_interval_seconds, catchup.check_deleted),
+                ("revised", settings.deleted_check_interval_seconds, catchup.check_revised),
+                ("audit", settings.deleted_check_interval_seconds, catchup.audit),
             ):
                 last = progress.checkpoint(name)
                 if args.all or last is None or now - last >= timedelta(seconds=interval):

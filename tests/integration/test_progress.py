@@ -70,3 +70,28 @@ def test_checkpoints_are_upserted(db):
     progress.set_checkpoint("catchup", NOW)
     progress.set_checkpoint("catchup", NOW + timedelta(hours=1))
     assert progress.checkpoint("catchup") == NOW + timedelta(hours=1)
+
+
+@pytest.mark.req("REQ-CU-003", "REQ-CU-004")
+def test_stored_history_its_oldest_event_and_a_window_of_it(db, make_envelope, make_feature):
+    progress = Progress(db)
+    assert progress.oldest() is None and progress.stored_in(WEEK) == []
+    first, later = SUN + timedelta(days=1, hours=3), SUN + timedelta(days=9)
+    ms = lambda moment: int(moment.timestamp() * 1000)  # noqa: E731
+    features = [
+        make_feature("ak1", ["ak1", "us1"], time=ms(first), updated=ms(first)),
+        make_feature("ak2", time=ms(later), updated=ms(later)),
+        make_feature("ak3", time=ms(first), updated=ms(first) + 1, status="deleted"),
+    ]
+    with db.begin() as conn:
+        for i, feature in enumerate(features):
+            process_message(conn, IncomingMessage("t", 0, i, b"k", make_envelope(feature)), now=NOW)
+    assert progress.oldest() == first
+    [one] = progress.stored_in(WEEK)  # ak2 is the next week; ak3 is deleted
+    assert (one.key, one.event_id, one.ids, one.event_time_ms) == (
+        "ak1",
+        "ak1",
+        frozenset({"ak1", "us1"}),
+        ms(first),
+    )
+    assert one.event_type and one.longitude is not None

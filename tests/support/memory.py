@@ -1,6 +1,6 @@
 """In-memory stand-ins for database-backed helpers, for unit tests."""
 
-from datetime import datetime
+from datetime import UTC, datetime
 
 from earth_hub.ingestion.windows import Window
 
@@ -39,3 +39,15 @@ class MemoryProgress:
 
     def set_checkpoint(self, name, value):
         self.points[name] = value
+
+    # Stored history for the audit and the history pass (earth_hub.ingestion.history.Stored).
+    events: list = ()
+
+    def oldest(self):
+        if not self.events:
+            return None
+        return datetime.fromtimestamp(min(e.event_time_ms for e in self.events) / 1000, UTC)
+
+    def stored_in(self, window):
+        lo, hi = window.start.timestamp() * 1000, window.end.timestamp() * 1000
+        return [e for e in self.events if lo <= e.event_time_ms < hi]

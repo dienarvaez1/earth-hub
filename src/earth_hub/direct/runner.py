@@ -31,8 +31,10 @@ from earth_hub.direct.store import BucketState, BucketStore, Inconsistent, iso, 
 from earth_hub.export import lock, mode
 from earth_hub.export.bucket import Bucket
 from earth_hub.ingestion.events import EventMessage
+from earth_hub.ingestion.history import Stored
 from earth_hub.ingestion.producer import PublishResult
 from earth_hub.ingestion.state import SentState
+from earth_hub.ingestion.windows import Window
 from earth_hub.validation.earthquake_rules import Rejected, validate
 
 logger = logging.getLogger(__name__)
@@ -145,6 +147,46 @@ class DirectRunner:
             status = dict(self.state.status)
             status["checkpoints"] = {**status["checkpoints"], name: iso(value)}
             self.state.save_status(status)
+
+    @_one_at_a_time
+    def oldest(self) -> datetime | None:
+        """The time of the oldest event in the snapshot: where stored history begins."""
+        self.state.refresh()
+        if not self.state.snapshot_path.exists():
+            return None
+        [(ms,)] = self._snapshot("SELECT min(event_time_ms) FROM snap")
+        return datetime.fromtimestamp(ms / 1000, UTC) if ms is not None else None
+
+    @_one_at_a_time
+    def stored_in(self, window: Window) -> list[Stored]:
+        """Progress.stored_in, from the snapshot and the ID map."""
+        self.state.refresh()
+        if not self.state.snapshot_path.exists():
+            return []
+        rows = self._snapshot(
+            "SELECT key, preferred_event_id, event_time_ms, longitude, latitude, depth_km,"
+            " event_type, place FROM snap"
+            " WHERE event_time_ms >= ? AND event_time_ms < ? AND review_status <> 'deleted'"
+            " ORDER BY event_time_ms, key",
+            [int(window.start.timestamp() * 1000), int(window.end.timestamp() * 1000)],
+        )
+        ids = self.state.ids_by_key
+        return [
+            Stored(key, event_id, frozenset(ids.get(key, ()) | {event_id}), *rest)
+            for key, event_id, *rest in rows
+        ]
+
+    def _snapshot(self, sql: str, params: list | None = None) -> list[tuple]:
+        """`sql`'s rows, over the snapshot as the view `snap`."""
+        import duckdb
+
+        path = str(self.state.snapshot_path).replace("'", "''")
+        db = duckdb.connect()
+        try:
+            db.execute(f"CREATE VIEW snap AS SELECT * FROM read_parquet('{path}')")  # noqa: S608 (our own temp file)
+            return db.execute(sql, params or []).fetchall()
+        finally:
+            db.close()
 
     @_one_at_a_time
     def needed(self, messages: list[EventMessage]) -> list[EventMessage]:
@@ -381,3 +423,9 @@ class BucketProgress:
 
     def set_checkpoint(self, name: str, value: datetime) -> None:
         self.runner.set_checkpoint(name, value)
+
+    def oldest(self) -> datetime | None:
+        return self.runner.oldest()
+
+    def stored_in(self, window: Window) -> list[Stored]:
+        return self.runner.stored_in(window)

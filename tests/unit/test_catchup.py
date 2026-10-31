@@ -164,7 +164,8 @@ def test_schedule_runs_catch_up_on_startup_and_then_hourly(make_job, month_feed,
     job, progress = make_job(
         clock=lambda: clock[0], catchup_interval_s=3600, deleted_interval_s=86400
     )
-    progress.points["deleted"] = NOW  # deletions were checked recently
+    for name in ("deleted", "revised", "audit"):
+        progress.points[name] = NOW  # the daily checks ran recently
     job.run_once()
     assert month_feed.requests == 1 and fdsn_server.requests == []  # catch-up runs on startup
     clock[0] += timedelta(minutes=30)
@@ -175,7 +176,10 @@ def test_schedule_runs_catch_up_on_startup_and_then_hourly(make_job, month_feed,
     assert month_feed.requests == 2
     clock[0] += timedelta(days=1)
     job.run_once()
-    assert len(fdsn_server.requests_for("query")) == 1  # the daily deleted check came due
+    # The daily checks came due: the deleted check and the history pass query once each, and
+    # the audit has nothing stored to compare.
+    queries = fdsn_server.requests_for("query")
+    assert sorted(q["includedeleted"] for q in queries) == ["false", "only"]
 
 
 @pytest.mark.req("REQ-OPS-005")

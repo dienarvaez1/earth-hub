@@ -94,7 +94,12 @@ def direct_main(s3, monkeypatch, feature_template):
     from earth_hub.direct import __main__ as entry
 
     settings = Settings(
-        _env_file=None, postgres_db="x", postgres_user="x", postgres_password="x", r2_bucket=BUCKET
+        _env_file=None,
+        postgres_db="x",
+        postgres_user="x",
+        postgres_password="x",
+        r2_bucket=BUCKET,
+        fdsn_pause_seconds=0,  # a mock: no need to be gentle with it
     )
     feed = FeedServer()
     feed.show(EventFactory(feature_template)("ak1", minutes_ago=10))
@@ -118,13 +123,14 @@ def direct_main(s3, monkeypatch, feature_template):
 
 
 def deleted_checked_recently(s3) -> None:
-    """Direct mode's state with the deleted-events check an hour old: not due (catch-up is)."""
+    """Direct mode's state with the daily checks an hour old: not due (catch-up is)."""
+    hour_ago = (datetime.now(UTC) - timedelta(hours=1)).isoformat()
     state = {
         "seq": 0,
         "run_id": None,
         "written_at": None,
         "sent": {},
-        "checkpoints": {"deleted": (datetime.now(UTC) - timedelta(hours=1)).isoformat()},
+        "checkpoints": {name: hour_ago for name in ("deleted", "revised", "audit")},
     }
     s3.put_object(Bucket=BUCKET, Key="_state/direct.json", Body=json.dumps(state))
 
@@ -159,7 +165,8 @@ def test_direct_once_runs_the_poller_and_catch_up_when_due(direct_main, s3, caps
     assert direct_main(["once"]) == 0
     out = capsys.readouterr().out
     assert "poller published, 1 events processed" in out
-    assert "catchup: 0 events processed" in out and "deleted" not in out
+    assert "catchup: 0 events processed" in out
+    assert all(f"{name}:" not in out for name in ("deleted", "revised", "audit"))
     row = json.loads(s3.get_object(Bucket=BUCKET, Key="earthquakes/ak1.json")["Body"].read())
     assert row["key"] == "ak1"
 
@@ -173,6 +180,7 @@ def test_direct_once_all_runs_catch_up_and_the_deleted_check_even_when_not_due(
     assert direct_main(["once", "--all"]) == 0
     out = capsys.readouterr().out
     assert "catchup: 0 events processed" in out and "deleted: 0 events processed" in out
+    assert "revised: 0 events processed" in out and "audit: 0 events processed" in out
 
 
 @pytest.mark.req("REQ-MODE-012")

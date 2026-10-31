@@ -1,9 +1,11 @@
 """Backfill and catch-up through the whole pipeline: mock FDSN and feeds -> real jobs -> Kafka
 (backfill topic) -> separate batched consumer -> PostgreSQL -> API."""
 
+import json
 import threading
 import time
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 
 import pytest
 from support.fdsn import event_at, fail_times
@@ -143,6 +145,55 @@ def test_deleted_check_hides_an_event_usgs_deleted(pipeline, feed, event):
     pipeline.sync()
     assert pipeline.events() == {}
     assert pipeline.get("/earthquakes/us0001")["review_status"] == "deleted"
+
+
+@pytest.mark.req("REQ-CU-003")
+def test_the_history_pass_recovers_a_revision_to_an_event_older_than_the_month_feed(
+    pipeline, feed, event
+):
+    """DEF-067: USGS revises an event 90 days old; no feed lists it any more."""
+    old = event("us0002", minutes_ago=90 * 24 * 60, mag=3.0, status="automatic")
+    feed.show(old)
+    pipeline.poll()
+    pipeline.sync()
+
+    pipeline.fdsn.put(revised(old, by_s=90 * 86400 - 3600, mag=3.4, status="reviewed"))
+    job = catch_up_job(pipeline, FeedServer())
+    Progress(pipeline.db).set_checkpoint("revised", datetime.now(UTC) - timedelta(days=1))
+    assert job.check_revised() == 1
+    pipeline.sync()
+    body = pipeline.get("/earthquakes/us0002")
+    assert (body["magnitude"], body["review_status"]) == (3.4, "reviewed")
+
+
+@pytest.mark.req("REQ-CU-004", "REQ-E2E-011")
+def test_the_audit_hides_an_event_usgs_deleted_without_keeping_its_time(pipeline, feed, event):
+    """DEF-066: FDSN keeps only the products' code and updateTime; no search by time finds it."""
+    from earth_hub.ingestion.history import month_start
+
+    quake = event("tx0003", minutes_ago=600)
+    feed.show(quake)
+    pipeline.poll()
+    pipeline.sync()
+
+    record = json.loads(
+        (
+            Path(__file__).resolve().parents[1]
+            / "fixtures/usgs/deleted_without_time_tx2026pfurqq.json"
+        ).read_text()
+    )
+    deleted_at = quake["properties"]["updated"] + 1800_000
+    for kind in record["properties"]["products"].values():
+        for product in kind:
+            product.update(code="tx0003", updateTime=deleted_at)
+    pipeline.fdsn.put(record)
+    when = datetime.fromtimestamp(quake["properties"]["time"] / 1000, UTC)
+    Progress(pipeline.db).set_checkpoint("audit_month", month_start(when))
+    assert catch_up_job(pipeline, FeedServer()).audit() == 1
+    pipeline.sync()
+    assert pipeline.events() == {}
+    body = pipeline.get("/earthquakes/tx0003")
+    assert (body["review_status"], body["place"]) == ("deleted", quake["properties"]["place"])
 
 
 @pytest.mark.req("REQ-BF-012", "REQ-BF-010")

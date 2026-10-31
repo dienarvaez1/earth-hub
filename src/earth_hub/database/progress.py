@@ -10,6 +10,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from earth_hub.database.models import BackfillWindow, Earthquake, EarthquakeId, IngestionCheckpoint
 from earth_hub.database.revisions import Revision, needed
 from earth_hub.ingestion.events import EventMessage
+from earth_hub.ingestion.history import Stored
 from earth_hub.ingestion.windows import Window
 
 windows = BackfillWindow.__table__
@@ -62,6 +63,41 @@ class Progress:
             for r in rows
         }
         return needed(messages, event_of, stored)
+
+    def oldest(self) -> datetime | None:
+        """The time of the oldest stored event: where stored history begins."""
+        with self._engine.connect() as conn:
+            return conn.execute(select(func.min(Earthquake.event_time))).scalar()
+
+    def stored_in(self, window: Window) -> list[Stored]:
+        """The stored events of `window` that are not deleted, with every ID of each."""
+        query = (
+            select(
+                Earthquake.key,
+                Earthquake.preferred_event_id,
+                Earthquake.event_time_ms,
+                Earthquake.longitude,
+                Earthquake.latitude,
+                Earthquake.depth_km,
+                Earthquake.event_type,
+                Earthquake.place,
+                func.array_agg(EarthquakeId.event_id),
+            )
+            .join(EarthquakeId, EarthquakeId.earthquake_id == Earthquake.id)
+            .where(
+                Earthquake.event_time >= window.start,
+                Earthquake.event_time < window.end,
+                Earthquake.review_status != "deleted",
+            )
+            .group_by(Earthquake.id)
+            .order_by(Earthquake.event_time_ms, Earthquake.key)
+        )
+        with self._engine.connect() as conn:
+            rows = conn.execute(query).all()
+        return [
+            Stored(key, event_id, frozenset(ids), t, lon, lat, depth, kind, place)
+            for key, event_id, t, lon, lat, depth, kind, place, ids in rows
+        ]
 
     # --- windows -------------------------------------------------------------------------
 

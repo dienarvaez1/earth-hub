@@ -12,6 +12,7 @@ import gzip
 import json
 import random
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 
 import boto3
 import duckdb
@@ -266,7 +267,42 @@ def test_deletion_scenarios_of_the_defect_log(modes, make_envelope, make_feature
     )
     # A deleted event revived by a newer revision.
     modes.batch([e(feature(make_feature, "uw3", status="reviewed", updated=UPDATED + 120_000))])
+    # DEF-066: the deletion the audit builds for one FDSN kept no time for. Of the event itself
+    # it deletes it; of an ID merged into another event, it is that duplicate's (DEF-026).
+    tx4 = feature(make_feature, "tx4")
+    us5 = feature(make_feature, "us5", ["us5", "tx5"])
+    modes.batch([e(tx4)])
+    modes.batch([e(us5)])
+    modes.batch([audit_deletion("tx4", tx4), audit_deletion("tx5", us5)])
+    with modes.db.connect() as conn:
+        status = dict(conn.execute(select(Earthquake.key, Earthquake.review_status)).all())
+    assert (status["tx4"], status["us5"]) == ("deleted", "reviewed")  # us5 only lost a duplicate
     modes.compare()
+
+
+def audit_deletion(code: str, stored_feature: dict) -> bytes:
+    """What catch-up's audit publishes when USGS deleted `code` without keeping its time, for
+    the stored event `stored_feature`."""
+    from earth_hub.ingestion.history import Stored, deletion
+
+    path = (
+        Path(__file__).resolve().parents[1] / "fixtures/usgs/deleted_without_time_tx2026pfurqq.json"
+    )
+    record = json.loads(path.read_text())
+    for kind in record["properties"]["products"].values():
+        for product in kind:
+            product.update(code=code, updateTime=UPDATED + 300_000)
+    props = stored_feature["properties"]
+    stored = Stored(
+        stored_feature["id"],
+        stored_feature["id"],
+        frozenset(i for i in props["ids"].split(",") if i),
+        props["time"],
+        *stored_feature["geometry"]["coordinates"],
+        props["type"],
+        props.get("place"),
+    )
+    return deletion(record, stored, fetched_at=datetime(2026, 10, 31, tzinfo=UTC)).to_json()
 
 
 @pytest.mark.req("REQ-MODE-001")

@@ -1,6 +1,8 @@
 """Earth-Hub against USGS (earth_hub/usgs_reconcile.py): every difference explained or not."""
 
+import json
 from datetime import UTC, date, datetime, timedelta
+from pathlib import Path
 
 import pytest
 from support.export import BUCKET, start_direct
@@ -423,3 +425,69 @@ def test_a_range_without_a_start_backwards_or_with_days_is_refused(check, argv):
     with pytest.raises(SystemExit) as exc:
         u.main(argv)
     assert exc.value.code == 2
+
+
+# --- history older than the month feed, and deletions with no time (DEF-066, DEF-067) ----------
+
+RECORD = json.loads(
+    (
+        Path(__file__).resolve().parents[1] / "fixtures/usgs/deleted_without_time_tx2026pfurqq.json"
+    ).read_text()
+)
+AUG_4 = datetime(2026, 8, 4, tzinfo=UTC)
+
+
+@pytest.mark.req("REQ-REC-006")
+def test_a_deletion_fdsn_kept_no_time_for_is_read_by_its_products():
+    found = u.from_feature(RECORD)
+    assert (found.id, found.ids, found.deleted, found.timeless) == (
+        "tx2026pfurqq",
+        frozenset({"tx2026pfurqq"}),
+        True,
+        True,
+    )
+    assert u.from_feature({"properties": {"status": "deleted"}}) is None  # names nothing
+
+
+@pytest.mark.req("REQ-REC-006")
+@pytest.mark.parametrize(
+    ("audited", "explained", "says"),
+    [
+        (None, True, "after the audit covered 2026-08"),  # not covered yet
+        (datetime(2026, 10, 1, tzinfo=UTC), True, "after the audit last covered 2026-08"),
+        (datetime(2026, 10, 31, tzinfo=UTC), False, "before the audit last covered 2026-08"),
+    ],
+)
+def test_such_a_deletion_is_judged_by_when_the_audit_last_covered_its_month(
+    audited, explained, says
+):
+    mine = event("tx2026pfurqq", AUG_4 + timedelta(hours=3), AUG_4 + timedelta(hours=4))
+    marks = u.Marks(NOW, NOW, NOW, NOW, {"2026-08": audited} if audited else {})
+    report = u.compare(
+        [mine],
+        [],
+        [],
+        marks,
+        start=AUG_4,
+        end=AUG_4 + u.DAY,
+        lookup=lambda i: u.from_feature(RECORD),
+    )
+    [d] = report.differences
+    assert (d.kind, d.event_id, d.explained) == ("deleted at USGS", "tx2026pfurqq", explained)
+    assert says in d.reason and "keeping no time" in d.reason
+
+
+@pytest.mark.req("REQ-REC-006")
+def test_older_than_the_month_feed_a_revision_is_judged_by_the_history_pass():
+    marks = u.Marks(day_feed=NOW, month_feed=NOW, deletions=NOW, history=NOW - timedelta(hours=10))
+    revised_after = event("a", AUG_4, NOW - timedelta(hours=2))  # after the last history pass
+    revised_before = event("b", AUG_4, NOW - timedelta(hours=12))  # before it: a real miss
+    ours = [event("a", AUG_4, AUG_4), event("b", AUG_4, AUG_4)]
+    report = u.compare(
+        ours, [revised_after, revised_before], [], marks, start=AUG_4, end=AUG_4 + u.DAY
+    )
+    assert sorted(kinds(report)) == [("older revision", "a", True), ("older revision", "b", False)]
+    assert all("history pass" in d.reason for d in report.differences)
+    # Within the month feed's 30 days, the month feed still judges it.
+    recent = NOW - timedelta(days=5)
+    assert marks.feed_for(event("c", recent, recent)) == ("month feed", NOW)
