@@ -346,12 +346,14 @@ The other checks compare Earth-Hub with itself: `make reconcile` Kafka with Post
 | Earth-Hub has it, USGS deleted it (`deleted at USGS`) | USGS deleted it after the last deleted-events check | unexplained |
 | Both have it, USGS's revision is newer (`older revision`) | USGS revised it after that source was last read | unexplained |
 | Earth-Hub has it deleted, USGS lists it (`deleted here`) | USGS revised it after the deletion and after that source was read | unexplained |
-| Earth-Hub has it, USGS has never heard of it (`unknown at USGS`) | never | unexplained |
+| Earth-Hub has it, FDSN lists it without an origin at the revision Earth-Hub holds (`no origin at FDSN`) | always (`explained`, not pending): FDSN's search by time leaves out an event with no origin, which the summary feeds still list with one (DEF-064) | unexplained when FDSN's revision is newer: USGS dropped the origin |
+| Earth-Hub has it, USGS has never heard of it, or its search by time leaves it out (`unknown at USGS`) | never | unexplained |
 | USGS lists apart two events Earth-Hub merged into one record (`split at USGS`) | never: Earth-Hub never splits a record | unexplained |
 
 - **The source that brings an event** is the day feed for events of the 24 hours before it was last read, and catch-up's month feed for older ones; deletions come only from the deleted-events check. A feed counts as read when USGS generated the newest copy of it Earth-Hub processed (`metadata.generated`, in every message's envelope as `feed_generated_ms`), since that is what its content is as of. The feed is fetched up to a minute after it was generated, and the round ends a minute or two later. Taking either of those as the read reported updates in between as missed (DEF-054). In full mode the times are the newest among `raw_events`' feed and catch-up messages; in direct mode each round keeps them in `_state/direct.json` (`generated`, per feed). Without one, the live topic's last delivery or the last round's end stands in for the day feed, and catch-up's checkpoint for the month feed. The deleted-events check counts from its checkpoint.
 - **Events are matched by any of their IDs**, so a merged event counts once. One whose time USGS moved out of the window since is looked up by ID (at most 25 a run).
 - **Revision times within 60 seconds are the same revision.** For `uw` events FDSN reports `updated` 5 to 9 seconds later than the summary feeds the poller and catch-up read (measured 2026-10-21, 19 events in 3 days); without the tolerance each would look like a missed revision.
+- **One snapshot.** In full mode the events and the marks are read from PostgreSQL in one `REPEATABLE READ` transaction: read apart, a message stored in between counted its feed as read but not its event, a false `missing` (DEF-065).
 - **Requests:** two FDSN queries a day (live and deleted events), with `FDSN_PAUSE_SECONDS` between them, and the lookups. It exits 1 if any difference is unexplained, 2 on missing settings or during a handover.
 
 ```text

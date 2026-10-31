@@ -125,6 +125,44 @@ def test_an_event_usgs_has_never_heard_of_is_unexplained():
     assert kinds(report) == [("unknown at USGS", "x1", False)]
 
 
+def test_an_event_fdsn_lists_without_an_origin_at_our_revision_is_explained():
+    # DEF-064: uw714132881 on 2026-10-31. The day feed listed it with its origin; FDSN, by ID,
+    # only with its phase data, so its search by time left it out: "USGS has no such event".
+    t = NOW - timedelta(hours=8)
+    shell = u.Event("uw1", frozenset({"uw1"}), at(t), at(t) + 7_000, origin=False)
+    report = run([event("uw1", t, t)], lookup={"uw1": shell}.get)
+    assert kinds(report) == [("no origin at FDSN", "uw1", True)]
+    assert report.ok and report.differences[0].settled
+    assert report.days["2026-10-20"] == {"usgs": 0, "ours": 1}
+
+
+@pytest.mark.parametrize(
+    ("origin", "later", "says"),
+    [
+        (False, timedelta(minutes=5), "without an origin), but its search"),
+        (True, timedelta(0), "but its search by time leaves it out"),
+    ],
+    ids=["origin dropped in a later revision", "with an origin"],
+)
+def test_an_event_usgs_has_but_its_search_leaves_out_is_otherwise_unexplained(origin, later, says):
+    t = NOW - timedelta(hours=8)
+    theirs = u.Event("uw1", frozenset({"uw1"}), at(t), at(t + later), origin=origin)
+    report = run([event("uw1", t, t)], lookup={"uw1": theirs}.get)
+    assert kinds(report) == [("unknown at USGS", "uw1", False)]
+    assert says in report.differences[0].reason
+
+
+@pytest.mark.parametrize(
+    ("types", "origin"),
+    [(",origin,phase-data,", True), (",phase-data,", False), (None, True), ("", True)],
+)
+def test_a_feature_says_whether_it_has_an_origin(types, origin):
+    props = {"time": 1, "updated": 2, "ids": ",uw1,", "status": "automatic"}
+    if types is not None:
+        props["types"] = types
+    assert u.from_feature({"id": "uw1", "properties": props}).origin is origin
+
+
 def test_deleted_here_but_live_at_usgs():
     t = NOW - timedelta(hours=2)
     revived = event("z1", t, MARKS.day_feed + timedelta(minutes=2))
@@ -334,18 +372,19 @@ def test_counts_and_differences_add_up_by_month_and_year():
             "2026-02-01": {"usgs": 1, "ours": 2},
         },
         differences=[
+            u.Difference("2025-12-31", "no origin at FDSN", "c", True, ""),  # settled
             u.Difference("2026-01-01", "missing", "a", True, ""),
             u.Difference("2026-02-01", "unknown at USGS", "b", False, ""),
         ],
     )
     assert u.by_period(report, "month") == {
-        "2025-12": {"usgs": 5, "ours": 5, "pending": 0, "unexplained": 0},
-        "2026-01": {"usgs": 7, "ours": 6, "pending": 1, "unexplained": 0},
-        "2026-02": {"usgs": 1, "ours": 2, "pending": 0, "unexplained": 1},
+        "2025-12": {"usgs": 5, "ours": 5, "pending": 0, "explained": 1, "unexplained": 0},
+        "2026-01": {"usgs": 7, "ours": 6, "pending": 1, "explained": 0, "unexplained": 0},
+        "2026-02": {"usgs": 1, "ours": 2, "pending": 0, "explained": 0, "unexplained": 1},
     }
     assert u.by_period(report, "year") == {
-        "2025": {"usgs": 5, "ours": 5, "pending": 0, "unexplained": 0},
-        "2026": {"usgs": 8, "ours": 8, "pending": 1, "unexplained": 1},
+        "2025": {"usgs": 5, "ours": 5, "pending": 0, "explained": 1, "unexplained": 0},
+        "2026": {"usgs": 8, "ours": 8, "pending": 1, "explained": 0, "unexplained": 1},
     }
     assert list(u.by_period(report)) == sorted(report.days)
 

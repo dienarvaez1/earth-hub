@@ -11,6 +11,8 @@ last few UTC days or any range of them (--start, --end), counted by UTC day, mon
 | USGS has it, Earth-Hub doesn't     | USGS updated it after the feed that brings it was read    |
 | Earth-Hub has it, USGS deleted it  | USGS deleted it after the last deleted-events check       |
 | Both have it, USGS's is newer      | USGS updated it after the feed that brings it was read    |
+| Both have it, FDSN without origin  | always, at the revision Earth-Hub holds: FDSN's search    |
+|                                    | leaves out events with no origin, which the feeds list    |
 
 The feed that brings an event is the day feed (`all_day`) for events of the 24 hours before its
 last read, and catch-up's month feed otherwise. Anything else is unexplained, and the command
@@ -52,6 +54,7 @@ LOOKUPS = 25  # events looked up again by ID, at most, per run
 # The same revision can carry different `updated` times: for `uw` events FDSN says 5 to 9 s later
 # than the summary feeds the poller and catch-up read (measured 2026-10-21).
 SAME_REVISION_MS = 60_000
+SETTLED = {"no origin at FDSN"}  # explained, but not pending: USGS's services disagree (DEF-064)
 
 
 @dataclass(frozen=True)
@@ -63,6 +66,9 @@ class Event:
     time_ms: int
     updated_ms: int
     deleted: bool = False
+    # Whether USGS lists an `origin` product for it. FDSN's searches by time leave out an event
+    # without one; its summary feeds may still list it with one (DEF-064).
+    origin: bool = True
 
 
 @dataclass(frozen=True)
@@ -82,10 +88,15 @@ class Marks:
 @dataclass
 class Difference:
     day: str
-    kind: str  # missing, deleted at USGS, older revision, deleted here
+    kind: str  # missing, deleted at USGS, older revision, deleted here, no origin at FDSN, ...
     event_id: str
     explained: bool
     reason: str
+
+    @property
+    def settled(self) -> bool:
+        """Explained without waiting for anything: no later read of USGS will change it."""
+        return self.explained and self.kind in SETTLED
 
 
 @dataclass
@@ -107,11 +118,13 @@ def _ms(moment: datetime) -> int:
 
 
 PERIODS = {"day": 10, "month": 7, "year": 4}  # how much of YYYY-MM-DD names a period
-STATUSES = ("pending", "unexplained")
+STATUSES = ("pending", "explained", "unexplained")
 
 
 def _status(d: Difference) -> str:
-    return "pending" if d.explained else "unexplained"
+    if not d.explained:
+        return "unexplained"
+    return "explained" if d.settled else "pending"
 
 
 def by_period(report: Report, by: str = "day") -> dict[str, dict[str, int]]:
@@ -269,6 +282,8 @@ def compare(  # noqa: C901, PLR0912 (to refactor: docs/progress/plan.md)
                         )
                     )
                     continue
+                report.differences.append(_left_out(mine, gone))
+                continue
         if gone is not None and gone.deleted:
             pending = _after(gone, marks.deletions)
             report.differences.append(
@@ -299,6 +314,31 @@ def compare(  # noqa: C901, PLR0912 (to refactor: docs/progress/plan.md)
     return report
 
 
+def _left_out(mine: Event, gone: Event) -> Difference:
+    """USGS has the event, in the window, not deleted, yet its search by time left it out."""
+    if not gone.origin and gone.updated_ms - mine.updated_ms <= SAME_REVISION_MS:
+        # Seen on 2026-10-31 (uw714132881): the day feed listed it with its origin; FDSN, at the
+        # same revision, only with its phase data (DEF-064). USGS's services disagree, not
+        # Earth-Hub with USGS; a later revision without the origin is a change, unexplained.
+        return Difference(
+            _day(mine.time_ms),
+            "no origin at FDSN",
+            mine.id,
+            True,
+            "FDSN lists it without an origin, at the revision Earth-Hub holds, so its search by "
+            "time leaves it out; the summary feeds listed it with one",
+        )
+    return Difference(
+        _day(mine.time_ms),
+        "unknown at USGS",
+        mine.id,
+        False,
+        f"USGS has it (revised {_when(gone.updated_ms)}"
+        + (", without an origin" if not gone.origin else "")
+        + "), but its search by time leaves it out",
+    )
+
+
 # --- USGS -------------------------------------------------------------------------------------
 
 
@@ -316,7 +356,16 @@ def from_feature(feature: dict) -> Event | None:
         props["time"],
         props["updated"],
         review_status(props) == "deleted",
+        _has_origin(props),
     )
+
+
+def _has_origin(props: dict) -> bool:
+    """False only when USGS lists the event's products and an origin is not among them."""
+    types = props.get("types")
+    if not isinstance(types, str) or not types.strip(","):
+        return True  # not listed: nothing to go by
+    return "origin" in types.split(",")
 
 
 def usgs_events(fdsn, start: datetime, end: datetime, *, deleted: str) -> list[Event]:
@@ -351,9 +400,14 @@ def _from_ms(ms) -> datetime | None:
 
 
 def from_postgres(engine, live_topic: str) -> tuple[list[Event], Marks]:
+    """The events and the marks from one snapshot. Read apart, a message stored in between was
+    in the marks (its feed read) but not in the events, a false `missing` (DEF-065)."""
     from sqlalchemy import text
 
-    with engine.connect() as conn:
+    with (
+        engine.connect().execution_options(isolation_level="REPEATABLE READ") as conn,
+        conn.begin(),
+    ):
         ids: dict[str, set[str]] = {}
         for key, event_id in conn.execute(
             text(
@@ -443,10 +497,14 @@ def print_report(report: Report, marks: Marks, where: str, by: str = "day") -> N
     for period, n in [*rows.items(), ("total", total)]:
         print(
             f"  {period}: USGS {n['usgs']}, Earth-Hub {n['ours']}; "
-            + ", ".join(f"{n[status]} {status}" for status in STATUSES)
+            + ", ".join(
+                f"{n[status]} {status}"
+                for status in STATUSES
+                if n[status] or status != "explained"  # shown only when there are some
+            )
         )
     for d in report.differences:
-        tag = "pending" if d.explained else "UNEXPLAINED"
+        tag = ("explained" if d.settled else "pending") if d.explained else "UNEXPLAINED"
         print(f"    {tag:11} {d.day} {d.kind:15} {d.event_id}: {d.reason}")
     print("RESULT: " + ("OK" if report.ok else f"{len(report.unexplained)} unexplained"))
 

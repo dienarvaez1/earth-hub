@@ -62,3 +62,36 @@ def test_full_mode_measures_each_feed_by_when_usgs_generated_it(db, make_envelop
     _, marks = u.from_postgres(db, "earthquakes.raw")
     assert marks.day_feed == datetime.fromtimestamp(feed / 1000, UTC)
     assert marks.month_feed == datetime.fromtimestamp(catchup / 1000, UTC)
+
+
+@pytest.mark.req("REQ-REC-004")
+def test_the_events_and_the_marks_come_from_one_snapshot(db, make_envelope, make_feature):
+    # DEF-065: nc75460217 on 2026-10-31 was stored between the check's read of the events and
+    # its read of the marks: the feed that brought it counted as read, the event as missing.
+    from sqlalchemy import event as sa_event
+
+    feed = 1793427990000
+
+    def store(offset, feature, generated):
+        with db.begin() as conn:
+            value = make_envelope(feature, feed_generated_ms=generated)
+            process_message(
+                conn, IncomingMessage("earthquakes.raw", 0, offset, b"k", value), now=NOW
+            )
+
+    store(0, make_feature("ak1"), feed - 60_000)
+    stored = []
+
+    def in_between(conn, cursor, statement, *args):
+        if "FROM earthquake_ids" in statement and not stored:
+            stored.append(True)
+            store(1, make_feature("nc2"), feed)  # another connection commits it now
+
+    sa_event.listen(db, "after_cursor_execute", in_between)
+    try:
+        events, marks = u.from_postgres(db, "earthquakes.raw")
+    finally:
+        sa_event.remove(db, "after_cursor_execute", in_between)
+    assert stored
+    assert {e.id for e in events} == {"ak1"}
+    assert marks.day_feed == datetime.fromtimestamp((feed - 60_000) / 1000, UTC)
