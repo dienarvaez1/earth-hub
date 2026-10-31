@@ -1,5 +1,5 @@
 # The watchdog (docs/technical/ci.md#the-watchdog): fails, so GitHub e-mails, when the
-# dashboard Worker's cron trigger has started no direct.yml run for 2 hours (scripts/watchdog.py).
+# dashboard Worker's cron trigger has started no direct.yml run for 5 hours (scripts/watchdog.py).
 #
 # The repository's only schedule. GitHub disables a public repository's scheduled workflows
 # after 60 days without commits; kept apart from direct.yml, that stops this check, never the
@@ -30,7 +30,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - name: A direct.yml run started within 2 hours
+      - name: A direct.yml run started within 5 hours
         env:
           GH_TOKEN: ${{ github.token }}
         run: |

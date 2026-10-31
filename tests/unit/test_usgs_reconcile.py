@@ -224,8 +224,8 @@ def test_the_command_skips_a_bucket_not_in_direct_mode_when_asked(check, capsys)
 @pytest.mark.req("REQ-REC-003")
 def test_the_command_fails_when_no_direct_round_has_written_for_too_long(check, s3, capsys):
     start_direct(s3)
-    check["last_round"] = datetime.now(UTC) - timedelta(hours=3)
-    assert u.main(["--skip-unless-direct", "--max-age-hours", "2"]) == 1
+    check["last_round"] = datetime.now(UTC) - timedelta(hours=6)
+    assert u.main(["--skip-unless-direct", "--max-age-hours", "5"]) == 1
     assert "is the schedule running?" in capsys.readouterr().err
 
 

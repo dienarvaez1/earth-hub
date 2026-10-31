@@ -1,6 +1,6 @@
 ---
 name: eh-mode
-description: Earth-Hub's two modes and who writes the R2 bucket — show the mode, hand over from full mode (Docker, Kafka, PostgreSQL) to direct mode (R2 only) and back, run direct mode locally, check direct mode's bucket state, or run a round on GitHub Actions and list direct mode's executions (its audit trail, the hourly rounds a Cloudflare cron trigger starts, which keep the dashboard current with no machine on). Use for /eh-mode, "which mode are we in", "switch to direct mode", "go back to full mode", "can I close my laptop", "is the schedule running", "run a direct round".
+description: Earth-Hub's two modes and who writes the R2 bucket — show the mode, hand over from full mode (Docker, Kafka, PostgreSQL) to direct mode (R2 only) and back, run direct mode locally, check direct mode's bucket state, or run a round on GitHub Actions and list direct mode's executions (its audit trail, the 4-hourly rounds a Cloudflare cron trigger starts, which keep the dashboard current with no machine on). Use for /eh-mode, "which mode are we in", "switch to direct mode", "go back to full mode", "can I close my laptop", "is the schedule running", "run a direct round".
 argument-hint: "[status | direct | full | usgs [DAYS] | catchup | once | run | reconcile [deep] | schedule | runs]  (default: status)"
 ---
 
@@ -9,14 +9,14 @@ argument-hint: "[status | direct | full | usgs [DAYS] | catchup | once | run | r
 Run from the repository root. One marker in the bucket, `_state/mode.json`, says which mode writes it
 (docs/technical/architecture.md#switching-modes). Full mode: poller → Kafka → consumer → PostgreSQL → API →
 `make export-r2`. Direct mode: poller → validate → R2, with the workflow `.github/workflows/direct.yml`
-(docs/technical/ci.md#direct-mode-on-a-schedule), its rounds started every hour by the dashboard Worker's
+(docs/technical/ci.md#direct-mode-on-a-schedule), its rounds started every 4 hours by the dashboard Worker's
 cron trigger, keeping the dashboard current while no machine runs.
 
 | Argument | Command | Writes |
 | --- | --- | --- |
 | `status` (default) | `make -s mode` (in full mode also the owner, its lease, live or expired, and this host), `make -s direct-runs LIMIT=5` | no |
 | `direct` | `make to-direct` ⚠ (in the background: waits for the consumers, `make reconcile`, `make mode-direct`, which stops the poller and catch-up, exports, hands over, catches up and checks against USGS, then `make down`; a few minutes) | bucket, stops services |
-| `full` | `make to-full` ⚠ (in the background: Docker and the mode checked, `make up`, `make mode-full`, which replays direct mode's log into Kafka, checks and switches back, then waits for the consumers and `make reconcile`; the hourly rounds then skip) | bucket, Kafka, PostgreSQL |
+| `full` | `make to-full` ⚠ (in the background: Docker and the mode checked, `make up`, `make mode-full`, which replays direct mode's log into Kafka, checks and switches back, then waits for the consumers and `make reconcile`; the 4-hourly rounds then skip) | bucket, Kafka, PostgreSQL |
 | `usgs [DAYS]` | `make reconcile-usgs [DAYS=3]`: the mode writing the bucket against USGS, every difference pending (explained) or not | no |
 | `catchup` | `make catchup-now` ⚠ (in either mode: day feed, month feed and deletions, whether due or not) | bucket, or Kafka in full mode |
 | `once` | `make direct-once` ⚠ (one poller round, and catch-up if due) | bucket |
@@ -45,16 +45,16 @@ cron trigger, keeping the dashboard current while no machine runs.
   `reason`, `errors`, `errata`), and on GitHub `gh run view <id> --log-failed`. Empty R2 values in its `env:` block
   mean the workflow's secrets are empty: the user sets them (`gh secret set <NAME> --env r2` for the four `R2_*`
   settings, in the `r2` environment; the repository has none of its own).
-- **The rounds come from the dashboard Worker's cron trigger**, hourly at :17 (docs/technical/ci.md#the-trigger);
-  and the daily reconcile at 05:41 UTC; `direct.yml` has no schedule of its own. A failed `Watchdog` run means no
-  `direct.yml` run started for 2 hours: the trigger stopped; `make -s trigger-check 2>&1 | grep -v '@' | tail -1`
+- **The rounds come from the dashboard Worker's cron trigger**, every 4 hours at :05 (docs/technical/ci.md#the-trigger);
+  and the daily reconcile at 00:10 UTC; `direct.yml` has no schedule of its own. A failed `Watchdog` run means no
+  `direct.yml` run started for 5 hours: the trigger stopped; `make -s trigger-check 2>&1 | grep -v '@' | tail -1`
   says whether its token still works (starts nothing). A failed `Trigger token` run means the trigger's GitHub token
   expires within 14 days: the user runs `make trigger-token` in a terminal (never run it for them).
 - Filter lines with `@` from `gh` output before showing it.
 
 ## Report
 
-The mode and since when, whether the hourly rounds write (direct mode) or skip (full mode), and the latest
+The mode and since when, whether the 4-hourly rounds write (direct mode) or skip (full mode), and the latest
 executions from `make direct-runs` (status, who started them, what they processed). After a handover: the command's last lines and `make -s mode`. After a round: the
 new sequence number and time, `make -s r2-get KEY=_state/direct.json | jq -c '{seq, written_at}'`, today's newest log files,
 `make -s r2-ls PREFIX=log/$(date -u +%F)/ LIMIT=0 | tail -3` (the previous day's folder if empty), and the dashboard's run

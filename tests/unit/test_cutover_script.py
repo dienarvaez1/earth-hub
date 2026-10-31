@@ -149,10 +149,10 @@ def test_a_refuses_after_its_pre_checks_with_nothing_changed(machine, says, caps
     assert f"[FAIL] {says}" in out and "pre-check(s) failed" in out
 
 
-def test_a_warns_when_the_hourly_rounds_look_stopped_but_goes_on(capsys):
+def test_a_warns_when_the_rounds_look_stopped_but_goes_on(capsys):
     a = Machine(host="host-a", last_round="2026-10-30T20-00-00Z")
     assert run_a(a) == 0
-    assert "[warn] direct mode's hourly rounds ran within 2 hours" in capsys.readouterr().out
+    assert "[warn] direct mode's rounds ran within 5 hours" in capsys.readouterr().out
 
 
 @pytest.mark.parametrize("how", ["a dry run", "an answer other than yes"])
