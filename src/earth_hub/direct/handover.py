@@ -309,6 +309,23 @@ def to_direct(
     return result
 
 
+def _replay(bucket, current, status, topic, result: Result, back_to_direct) -> None:
+    """Every log entry since the last handover onto the backfill topic, once (DEF-047)."""
+    entries = read_log(bucket, current.checkpoint_seq)
+    expected = list(range(current.checkpoint_seq + 1, status["seq"] + 1))
+    if [e["seq"] for e in entries] != expected:
+        missing = sorted(set(expected) - {e["seq"] for e in entries})
+        back_to_direct(
+            f"the log lacks {len(missing)} entries (from {missing[:1]}): replay is not possible. "
+            f"Backfill the direct period instead (make backfill START={current.since})"
+        )
+    done = topic.replayed(current.replay_from)
+    to_send = [e for e in entries if e["seq"] not in done]
+    topic.send(to_send)
+    result.replayed, result.already_replayed = len(to_send), len(entries) - len(to_send)
+    result.step(f"replayed {len(to_send)} log entries ({result.already_replayed} sent before)")
+
+
 def to_full(
     bucket: Bucket,
     engine: Engine,
@@ -321,8 +338,11 @@ def to_full(
     clock: Callable[[], datetime] = lambda: datetime.now(UTC),
     local_dir: Path | None = None,
     machine: str | None = None,
+    rebuild: bool = False,
 ) -> Result:
-    """Direct -> full, with `machine` (settings.machine_id) the bucket's owner. `wait`:
+    """Direct -> full, with `machine` (settings.machine_id) the bucket's owner. `rebuild`:
+    PostgreSQL, empty, is loaded from the frozen bucket instead of replaying the log
+    (direct/rebuild.py); the checks after it are the same. `wait`:
     returns once the consumers have stored every replayed message;
     `problems`: what reconciliation finds wrong in full mode, empty when nothing."""
     result = Result(mode.FULL)
@@ -331,6 +351,11 @@ def to_full(
         raise mode.WrongMode(f"the bucket is in {current.mode} mode, not direct")
     now = clock()
     run_id = _run_id(now)
+
+    def back_to_direct(reason: str) -> None:
+        mode.write(bucket, mode.read(bucket), state=mode.ACTIVE)
+        raise HandoverFailed(f"{reason}; the bucket is back in direct mode")
+
     with tempfile.TemporaryDirectory() as tmp:
         runner = DirectRunner(bucket, workdir=Path(tmp))
         held = lock.Held(bucket, run_id, iso(now), now, LOCK_TTL, clock)
@@ -348,25 +373,18 @@ def to_full(
         finally:
             held.release()
         status = runner.state.status
-    result.step(f"direct mode frozen at sequence {status['seq']}")
+        result.step(f"direct mode frozen at sequence {status['seq']}")
+        if rebuild:
+            from earth_hub.direct.rebuild import load
 
-    def back_to_direct(reason: str) -> None:
-        mode.write(bucket, mode.read(bucket), state=mode.ACTIVE)
-        raise HandoverFailed(f"{reason}; the bucket is back in direct mode")
+            try:
+                loaded = load(engine, runner.state)
+            except Exception as exc:  # noqa: BLE001 (any failure unfreezes the bucket)
+                back_to_direct(f"the rebuild failed: {type(exc).__name__}: {exc}")
+            result.step(f"PostgreSQL rebuilt from the bucket: {loaded} records")
 
-    entries = read_log(bucket, current.checkpoint_seq)
-    expected = list(range(current.checkpoint_seq + 1, status["seq"] + 1))
-    if [e["seq"] for e in entries] != expected:
-        missing = sorted(set(expected) - {e["seq"] for e in entries})
-        back_to_direct(
-            f"the log lacks {len(missing)} entries (from {missing[:1]}): replay is not possible. "
-            f"Backfill the direct period instead (make backfill START={current.since})"
-        )
-    done = topic.replayed(current.replay_from)
-    to_send = [e for e in entries if e["seq"] not in done]
-    topic.send(to_send)
-    result.replayed, result.already_replayed = len(to_send), len(entries) - len(to_send)
-    result.step(f"replayed {len(to_send)} log entries ({result.already_replayed} sent before)")
+    if not rebuild:
+        _replay(bucket, current, status, topic, result, back_to_direct)
 
     wait()
     if found := problems():
@@ -424,6 +442,9 @@ def main(argv: list[str] | None = None) -> int:  # noqa: C901 (to refactor: docs
     parser = argparse.ArgumentParser(description="Show or change which mode writes the bucket.")
     parser.add_argument("command", choices=("status", "direct", "full"))
     parser.add_argument("--timeout", type=float, default=600, help="full: seconds to wait")
+    parser.add_argument(
+        "--rebuild", action="store_true", help="full: load an empty PostgreSQL from the bucket"
+    )
     args = parser.parse_args(argv)
     configure_logging()
     settings = get_settings()
@@ -487,6 +508,7 @@ def main(argv: list[str] | None = None) -> int:  # noqa: C901 (to refactor: docs
                     wait=wait,
                     problems=problems,
                     machine=settings.machine_id,
+                    rebuild=args.rebuild,
                 )
     except (HandoverFailed, mode.WrongMode, lock.LockHeld) as exc:
         print(f"mode: {exc}", file=sys.stderr)

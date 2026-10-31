@@ -108,10 +108,10 @@ mode-direct: ## Hand over to direct mode: stop the poller and catch-up, export, 
 	uv run python -m earth_hub.usgs_reconcile || { echo "Direct mode is on; the check against USGS found differences it cannot explain (above)"; exit 1; }
 	@echo "Direct mode: the hourly schedule writes the bucket now (or make direct-run, not both)"
 
-mode-full: ## Hand over to full mode: replay direct mode's log into Kafka, check, then switch
+mode-full: ## Hand over to full mode: replay direct mode's log into Kafka (REBUILD=1: load an empty PostgreSQL from the bucket), check, then switch
 	docker compose --profile ingest build migrate
 	docker compose --profile ingest --profile api up -d --wait consumer consumer-backfill api
-	uv run python -m earth_hub.direct.handover full
+	uv run python -m earth_hub.direct.handover full $(if $(REBUILD),--rebuild)
 	docker compose --profile ingest --profile api up -d poller catchup exporter
 	@echo "Full mode: catching up with USGS, then checking against it"
 	uv run python -m earth_hub.ingestion.catchup --once
