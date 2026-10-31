@@ -245,6 +245,18 @@ def test_three_part_requirement_ids_are_found_in_a_layer_left_out(trace_repo):
     assert traceability.marked_in(["tests/slow"]) == {"REQ-T-002", "REQ-DQ-GEO-002", "REQ-E2E-011"}
 
 
+@pytest.mark.req("REQ-DASH-036")
+def test_make_dashboard_install_prepares_everything_the_dashboard_layer_needs():
+    # DEF-069: on a fresh checkout, `make dashboard-install` then `make regression` failed the
+    # whole dashboard layer: the DuckDB extensions the page serves are git-ignored, and only
+    # `make dashboard-build` and a CI step fetched them.
+    makefile = (REPO / "Makefile").read_text()
+    (recipe,) = re.findall(r"^dashboard-install:.*\n((?:\t.*\n?)+)", makefile, re.M)
+    assert "npm ci" in recipe and "playwright install chromium" in recipe
+    assert "scripts/fetch_duckdb_extensions.py" in recipe
+    assert "scripts/fetch_duckdb_extensions.py" in WORKFLOW.read_text()  # CI does the same
+
+
 @pytest.mark.req("REQ-QA-003")
 def test_make_test_and_make_coverage_run_exactly_the_regressions_unit_layer():
     # DEF-039: `make coverage` selected "not integration", so it also ran the end-to-end and

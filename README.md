@@ -46,9 +46,9 @@ Two [modes](docs/technical/architecture.md#switching-modes) take turns: **full**
 
 | | |
 | --- | --- |
-| **Requirements** | 207 requirements, each with a stable ID and at least one passing test that names it (`@pytest.mark.req`); `make traceability` fails if one has none |
+| **Requirements** | 208 requirements, each with a stable ID and at least one passing test that names it (`@pytest.mark.req`); `make traceability` fails if one has none |
 | **Tests** | About 1,200 in eight layers: unit, integration, API, contract (Schemathesis), end-to-end, dashboard (in Chromium), disruptive (real outages) and performance; about 92% coverage |
-| **Defects** | 68 defects found and fixed, each with how it was found and the commit that fixed it; [the most instructive written up in full](docs/progress/defects.md) |
+| **Defects** | 69 defects found and fixed, each with how it was found and the commit that fixed it; [the most instructive written up in full](docs/progress/defects.md) |
 | **CI** | Lint, unit tests and the regression of every layer but performance on every pull request, with no secrets ([CI](docs/technical/ci.md)) |
 | **Data integrity** | Kafka offsets committed only after the database, idempotent upserts, newest revision wins, and reconciliation of each topic with the database and of the data with USGS. At-least-once, never claimed exactly-once |
 | **Recovery** | PostgreSQL stopped mid-stream, a Kafka restart, crashes between the two commits, restarts: each tested, each ending in a reconciliation |
@@ -110,7 +110,7 @@ When a defect showed a class of mistake, a rule went into `CLAUDE.md` so it woul
 
 **Skills for operating it.** The everyday operations are Claude Code skills in `.claude/skills/` (`/eh-status`, `/eh-mode`, `/eh-db`, …), indexed in the [cheat sheet](docs/overview/cheatsheet.md); a test checks that every skill and command the docs name exists.
 
-**Not trusting AI-written tests either.** The [test strategy](docs/progress/test-strategy.md#ai-assisted-development) applies mutation spot checks, repeated runs, independent oracles and tests of the test tooling. Some defects were in the test tooling itself (DEF-007, DEF-008, DEF-025, DEF-028, DEF-029), found because results were checked rather than trusted. Those found after merge (DEF-034 to DEF-039, DEF-053 to DEF-068) are logged as such.
+**Not trusting AI-written tests either.** The [test strategy](docs/progress/test-strategy.md#ai-assisted-development) applies mutation spot checks, repeated runs, independent oracles and tests of the test tooling. Some defects were in the test tooling itself (DEF-007, DEF-008, DEF-025, DEF-028, DEF-029), found because results were checked rather than trusted. Those found after merge (DEF-034 to DEF-039, DEF-053 to DEF-069) are logged as such.
 
 ## Documentation
 

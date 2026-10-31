@@ -219,6 +219,7 @@ The dashboard's SQL lives in `dashboard/queries/`; the page runs it in the brows
 | REQ-DASH-033 | The page's footer credits the U.S. Geological Survey as the data's source, with a link, and says Earth-Hub is an independent research project, not affiliated with or endorsed by USGS and not a complete or exact copy of its service; that events may be revised, late, or missing or inaccurate if any part of the system fails; that city, region and country are derived by Earth-Hub; that it comes without warranty; and that it is not for emergency or safety decisions, linking to USGS's own map. The README says the same |
 | REQ-DASH-034 | A visit sets no cookie, stores nothing in the browser (local or session storage, IndexedDB) and never asks for the device's location (no Geolocation API call); the footer links to a privacy notice (`/privacy`, kept out of search engines) that says so, says Earth-Hub records no IP address or location derived from it, and names the providers that receive visitors' IP addresses to deliver content (Cloudflare, jsDelivr, OpenFreeMap) |
 | REQ-DASH-035 | The Worker keeps its own log lines but no invocation logs, which would record each visitor's request with the IP address and the location Cloudflare derives from it; its fetch handler logs nothing |
+| REQ-DASH-036 | `make dashboard-install` prepares everything the dashboard layer needs on a fresh checkout: the Node dependencies, the test browser, and the DuckDB extensions the page serves (git-ignored), as CI does |
 
 ## End-to-end scenarios
 
