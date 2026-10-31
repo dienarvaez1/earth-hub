@@ -1,12 +1,14 @@
 # Earth Hub
 
-A local-first earthquake data platform, built as a QA engineering portfolio project. The live USGS feed flows through Apache Kafka into validated PostgreSQL tables; a read-only REST API serves them, and a public dashboard shows them from an export to Cloudflare R2. The point is less the pipeline than the evidence that it works: every requirement traces to a passing test, every defect is logged with how it was found and fixed, and CI runs the regression on every pull request.
+**Earth-Hub turns the U.S. Geological Survey's live earthquake feed into a dataset you can trust, and shows the evidence.** Every minute it reads the [USGS feed](https://earthquake.usgs.gov/earthquakes/feed/), validates each event against explicit data-quality rules, and follows USGS as it revises, merges and deletes events, then serves the result through a REST API and a public dashboard. Underneath are Apache Kafka, PostgreSQL and FastAPI, with a Cloudflare Worker and DuckDB in the browser.
 
-**Status:** released as [v1.0.0](https://github.com/dienarvaez1/earth-hub/releases/tag/v1.0.0) on 2026-10-29; `main` is protected and accepts only changes that pass CI ([status](docs/progress/plan.md#status)). The dashboard runs at **https://earth-hub.diego-narvaez.workers.dev**, shared by link and kept out of search engines.
+It is a QA engineering portfolio project, and the testing is the point: every requirement traces to a passing test, every defect is logged with how it was found and fixed, CI runs the regression on every pull request, and the stored data is reconciled against USGS itself.
 
 [![The Earth-Hub dashboard as it opens: this week's earthquakes on a world map](docs/images/dashboard.jpg)](https://earth-hub.diego-narvaez.workers.dev)
 
-*As it opens, with every default, on 2026-10-31.*
+*The [live dashboard](https://earth-hub.diego-narvaez.workers.dev) as it opens, with every default, on 2026-10-31.*
+
+**Status:** released as [v1.0.0](https://github.com/dienarvaez1/earth-hub/releases/tag/v1.0.0) on 2026-10-29; `main` accepts only changes that pass CI ([status](docs/progress/plan.md#status)). The dashboard is shared by link and kept out of search engines.
 
 ## For reviewers
 
@@ -38,7 +40,7 @@ flowchart LR
     cron -.-> direct
 ```
 
-Two modes write the same bucket, one at a time: **full** (the whole pipeline, on one machine) and **direct** (no Docker, Kafka or PostgreSQL, on GitHub Actions, so the dashboard stays current with no machine on). How they hand over is in the [architecture](docs/technical/architecture.md#switching-modes).
+Two [modes](docs/technical/architecture.md#switching-modes) take turns: **full** runs the whole pipeline on one machine, **direct** runs on GitHub Actions with no machine on.
 
 ## Quality at a glance
 
@@ -90,7 +92,7 @@ make api                 # the REST API at http://127.0.0.1:8000/docs
 
 ## Tests and QA
 
-`make regression` runs every layer in order (lint, unit, integration, API, contract, end-to-end, dashboard, disruptive, performance), then the traceability check, and writes its reports to `reports/`. What each layer covers, and why, is in the [test strategy](docs/progress/test-strategy.md); the other QA documents are the [requirements](docs/progress/requirements.md) and their [traceability matrix](docs/progress/traceability-matrix.md), the [defect log](docs/progress/defects.md), the [data-quality rules](docs/technical/data-quality-rules.md) and the [known limitations](docs/overview/limitations.md).
+`make regression` runs every layer in order (lint, unit, integration, API, contract, end-to-end, dashboard, disruptive, performance), then the traceability check, and writes its reports to `reports/`. What each layer covers, and why, is in the [test strategy](docs/progress/test-strategy.md); the other QA documents are listed under [Documentation](#documentation).
 
 ## How Claude Code was used
 
