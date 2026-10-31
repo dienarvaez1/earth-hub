@@ -202,7 +202,9 @@ services:
 
   api:
     # Read-only: queries PostgreSQL only. `make api`, then http://127.0.0.1:8000/docs
-    profiles: [api]
+    # In `ingest` too, as the exporter depends on it: without it, any command with only
+    # `--profile ingest` is an invalid project (DEF-061). It starts only when named or needed.
+    profiles: [api, ingest]
     image: earth-hub:dev
     env_file: .env
     environment: *in-network

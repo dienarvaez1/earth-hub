@@ -1,6 +1,7 @@
 """scripts/modes.py: switching modes and backfilling in full mode, each one command with its
 checks, run here against a fake shell (no Docker, Kafka, PostgreSQL or R2)."""
 
+import json
 import re
 import sys
 from datetime import date
@@ -12,6 +13,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
 import modes  # noqa: E402
 
 pytestmark = pytest.mark.req("REQ-MODE-016")
+
+
+@pytest.fixture(autouse=True)
+def outcome_file(tmp_path, monkeypatch):
+    """The handover's outcome file (DEF-062), out of reports/."""
+    monkeypatch.setattr(modes, "OUTCOME", tmp_path / "handover.json")
+
 
 DESCRIBE = """
 GROUP  TOPIC  PARTITION  CURRENT-OFFSET  LOG-END-OFFSET  LAG  CONSUMER-ID  HOST  CLIENT-ID
@@ -182,10 +190,14 @@ def test_lag_reads_the_brokers_table():
 class Hosts(Fake):
     """Fake adds the owner, this host and its database to what the checks read."""
 
-    def __init__(self, *, owner=None, live=False, host="host-b", db="empty", check=0, **kwargs):
+    def __init__(self, *, owner=None, live=False, host="host-b", db="empty", check=0,
+                 outcome="differs", **kwargs):  # fmt: skip
         super().__init__(**kwargs)
         self.owner, self.live, self.host = owner, live, host
         self.db, self.check = db, check  # db: "empty" or "data"; check: rebuild check's exit
+        # What a failed `make mode-full` leaves in reports/handover.json (DEF-062): "differs",
+        # "failed", "switched-then-failed" (the check against USGS after the switch), or None.
+        self.outcome = outcome
 
     def read(self, *cmd):
         line = " ".join(cmd)
@@ -196,7 +208,7 @@ class Hosts(Fake):
                 out += f"owner {self.owner}, lease until 2026-10-30T12:00:00Z ({state})\n"
             return 0, out + f"this host: {self.host}\n"
         if "earth_hub.direct.rebuild status" in line:
-            return 0, "rebuild: this database is empty" if self.db == "empty" else "rebuild: ok"
+            return self._status()
         if "earth_hub.direct.rebuild check" in line:
             return (
                 self.check,
@@ -206,9 +218,32 @@ class Hosts(Fake):
             return 0, "run-1 succeeded"
         return super().read(*cmd)
 
+    def _record_outcome(self):
+        if self.outcome is None:  # stopped before the handover (a build, Compose)
+            return
+        if self.outcome == "switched-then-failed":
+            self.mode, self.owner, self.live = "full (active) since now", self.host, True
+            record = {"command": "full", "outcome": "switched"}
+        else:
+            record = {"command": "full", "outcome": self.outcome, "reason": "simulated"}
+        modes.OUTCOME.write_text(json.dumps(record))
+
+    def _status(self):
+        """`rebuild status`: its exit codes are check's (DEF-060)."""
+        if self.db == "empty":
+            return 0, "rebuild: this database is empty: nothing to lose"
+        if self.db == "unreadable":
+            return 2, "rebuild: R2 settings missing"
+        return (
+            self.check,
+            "rebuild: REFUSED: 1 USGS IDs the bucket lacks" if self.check else "rebuild: ok",
+        )
+
     def run(self, *cmd):
-        super().run(*cmd)
         line = " ".join(cmd)
+        if line == self.fail == "make mode-full" and not self.dry_run:
+            self._record_outcome()
+        super().run(*cmd)
         if line.startswith("make mode-full") and not self.dry_run and line != self.fail:
             self.mode = "full (active) since now"
             self.owner, self.live = self.host, True
@@ -280,6 +315,60 @@ def test_a_claim_refuses_a_wrong_start_without_changing_anything(hosts, says, ca
 
 
 @MODE_REQ
+def test_a_database_ahead_of_the_bucket_still_tries_the_handover_first():
+    # DEF-060: `rebuild status` exiting 1 (read, wiping would lose data) stopped the claim as
+    # "could not read this host's database", before `make mode-full` was tried.
+    shell = Hosts(db="data", check=1)
+    assert modes.main(["host-claim"], shell) == 0
+    assert ran(shell) == ["make up", "make migrate", "make mode-full", "make reconcile"]
+
+
+@MODE_REQ
+def test_a_database_ahead_that_differs_refuses_the_rebuild_and_wipes_nothing(capsys):
+    shell = Hosts(db="data", check=1, fail="make mode-full")
+    assert modes.main(["host-claim"], shell) == 2
+    assert ran(shell)[-1] == "make ingest-stop" and "make reset" not in ran(shell)
+    out = capsys.readouterr().out
+    assert "would lose data" in out and "could not read" not in out
+
+
+@MODE_REQ
+@pytest.mark.parametrize(
+    ("outcome", "says"),
+    [
+        (None, "stopped before the handover's comparison"),
+        ("failed", "simulated"),
+        ("switched-then-failed", "the handover switched, then a later step failed"),
+    ],
+    ids=["before the handover", "another handover failure", "after the switch"],
+)
+def test_a_failed_handover_that_is_not_a_difference_wipes_nothing(outcome, says, capsys):
+    # DEF-062: any failure of make mode-full (here a Compose error, DEF-061) went on to the
+    # rebuild; after the switch it would have wiped the database of the bucket's new owner.
+    shell = Hosts(db="data", fail="make mode-full", outcome=outcome)
+    assert modes.main(["host-claim"], shell) == 1
+    assert ran(shell) == ["make up", "make migrate", "make mode-full"]
+    out = capsys.readouterr().out
+    assert says in out and "nothing was wiped" in out and "rebuilding" not in out
+
+
+def test_an_outcome_left_by_an_earlier_handover_is_cleared_first(capsys):
+    modes.OUTCOME.write_text(json.dumps({"command": "full", "outcome": "differs"}))
+    shell = Hosts(db="data", fail="make mode-full", outcome=None)
+    assert modes.main(["host-claim"], shell) == 1
+    assert "make reset" not in ran(shell)
+
+
+def test_a_claim_fails_when_the_database_cannot_be_read(capsys):
+    shell = Hosts(db="unreadable")
+    assert modes.main(["host-claim"], shell) == 1
+    assert "could not read this host's database: rebuild: R2 settings missing" in (
+        capsys.readouterr().out
+    )
+    assert "make mode-full" not in " ".join(ran(shell))
+
+
+@MODE_REQ
 def test_a_claim_after_a_host_stopped_takes_the_bucket_over_first():
     shell = Hosts(mode="full (active) since x", owner="host-a", live=False)
     assert modes.main(["host-claim"], shell) == 0
@@ -336,3 +425,13 @@ def test_host_status_writes_nothing(capsys):
     assert ran(shell) == []
     out = capsys.readouterr().out
     assert "Owner: host-a, lease expired" in out and "This host: host-b" in out
+
+
+def test_the_machine_id_prompt_with_no_input_wipes_nothing(monkeypatch, capsys):
+    # DEF-059: with no terminal, input() raises EOFError; that is not the ID typed.
+    def no_input(_prompt):
+        raise EOFError
+
+    monkeypatch.setattr("builtins.input", no_input)
+    assert modes.ask("host-b") is False
+    assert "No answer" in capsys.readouterr().out

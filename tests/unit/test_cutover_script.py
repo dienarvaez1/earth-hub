@@ -32,11 +32,13 @@ class Machine(modes.Shell):
 
     def __init__(self, *, mode="direct (active) since x", owner=None, live=False, host="host-b",
                  docker=True, direct_run=False, feed="200", last_round="2026-10-31T02-17-01Z",
-                 claim_dry_run=0, dry_run=False, services=cutover.SERVICES):  # fmt: skip
+                 claim_dry_run=0, dry_run=False, services=cutover.SERVICES,
+                 db=None):  # fmt: skip
         super().__init__(dry_run=dry_run)
         self.mode, self.owner, self.live, self.host = mode, owner, live, host
         self.docker, self.direct_run, self.feed = docker, direct_run, feed
         self.last_round, self.claim_dry_run, self.services = last_round, claim_dry_run, services
+        self.db = db  # None: PostgreSQL not running; else `rebuild status`'s (exit, output)
         self.reads: list[str] = []
 
     def _marker(self):
@@ -70,7 +72,11 @@ class Machine(modes.Shell):
                 lambda: line in ("make host-release DRY_RUN=1", "make host-claim DRY_RUN=1"),
                 lambda: (self.claim_dry_run, "    [1/6] ...\n    Dry run: nothing was changed."),
             ),
-            (lambda: cmd[:3] == ("docker", "compose", "ps"), lambda: (0, "\n".join(self.services))),
+            (lambda: "earth_hub.direct.rebuild status" in line, lambda: self.db),
+            (
+                lambda: cmd[:3] == ("docker", "compose", "ps"),
+                lambda: (0, "\n".join([*self.services, *(["postgres"] if self.db else [])])),
+            ),
         ]
         for matches, answer in answers:
             if matches():
@@ -242,3 +248,66 @@ def test_env_file_reads_values_and_skips_comments(tmp_path):
         "EMPTY": "",
     }
     assert cutover.env_file(tmp_path / "missing") == {}
+
+
+# DEF-059: `! make cutover-b` (no terminal) raised EOFError at the prompt.
+
+
+def no_input(_prompt):
+    raise EOFError
+
+
+def test_no_answer_to_the_prompt_is_a_no_with_nothing_changed(capsys):
+    a = Machine(mode="full (active) since x", owner="host-a", live=True, host="host-a")
+    b = Machine()
+    assert cutover.main(["a"], a, ask=no_input, now=lambda: NOW) == 0
+    assert cutover.main(["b"], b, ask=no_input, env=ENV) == 0
+    assert capsys.readouterr().out.count("No answer: nothing was changed") == 2
+    assert ran(a) == ran(b) == []
+
+
+@pytest.mark.parametrize("machine", ["a", "b"])
+def test_a_real_run_without_a_terminal_refuses_before_anything(machine, monkeypatch, capsys):
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: False, raising=False)
+    shell = Machine()
+    assert cutover.main([machine], shell, env=ENV, now=lambda: NOW) == 2
+    assert "run this in a terminal" in capsys.readouterr().out
+    assert ran(shell) == [] and not shell.reads  # not even the pre-checks
+
+
+def test_a_dry_run_needs_no_terminal(monkeypatch):
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: False, raising=False)
+    shell = Machine()
+    assert cutover.main(["b", "--dry-run"], shell, env=ENV) == 0
+    assert "make host-claim DRY_RUN=1" in shell.reads
+
+
+# DEF-060: a database ahead of the bucket, found only after Kafka and PostgreSQL were started.
+
+AHEAD = (
+    1,
+    '{"level": "INFO", "message": "bucket state refreshed"}\n'
+    "rebuild: REFUSED, wiping this database would lose:\n"
+    "  1 events at a newer revision than the bucket's: ['aka2026vnrcdp']\n",
+)
+
+
+@pytest.mark.parametrize(
+    ("db", "mark", "says"),
+    [
+        (None, "ok  ", "PostgreSQL not running: compared during the claim"),
+        ((0, "rebuild: this database is empty: nothing to lose\n"), "ok  ",
+         "this database is empty: nothing to lose"),
+        (AHEAD, "warn", "1 events at a newer revision than the bucket's: ['aka2026vnrcdp']. "
+         "If the claim must rebuild it, it will refuse"),
+        ((2, "rebuild: R2 settings missing\n"), "warn", "could not compare"),
+    ],
+    ids=["not running", "empty", "ahead", "unreadable"],
+)  # fmt: skip
+def test_b_says_before_the_prompt_whether_its_database_is_ahead(db, mark, says, capsys):
+    b = Machine(db=db)
+    assert run_b(b) == 0  # a warning: the handover may still find them the same
+    out = capsys.readouterr().out
+    line = next(x for x in out.splitlines() if "this host's database is not ahead" in x)
+    assert line.startswith(f"  [{mark}]") and says in line
+    assert out.index(line) < out.index("2. Dry run")
