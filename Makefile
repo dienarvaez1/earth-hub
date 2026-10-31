@@ -72,9 +72,10 @@ r2-get: ## Print one R2 object (read-only): make r2-get KEY=analytics/meta.json 
 	@test -n "$(KEY)" || (echo "usage: make r2-get KEY=analytics/meta.json [OUT=file]"; exit 1)
 	uv run python -m earth_hub.export.browse get $(KEY) $(if $(OUT),--out $(OUT))
 
-dashboard-install: ## Install the dashboard's Node dependencies (dashboard/package-lock.json) and the test browser
+dashboard-install: ## Install the dashboard's Node dependencies (dashboard/package-lock.json), the test browser and the DuckDB extensions the page serves
 	cd dashboard && npm ci
 	uv run playwright install chromium
+	uv run python scripts/fetch_duckdb_extensions.py
 
 dashboard-build: ## Build the dashboard page into dashboard/dist
 	uv run python scripts/fetch_duckdb_extensions.py
