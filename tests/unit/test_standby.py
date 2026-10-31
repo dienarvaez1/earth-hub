@@ -386,3 +386,15 @@ def test_the_service_and_the_skipped_rounds_stay_inside_the_budget(api, s3, tmp_
     )
     assert month_a < FREE_CLASS_A / 2
     assert month_b < FREE_CLASS_B / 10
+
+
+def test_the_service_keeps_no_local_copy_of_its_run_records(s3):
+    # DEF-063: its container's working directory is not writable by the service's user.
+    from types import SimpleNamespace
+
+    from earth_hub.direct import standby
+
+    settings = SimpleNamespace(export_workers=4, machine_id="host-a")
+    exporter = standby.make_exporter(None, Bucket(s3, BUCKET), "http://api:8000/api/v1", settings)
+    assert exporter.local_dir is None
+    assert exporter.machine == "host-a"

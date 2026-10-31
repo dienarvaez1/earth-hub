@@ -501,3 +501,23 @@ def test_a_bucket_named_by_id_is_renamed_by_the_next_run(export, api, s3):
     assert record.status == "succeeded"
     assert (record.counts.new, record.counts.deleted) == (7, 7)  # every row moves to its key
     assert stored_rows(s3) == {row["key"]: published(row) for row in api.rows}
+
+
+@pytest.mark.req("REQ-EXP-006")
+def test_a_run_record_that_cannot_be_saved_locally_neither_fails_the_run_nor_keeps_the_lock(
+    api, bucket, tmp_path, s3, caplog
+):
+    # DEF-063: in the exporting service's container `reports/` could not be created; the save
+    # right after taking the lock raised, outside the code that releases it, and every attempt
+    # left the lock held for its whole time.
+    blocked = tmp_path / "a file"
+    blocked.write_text("")
+    exporter = Exporter(
+        api.client(), bucket, api_url="http://api.test/api/v1", local_dir=blocked / "exports"
+    )
+    record = exporter.run()
+    assert record.status == "succeeded"
+    assert s3.list_objects_v2(Bucket=BUCKET, Prefix=LOCK_KEY)["KeyCount"] == 0  # released
+    assert s3.list_objects_v2(Bucket=BUCKET, Prefix="runs/")["KeyCount"] == 1  # the record
+    assert "could not save run record" in caplog.text
+    assert exporter.run().status == "succeeded"  # and the next run can take the lock

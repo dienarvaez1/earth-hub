@@ -520,10 +520,16 @@ class Exporter:
     # Run records and the lock. A run's record is its own object, written without the lock.
 
     def _save(self, record: RunRecord) -> None:
+        """Never raises: it runs right after the lock is taken and as the lock is released, so
+        a failure here left the lock held for its whole time (DEF-063). The bucket's copy is the
+        record; the local one is a convenience for runs started on the host."""
         body = record.to_json()
         if self.local_dir is not None:
-            self.local_dir.mkdir(parents=True, exist_ok=True)
-            (self.local_dir / f"{record.run_id}.json").write_bytes(body)
+            try:
+                self.local_dir.mkdir(parents=True, exist_ok=True)
+                (self.local_dir / f"{record.run_id}.json").write_bytes(body)
+            except OSError as exc:
+                logger.warning("could not save run record %s locally: %s", record.run_id, exc)
         if not record.dry_run:
             try:
                 self.bucket.put(f"{RUNS_PREFIX}{record.run_id}.json", body)
