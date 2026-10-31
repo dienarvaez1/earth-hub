@@ -98,7 +98,7 @@ def test_a_merged_event_matches_by_any_of_its_ids():
     assert report.ok and report.days["2026-10-21"] == {"usgs": 1, "ours": 1}
 
 
-def test_an_event_usgs_split_after_earth_hub_merged_it_is_unexplained():
+def test_an_event_usgs_split_after_earth_hub_merged_it_is_explained_never_pending():
     """Seen live on 2026-10-20: USGS once listed us6000u3jl and pt26293000 as one event, then as
     two. Both match the one record Earth-Hub merged them into, which it never splits."""
     t = NOW - timedelta(hours=2)
@@ -108,7 +108,8 @@ def test_an_event_usgs_split_after_earth_hub_merged_it_is_unexplained():
         event("us6000u3jl", t, t, ids={"attn6uqd", "us6000u3jl"}),
     ]
     report = run(ours, live)
-    assert kinds(report) == [("split at USGS", "us6000u3jl", False)]
+    assert kinds(report) == [("split at USGS", "us6000u3jl", True)]
+    assert report.differences[0].settled and report.ok  # a known limitation, not a fault
     assert "merged both into attn6uqd" in report.differences[0].reason
     assert report.days["2026-10-21"] == {"usgs": 2, "ours": 1}
 
@@ -250,7 +251,7 @@ def check(s3, monkeypatch):
     monkeypatch.setattr(
         u,
         "usgs_events",
-        lambda fdsn, start, end, deleted: state[deleted == "only" and "deleted" or "live"],
+        lambda fdsn, start, end, deleted, **_: state[deleted == "only" and "deleted" or "live"],
     )
     return state
 
@@ -398,7 +399,7 @@ def test_the_command_compares_the_range_asked_and_prints_a_line_per_period_and_a
     start_direct(s3)
     asked = []
     monkeypatch.setattr(
-        u, "usgs_events", lambda fdsn, start, end, deleted: asked.append((start, end)) or []
+        u, "usgs_events", lambda fdsn, start, end, deleted, **_: asked.append((start, end)) or []
     )
     assert u.main(["--start", "2026-01-01", "--end", "2026-02-28", "--by", "month"]) == 0
     assert set(asked) == {(datetime(2026, 1, 1, tzinfo=UTC), datetime(2026, 3, 1, tzinfo=UTC))}
@@ -491,3 +492,43 @@ def test_older_than_the_month_feed_a_revision_is_judged_by_the_history_pass():
     # Within the month feed's 30 days, the month feed still judges it.
     recent = NOW - timedelta(days=5)
     assert marks.feed_for(event("c", recent, recent)) == ("month feed", NOW)
+
+
+# --- what Earth-Hub's own rules reject ----------------------------------------------------------
+
+
+@pytest.mark.req("REQ-REC-007")
+def test_an_event_earth_hubs_rules_reject_is_explained_not_missing(feature_template):
+    """Seen 2024-2025: 72 Oklahoma events at magnitude -2.01 to -2.31, below MAG-001's -2."""
+    old = datetime(2024, 2, 10, 1, 26, tzinfo=UTC)
+    tiny = event_at(feature_template, "ok2024cvez", old, mag=-2.31)
+    ok = event_at(feature_template, "ok2024good", old, mag=1.2)
+    server = FdsnServer([tiny, ok])
+    fdsn = FdsnClient(
+        "https://earthquake.usgs.gov/fdsnws/event/1",
+        make_http_client(transport=server.transport),
+        pause_s=0,
+        sleep=lambda s: None,
+    )
+    day = datetime(2024, 2, 10, tzinfo=UTC)
+    live = u.usgs_events(fdsn, day, day + u.DAY, deleted="false", known=frozenset({"ok2024good"}))
+    assert {e.id: e.rejected for e in live} == {
+        "ok2024cvez": "MAG-001: magnitude -2.31 outside -2..10.5",
+        "ok2024good": None,  # stored: not validated again
+    }
+    report = u.compare(
+        [event("ok2024good", old, old + timedelta(minutes=5))],
+        live,
+        [],
+        MARKS,
+        start=day,
+        end=day + u.DAY,
+    )
+    [d] = report.differences
+    assert (d.kind, d.event_id, d.explained, d.settled) == (
+        "rejected here",
+        "ok2024cvez",
+        True,
+        True,
+    )
+    assert "MAG-001" in d.reason and report.ok

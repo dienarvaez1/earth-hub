@@ -27,7 +27,7 @@ from pathlib import Path
 from earth_hub.database.progress import Progress
 from earth_hub.ingestion import history
 from earth_hub.ingestion.backfill import MIN_SPLIT
-from earth_hub.ingestion.events import InvalidFeed, log_rejected, parse_feed
+from earth_hub.ingestion.events import EventMessage, InvalidFeed, log_rejected, parse_feed
 from earth_hub.ingestion.fdsn import MAX_RESULTS, FdsnClient, FdsnTooSlow, FdsnUnavailable
 from earth_hub.ingestion.producer import EventPublisher
 from earth_hub.ingestion.usgs_client import FeedUnavailable, UsgsClient
@@ -186,15 +186,18 @@ class CatchUp:
             if self._fdsn.count(day, min(day + history.DAY, end), include_deleted="false")
             != ours[f"{day:%Y-%m-%d}"]
         ]
-        candidates = []
+        candidates, messages = [], []
         for day in differing:
+            # What USGS lists that Earth-Hub never stored is published as it comes (only what is
+            # new or newer passes needs_publish below); the consumer's rules then decide.
             listed = self._listed(day, min(day + history.DAY, end))
+            messages += listed
+            ids = {i for m in listed for i in m.ids}
             candidates += [
                 e
                 for e in stored
-                if history.day_of(e.event_time_ms) == f"{day:%Y-%m-%d}" and not e.ids & listed
+                if history.day_of(e.event_time_ms) == f"{day:%Y-%m-%d}" and not e.ids & ids
             ]
-        messages = []
         for event in candidates[:AUDIT_LOOKUPS]:
             body = self._fdsn.event(event.event_id)
             message = history.deletion(
@@ -204,7 +207,7 @@ class CatchUp:
                 messages.append(message)
         outcome = self._publisher.publish(self._progress.needs_publish(messages))
         if outcome.failed:
-            raise FdsnUnavailable(f"{len(outcome.failed)} audit deletions not delivered")
+            raise FdsnUnavailable(f"{len(outcome.failed)} audit events not delivered")
         complete = len(candidates) <= AUDIT_LOOKUPS  # else the same month again next time
         if complete:
             self._progress.set_checkpoint(f"audit:{month:%Y-%m}", started)
@@ -223,14 +226,13 @@ class CatchUp:
         )
         return len(outcome.delivered)
 
-    def _listed(self, start: datetime, end: datetime) -> set[str]:
-        """Every ID of the events USGS lists in [start, end), deleted ones included."""
-        parsed = parse_feed(
+    def _listed(self, start: datetime, end: datetime) -> list[EventMessage]:
+        """The events USGS lists in [start, end), deleted ones included."""
+        return parse_feed(
             self._fdsn.query(start, end, include_deleted="true"),
             fetched_at=self._clock(),
             source="audit",
-        )
-        return {i for m in parsed.messages for i in m.ids}
+        ).messages
 
     def due(self, name: str, interval: timedelta) -> bool:
         last = self._last_catchup if name == "catchup" else self._progress.checkpoint(name)
