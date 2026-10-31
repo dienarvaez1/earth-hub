@@ -38,7 +38,7 @@ from earth_hub.database.repository import export_cut
 from earth_hub.direct.handover import Standby, read_standby, write_standby
 from earth_hub.export import lock, mode
 from earth_hub.export.bucket import Bucket
-from earth_hub.export.r2 import Exporter
+from earth_hub.export.r2 import Exporter, _git_commit
 from earth_hub.ingestion.state import STATE_WINDOW, SentState, read_topic_since, state_from_messages
 from earth_hub.kafka_metadata import with_retries
 from earth_hub.reconcile import committed_offsets
@@ -193,13 +193,28 @@ def make_cut(engine: Engine, settings, clock: Callable[[], datetime]):
     return cut
 
 
+def make_exporter(api, bucket: Bucket, api_url: str, settings) -> Exporter:
+    """The service's exporter (`api`: an httpx.Client; `settings`: earth_hub.config.Settings).
+    No local copy of run records (`local_dir=None`): the container's working directory is not
+    writable by its user, nor visible from the host, and the bucket keeps every record under
+    runs/ (DEF-063)."""
+    return Exporter(
+        api,
+        bucket,
+        api_url=api_url,
+        workers=settings.export_workers,
+        git_commit=_git_commit(),
+        machine=settings.machine_id,
+        local_dir=None,
+    )
+
+
 def main() -> int:
     import httpx
 
     from earth_hub.config import get_settings
     from earth_hub.database.engine import make_engine
     from earth_hub.export.bucket import MissingSettings, make_s3_client
-    from earth_hub.export.r2 import _git_commit
     from earth_hub.logging_config import configure_logging
 
     configure_logging()
@@ -224,14 +239,7 @@ def main() -> int:
         service = Service(
             bucket,
             machine=settings.machine_id,
-            make_exporter=lambda: Exporter(
-                api,
-                bucket,
-                api_url=api_url,
-                workers=settings.export_workers,
-                git_commit=_git_commit(),
-                machine=settings.machine_id,
-            ),
+            make_exporter=lambda: make_exporter(api, bucket, api_url, settings),
             cut=make_cut(engine, settings, lambda: datetime.now(UTC)),
             last_change=last_change,
             interval=timedelta(seconds=settings.export_interval_seconds),
