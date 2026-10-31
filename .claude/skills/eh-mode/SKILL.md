@@ -17,8 +17,8 @@ cron trigger, keeping the dashboard current while no machine runs.
 | `status` (default) | `make -s mode` (in full mode also the owner, its lease, live or expired, and this host), `make -s direct-runs LIMIT=5` | no |
 | `direct` | `make to-direct` ⚠ (in the background: waits for the consumers, `make reconcile`, `make mode-direct`, which stops the poller and catch-up, exports, hands over, catches up and checks against USGS, then `make down`; a few minutes) | bucket, stops services |
 | `full` | `make to-full` ⚠ (in the background: Docker and the mode checked, `make up`, `make mode-full`, which replays direct mode's log into Kafka, checks and switches back, then waits for the consumers and `make reconcile`; the 4-hourly rounds then skip) | bucket, Kafka, PostgreSQL |
-| `usgs [DAYS]` | `make reconcile-usgs [DAYS=3]`: the mode writing the bucket against USGS, every difference pending (explained) or not | no |
-| `catchup` | `make catchup-now` ⚠ (in either mode: day feed, month feed and deletions, whether due or not) | bucket, or Kafka in full mode |
+| `usgs [DAYS]` | `make reconcile-usgs [DAYS=3]`: the mode writing the bucket against USGS, every difference pending, explained (rejected by a rule, a kept merge, no origin at FDSN) or unexplained; any range by day, month or year with `/eh-reconcile` | no |
+| `catchup` | `make catchup-now` ⚠ (in either mode: day feed, month feed, deletions, history pass and audit, whether due or not) | bucket, or Kafka in full mode |
 | `once` | `make direct-once` ⚠ (one poller round, and catch-up if due) | bucket |
 | `run` | `make direct-run` ⚠ (until stopped; run it in the background) | bucket |
 | `reconcile` | `make reconcile-direct` (`deep`: `make reconcile-direct DEEP=1`, one read per row) | no |

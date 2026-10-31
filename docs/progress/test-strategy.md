@@ -169,4 +169,4 @@ The code and tests were written with Claude Code, under a fixed working method:
 - the real suite is run and its output reviewed
 - every diff is reviewed before commit
 
-The safeguards in this strategy apply to AI-written tests as much as to AI-written code: mutation spot checks, repeated runs, independent oracles and tests of the test tooling. Five of the recorded defects were in the test tooling itself (DEF-007, DEF-008, DEF-025, DEF-028 and DEF-029), found because results were checked rather than trusted. The documentation is held to the same standard: its API and SQL examples are replayed by tests, and its links and schema are checked.
+The safeguards in this strategy apply to AI-written tests as much as to AI-written code: mutation spot checks, repeated runs, independent oracles and tests of the test tooling. Some of the recorded defects were in the test tooling itself (DEF-007, DEF-008, DEF-025, DEF-028 and DEF-029), found because results were checked rather than trusted. The documentation is held to the same standard: its API and SQL examples are replayed by tests, and its links and schema are checked.

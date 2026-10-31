@@ -50,7 +50,7 @@ backfill: up ## Backfill from USGS FDSN, one week per request: make backfill STA
 	@test -n "$(START)" || (echo "usage: make backfill START=2026-01-01 [END=2026-06-01]"; exit 1)
 	uv run python -m earth_hub.ingestion.backfill --start $(START) $(if $(END),--end $(END))
 
-catchup-once: up ## One catch-up pass (all_month feed) and one deleted-events check
+catchup-once: up ## One catch-up pass (all_month feed), deleted-events check, history pass and audit
 	uv run python -m earth_hub.ingestion.catchup --once
 
 consume: ## Run the consumer from this machine (Ctrl+C to stop)
@@ -149,7 +149,7 @@ backfill-full: ## Backfill in full mode in one command: make ingest, make backfi
 	@test -n "$(START)" || (echo "usage: make backfill-full START=2026-01-01 [END=2026-06-01]"; exit 1)
 	uv run python scripts/modes.py $(if $(DRY_RUN),--dry-run) backfill $(START) $(END)
 
-catchup-now: ## Catch up with USGS now, in the mode that writes the bucket: day feed, month feed, deletions
+catchup-now: ## Catch up with USGS now, in the mode that writes the bucket: day feed, month feed, deletions, history pass, audit
 	@if uv run python -m earth_hub.direct.handover status | grep -q '^direct (active)'; then \
 		uv run python -m earth_hub.direct once --all; \
 	else \

@@ -49,8 +49,8 @@ every status the output prints (for example `Explained`), in its order. Keep eve
 with no difference.
 
 Under it, the differences grouped by kind with their event IDs and reasons in plain words: **pending**
-(USGS changed it after Earth-Hub last read the feed that brings it; the next poll or catch-up brings
-it), **explained** if printed, and **unexplained** first and flagged if any (suggest `/eh-usgs event <ID>`
+(USGS changed it after Earth-Hub last read what brings it: the day feed, the month feed, the history pass for events older than 30 days, or the audit for a deletion USGS kept no time for; the next poll or catch-up brings
+it), **explained** if printed (by design and never cleared: `rejected here`, Earth-Hub's data-quality rules reject it, with the rule; `split at USGS`, a merge Earth-Hub keeps; `no origin at FDSN`, USGS's services disagree), and **unexplained** first and flagged if any (suggest `/eh-usgs event <ID>`
 and `/eh-db event <ID>`, or `make catchup-now`). With more than about 20, give the counts per kind and the
 first few IDs. Give the "last read" line's feed times when a difference is pending, and end with the
 `RESULT` line.

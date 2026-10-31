@@ -69,7 +69,7 @@ Always send a User-Agent: `UA="earth-hub (manual check)"`.
 | `/eh-mode catchup` | `make catchup-now` ⚠ | The same in whichever mode writes the bucket; in direct mode a round with the day feed too |
 | `/eh-backfill progress` | `docker compose exec -T postgres psql -U earth_hub_app earth_hub -c "SELECT job, status, count(*), sum(fetched), sum(rejected) FROM backfill_windows GROUP BY 1, 2"` | Which weeks are done, and the features dropped before Kafka |
 | `/eh-status reconcile` | `make reconcile` | Every Kafka message has a database row; 5 invariants hold |
-| `/eh-mode usgs` | `make reconcile-usgs [DAYS=3]` | Earth-Hub against USGS itself: every difference pending (explained) or not ([how](../technical/architecture.md#reconciliation-with-usgs)) |
+| `/eh-mode usgs` | `make reconcile-usgs [DAYS=3]` | Earth-Hub against USGS itself: every difference pending, explained (rejected by a rule, a kept merge, no origin at FDSN) or unexplained ([how](../technical/architecture.md#reconciliation-with-usgs)) |
 | `/eh-reconcile 2026-01-01 2026-10-31 month` | `make reconcile-usgs START=2026-01-01 [END=2026-10-31] [BY=day\|month\|year]` | The same for any range of UTC days, a line per day, month or year and a total; about 2 s a day of range |
 
 ## 4. Kafka
@@ -165,7 +165,7 @@ One marker in the bucket, `_state/mode.json`, says which mode writes it ([how it
 | `/eh-host takeover` | `make host-takeover` ⚠ | Direct mode takes the bucket over now, without waiting for the host's lease: for a host known gone |
 | | `make mode-direct` / `make mode-full` ⚠ | The handovers alone, without the checks and waiting around them |
 | `/eh-mode usgs` | `make reconcile-usgs [DAYS=3]` | The mode writing the bucket against USGS itself, every difference explained or flagged; runs by itself after each switch ([how](../technical/architecture.md#reconciliation-with-usgs)) |
-| `/eh-mode catchup` | `make catchup-now` ⚠ | Catch up with USGS now in either mode: day feed, month feed, deletions; runs by itself after each switch |
+| `/eh-mode catchup` | `make catchup-now` ⚠ | Catch up with USGS now in either mode: day feed, month feed, deletions, history pass and audit; runs by itself after each switch |
 
 ### Full mode: the pipeline on your machine
 
@@ -191,7 +191,7 @@ Only while `make mode` says `direct`. The 4-hourly rounds (a Cloudflare cron tri
 | `/eh-mode run` | `make direct-run` ⚠ | Direct mode from your machine until Ctrl-C: a round a minute instead of an hour. Not while the schedule is on |
 | `/eh-mode runs` | `make direct-runs [LIMIT=20]` | Direct mode's audit trail: each execution's status, who started it (Cloudflare trigger, GitHub schedule or by hand, `direct-run`, local), the mode, messages by part and outcome, elapsed time (read-only) |
 | | `gh run list --workflow watchdog.yml --limit 3` | The watchdog, hourly: it fails, and GitHub e-mails, when no `direct.yml` run started for 5 hours ([CI](../technical/ci.md#the-watchdog)) |
-| `/eh-mode catchup` | `make catchup-now` ⚠ | Catch up now: a direct round with the day feed, the month feed and the deletions, whether due or not |
+| `/eh-mode catchup` | `make catchup-now` ⚠ | Catch up now: a direct round with the day feed, the month feed, the deletions, the history pass and the audit, whether due or not |
 | `/eh-mode reconcile` | `make reconcile-direct [DEEP=1]` | Rows, manifest, snapshot, ID map and log agree, read-only ([direct mode](../technical/architecture.md#direct-mode)) |
 | `/eh-mode repair` | `make repair-rows [DRY_RUN=1]` ⚠ | Row objects that `DEEP=1` finds stale or missing, written again from the snapshot, in either mode (DEF-058) |
 | `/eh-r2 count` | `make r2-get KEY=analytics/meta.json \| jq '{run_id, written_at, rows}'` | Rows in the bucket now (PostgreSQL falls behind until `make mode-full`) |
