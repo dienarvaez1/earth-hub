@@ -45,7 +45,7 @@ As of 2026-10-29. The plan below is the original, with Milestone 7 revised; the 
 | The USGS credit and a disclaimer (research purposes, not affiliated with or endorsed by USGS, data that may be late or inaccurate when a part fails, no warranty, not for emergencies) in the dashboard's footer and the README | Done | #57 |
 | A privacy notice (`/privacy`, linked from the footer): no cookies, storage, tracking or location; the Worker's invocation logs, which recorded visitors' IP addresses and IP-derived locations, switched off | Done | #58 |
 | Code quality: Ruff's complexity (`C90`), security (`S`), simplification (`SIM`) and Pylint (`PL`) rules, with their first findings fixed or marked; CodeQL code scanning | Done | #59 |
-| [9. Standby: direct mode takes over from one full-mode machine](#milestone-9--standby-direct-mode-takes-over-from-one-full-mode-machine) | Approved; step 1 in progress | |
+| [9. Standby: direct mode takes over from one full-mode machine](#milestone-9--standby-direct-mode-takes-over-from-one-full-mode-machine) | Approved; step 1 in review | #61 |
 
 Current numbers: 191 requirements, all covered by a passing test; 58 defects, all fixed; about 1,200 tests in the full regression.
 
