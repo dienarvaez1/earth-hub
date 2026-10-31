@@ -6,8 +6,8 @@ cutover guide, months after rounds went to every 4 hours; "190 of them" in the R
 requirements. A fact that changes is stated in its homes below, and only there; other pages name
 it and link. Changing a fact = changing it in its homes (and here, if a home moves).
 
-History is left out on purpose: the plan, the defect log and the generated traceability matrix
-record what was true then.
+History is left out on purpose: the plan history, the defect log and the generated traceability
+matrix record what was true then.
 """
 
 import re
@@ -17,7 +17,7 @@ import pytest
 
 REPO = Path(__file__).resolve().parents[2]
 HISTORY = {
-    "docs/progress/plan.md",
+    "docs/progress/history.md",
     "docs/progress/defects.md",
     "docs/progress/traceability-matrix.md",
 }
@@ -50,22 +50,17 @@ FACTS = {
             "docs/technical/ci.md",
             "docs/technical/deployment.md",
             "docs/progress/requirements.md",
-            ".claude/skills/eh-dashboard/SKILL.md",
-            ".claude/skills/eh-mode/SKILL.md",
         },
     ),
     "the 5-hour staleness limit": (
         r"\b5 hours\b",
         {
             "CLAUDE.md",
-            "docs/overview/cheatsheet.md",
             "docs/technical/architecture.md",
             "docs/technical/ci.md",
             "docs/technical/deployment.md",
             "docs/progress/requirements.md",
             "docs/progress/test-strategy.md",
-            ".claude/skills/eh-mode/SKILL.md",
-            ".claude/skills/eh-status/SKILL.md",
         },
     ),
     "the 20-minute lease": (
@@ -75,7 +70,6 @@ FACTS = {
             "docs/technical/ci.md",
             "docs/technical/deployment.md",
             "docs/progress/requirements.md",
-            ".claude/skills/eh-host/SKILL.md",
         },
     ),
     "the export interval's default": (
@@ -85,6 +79,13 @@ FACTS = {
     "the audit's lookup limit": (
         r"at most 50|50 a day",
         {"docs/technical/architecture.md", "docs/progress/requirements.md"},
+    ),
+    # Left at 2 in ci.md after the workflow moved to 5 (#70).
+    "the daily reconcile's age limit": (r"max-age-hours \d", {"docs/technical/ci.md"}),
+    # "Up to an hour late" outlived the hourly rounds in the README and ci.md (#70).
+    "how late direct mode is": (
+        r"(?i)up to (?:an|one|two|three|four|five|six|\d+) hours? (?:late|after)",
+        {"docs/overview/limitations.md"},
     ),
 }
 
@@ -142,26 +143,27 @@ def test_the_counts_that_slipped_through_before_are_caught(sentence):
 
 # Today's sizes, rounded up: a ceiling while the pages are condensed, lowered as they shrink.
 BUDGETS = {
-    "README.md": 3700,
-    "CLAUDE.md": 3300,
-    "docs/overview/cheatsheet.md": 4500,
+    "README.md": 1800,
+    "CLAUDE.md": 2900,
+    "docs/overview/cheatsheet.md": 2900,
     "docs/overview/demo.md": 1600,
     "docs/overview/limitations.md": 1900,
-    "docs/technical/architecture.md": 9200,
+    "docs/technical/architecture.md": 7700,
     "docs/technical/deployment.md": 1800,
-    "docs/technical/ci.md": 2600,
+    "docs/technical/ci.md": 2300,
+    "docs/progress/plan.md": 1600,
     "docs/progress/test-strategy.md": 2800,
     ".claude/skills/eh-api/SKILL.md": 400,
     ".claude/skills/eh-backfill/SKILL.md": 400,
-    ".claude/skills/eh-dashboard/SKILL.md": 900,
+    ".claude/skills/eh-dashboard/SKILL.md": 600,
     ".claude/skills/eh-db/SKILL.md": 500,
     ".claude/skills/eh-export/SKILL.md": 600,
     ".claude/skills/eh-host/SKILL.md": 800,
     ".claude/skills/eh-kafka/SKILL.md": 500,
     ".claude/skills/eh-logs/SKILL.md": 400,
-    ".claude/skills/eh-mode/SKILL.md": 1100,
+    ".claude/skills/eh-mode/SKILL.md": 700,
     ".claude/skills/eh-poller/SKILL.md": 400,
-    ".claude/skills/eh-r2/SKILL.md": 800,
+    ".claude/skills/eh-r2/SKILL.md": 600,
     ".claude/skills/eh-reconcile/SKILL.md": 600,
     ".claude/skills/eh-start/SKILL.md": 400,
     ".claude/skills/eh-status/SKILL.md": 600,

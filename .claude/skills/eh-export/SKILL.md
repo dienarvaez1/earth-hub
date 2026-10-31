@@ -11,7 +11,7 @@ PostgreSQL directly, so **the API must be running**: check `curl -s -m 5 http://
 and if it doesn't answer, start it with `make api` first (say so).
 
 **Full mode only.** The exporter checks the bucket's mode marker after taking the lock, and refuses in
-direct mode ("the bucket is in direct mode, not full (make mode)"): there, the direct rounds (every 4 hours) write the
+direct mode ("the bucket is in direct mode, not full (make mode)"): there, the direct rounds write the
 rows and the snapshot themselves. Check `make -s mode` first; to export again, hand back with `/eh-mode full`.
 **Only on the bucket's owner** (`make -s mode` names it in full mode): on another host the export refuses
 ("the bucket is owned by …") and writes nothing. With the pipeline running (`make ingest`), the `exporter`
