@@ -20,32 +20,20 @@ settings are missing (the message names them).
 | `runs` | `make -s export-r2-runs` (the latest export runs and their counts) |
 | `audit` | `make -s direct-runs [LIMIT=20]` (direct mode's latest executions: status, who started each, mode, messages by part, elapsed), and one in full with `make -s r2-get KEY=audit/direct/<day>/<run_id>.json` |
 
-What's in the bucket (`docs/technical/architecture.md`, Export to R2): `earthquakes/<key>.json` (one per row, named by its key),
-`_state/earthquakes-manifest.json.gz` (SHA-256 per row), `_state/lock.json` (only during a run),
-`runs/<run_id>.json`, `analytics/earthquakes.parquet` and `analytics/meta.json` (the dashboard's snapshot).
-Direct mode's state (architecture, Direct mode): `_state/mode.json` (which mode writes the bucket; `make mode`),
-`_state/ids.json.gz` (the ID map), `_state/direct.json` (last sequence number, poller and catch-up state),
-`_state/direct-pending.json` (only while a round writes), `audit/direct/<date>/<run_id>.json` (one record per
-direct-mode execution: who started it, its status, counts and errors; `make direct-runs`), and `log/<date>/<first>-<last>.ndjson` (every
-message processed, in order, one folder per UTC day: today's newest with `make -s r2-ls PREFIX=log/$(date -u +%F)/ LIMIT=0 | tail -3`
-(empty until the day's first round: then the previous day's folder); listings are in key
-order, oldest first, so never take the newest from a `LIMIT`ed listing of `log/`).
-
-The public dashboard serves only the two `analytics/` files, at `/data/earthquakes.parquet` and
-`/data/meta.json` (see `/eh-dashboard check`).
+The bucket's layout is in docs/technical/architecture.md (Export to R2, Direct mode). In short: `earthquakes/<key>.json`
+(one per row), `analytics/` (the dashboard's snapshot and `meta.json`, the only files the page serves), `runs/`
+(export runs), `_state/` (the manifest, the lock, the mode marker, direct mode's state and ID map), `audit/direct/<day>/`
+(one record per direct execution) and `log/<day>/` (every message direct mode processed). Listings are in key order,
+oldest first: never take the newest from a `LIMIT`ed listing of `log/`; use
+`make -s r2-ls PREFIX=log/$(date -u +%F)/ LIMIT=0 | tail -3` (the previous day's folder if today's is empty).
 
 ## Report
 
 The listing or object, summarized: for `meta.json` the run, row count, size and when it was written; for a run
 record its status and counts.
 
-For `count`, a table like `/eh-db`'s, one row per source, then one line on what it means:
-
-| Source | rows | written at (UTC) | by | log sequence |
-| --- | --- | --- | --- | --- |
-| `analytics/meta.json` (the dashboard's snapshot) | 115,845 | 21:34:34 | direct round `<run_id>` (or export `<run_id>`) | 62 (direct mode) |
-| latest `runs/` record | 115,814 read (196 new, 54 updated, 0 deleted, 0 failed) | 19:55:49 | export `<run_id>` | – |
-| PostgreSQL (`/eh-db counts`) | 115,814 | last applied 19:52:36 | full mode | – |
+For `count`, a table with one row per source (the snapshot's `meta.json`, the latest `runs/` record, PostgreSQL),
+its rows, when and by what it was written, then one line on what it means:
 
 e.g. "the bucket holds 31 rows more than PostgreSQL: the events direct mode stored since the handover;
 `make mode-full` replays them". In full mode, after an export, all three should agree. Compare with PostgreSQL (`/eh-db counts`) when the question is "is R2 up to date".

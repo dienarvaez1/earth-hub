@@ -26,35 +26,16 @@ Local-first earthquake data platform: USGS GeoJSON feed → Python poller → Ka
 
 ## Commands
 
-- `make install`: install dependencies from `uv.lock`
-- `make up` / `make down` / `make reset`: start, stop, or stop and wipe Kafka and PostgreSQL
-- `make lint` / `make format`: Ruff checks and fixes. Rules in `pyproject.toml`: also complexity (`C90`), security (`S`), simplification (`SIM`) and Pylint's (`PL`), with the deliberate exceptions listed there; a finding that is a false alarm gets `# noqa: <rule> (<why>)` on its line, and the functions already over the complexity limits are listed in the plan to refactor
-- `make test`: unit tests (no Docker)
-- `make smoke`: integration smoke tests (needs `make up`)
-- `make smoke-restart`: restart services and check data survives
-- `make migrate`: `alembic upgrade head`
-- `make ingest` / `make ingest-once`: run the pipeline (migrate, poller, consumer) on the live feed / one poller round on the host. Never part of the test suite.
-- `make regression`: every layer in order, with reports in `reports/` and the traceability matrix. Run it before proposing a milestone as done.
-- `make backfill START=2026-01-01 [END=...]`, `make catchup-once`, `make test-performance` (a year of synthetic backfill, timed; the API under load).
-- `make load [USERS=] [RUN_TIME=]` / `make load-ui`: Locust against the API over a temporary, seeded database (`scripts/load_test.py`, `tests/load/locustfile.py`); report in `reports/load-report.html`. Locust runs as a subprocess and is never imported by pytest (gevent patches networking on import).
-- `make test-e2e`, `make test-disruptive` (stops shared containers), `make flake-check` (end-to-end suite ×5), `make traceability`.
-- `make reconcile`: topic-versus-database check.
-- `make reconcile-direct [DEEP=1]`: direct mode's bucket invariants (read-only). `make repair-rows [DRY_RUN=1]`: row objects that differ from the snapshot written again (writes the bucket: only when the user asks; DEF-058).
-- `make direct-runs [LIMIT=20]`: direct mode's audit trail, one line per execution (read-only; `earth_hub/direct/audit.py`).
-- `make reconcile-usgs [DAYS=3]`: the mode writing the bucket against USGS, every difference explained (read-only; `earth_hub/usgs_reconcile.py`). `make catchup-now`: catch up with USGS now, in either mode. Both run at the end of `make mode-direct` and `make mode-full`.
-- `make to-full` / `make to-direct` / `make backfill-full START=… [END=…]` (`scripts/modes.py`, `DRY_RUN=1` lists the steps): one command each, around the targets below, with their checks (Docker, the mode, no local `direct-run`, consumers caught up, `make reconcile`); `to-direct` ends with `make down`, `backfill-full` with `make export-r2`. They write the real bucket, Kafka or PostgreSQL: only when the user asks.
-- `make cutover-a` / `make cutover-b [DRY_RUN=1]` (`scripts/cutover.py`): the whole cutover, one command per machine: pre-checks, a dry run, `Proceed? [y/N]`, the steps, checks after. Their `DRY_RUN=1` is read-only; the real runs are the user's, in a terminal.
-- `make host-status` (read-only) / `make host-release` / `make host-claim` / `make host-rebuild` / `make host-takeover` (`scripts/modes.py`, `/eh-host`): move full mode between hosts. All but `host-status` write the real bucket or wipe this host's data: only when the user asks. A rebuild (also inside `host-claim` when the database differs) asks for the machine ID to be typed: the user runs it in a terminal; never type it or pass `--yes`.
-- `make mode` / `make mode-direct` / `make mode-full`: show / hand over the bucket between modes. `make direct-once` / `make direct-run`: run direct mode. All but `make mode` write to the real bucket or stop services: only when the user asks.
-- `make dashboard-install` / `make dashboard-build` / `make dashboard-dev` / `make test-dashboard`: the dashboard's Node setup, build, local server over the real bucket, browser tests.
-- `make dashboard-deploy`: publish the dashboard and the Worker's cron trigger to Cloudflare Workers. Only when the user asks; never part of the tests.
-- `make export-r2 [DRY_RUN=1] [VERIFY=1]` / `make export-r2-runs`: on-demand copy of `earthquakes` to R2 through the API / list runs. Never part of the test suite.
-- `make r2-ls [PREFIX=] [LIMIT=]` / `make r2-count [PREFIX=]` / `make r2-get KEY= [OUT=]`: read-only look at the bucket (`export/browse.py`; it must never write).
-- Skills: `.claude/skills/eh*` (`/eh-status`, `/eh-kafka`, `/eh-db`, …), indexed in `docs/overview/cheatsheet.md`. A new skill or make target used in them goes in the cheat sheet; `tests/unit/test_cheatsheet.py` checks both exist.
-- `make release [DRY_RUN=1]`: the public release (`scripts/release.py`), interactive: run by the user in a terminal, never by Claude or the tests.
-- `make trigger-token`: the dashboard trigger's GitHub token (`scripts/trigger_token.py`), interactive: run by the user in a terminal, never by Claude or the tests. The token must never be shown, written to a file or put on a command line.
-- `make trigger-check`: whether the Worker's deployed token works (`scripts/trigger_check.py`): `wrangler dev --remote --test-scheduled` fires the handler's `check` "cron" on Cloudflare, which reads `direct.yml` with the token and starts nothing. Read-only, safe to run; never part of the tests.
-- `make api` / `make api-dev`: serve the API (container / host with reload) at http://127.0.0.1:8000/docs.
+`make help` lists every target and what it does; the cheat sheet (`docs/overview/cheatsheet.md`) puts each next to the skill that runs it. What matters here is which ones Claude may run:
+
+- **Read-only, safe any time:** `make mode`, `make host-status`, `make direct-runs`, `make reconcile`, `make reconcile-direct [DEEP=1]`, `make reconcile-usgs`, `make r2-ls` / `make r2-count` / `make r2-get` (`export/browse.py`; it must never write), `make trigger-check` (fires the Worker's `check` "cron" on Cloudflare, which reads `direct.yml` with the token and starts nothing), and any `DRY_RUN=1`.
+- **Only when the user asks** (they write the real bucket, Kafka or PostgreSQL, or stop services): `make ingest`, `make export-r2`, `make dashboard-deploy`, `make to-full` / `make to-direct` / `make backfill-full` (`scripts/modes.py`), `make mode-direct` / `make mode-full`, `make direct-once` / `make direct-run`, `make catchup-now`, `make host-release` / `make host-claim` / `make host-takeover`, `make repair-rows` (DEF-058).
+- **Only the user, in a terminal** (interactive): the real runs of `make cutover-a` / `make cutover-b` (`scripts/cutover.py`); `make host-rebuild`, and `make host-claim` when it rebuilds: they ask for the machine ID to be typed: never type it or pass `--yes`; `make release` (`scripts/release.py`); `make trigger-token` (`scripts/trigger_token.py`): the token must never be shown, written to a file or put on a command line.
+- **Never part of the test suite:** `make ingest`, `make export-r2`, `make dashboard-deploy`, `make trigger-check`, and anything that calls the live USGS feed.
+- `make regression` runs every layer, with reports in `reports/` and the traceability matrix: run it before proposing a milestone as done.
+- `make lint`: Ruff, with complexity (`C90`), security (`S`), simplification (`SIM`) and Pylint's (`PL`) rules and the deliberate exceptions in `pyproject.toml`. A finding that is a false alarm gets `# noqa: <rule> (<why>)` on its line; the functions already over the complexity limits are listed in the plan to refactor.
+- `make load`: Locust runs as a subprocess and is never imported by pytest (gevent patches networking on import).
+- Skills: `.claude/skills/eh*`, indexed in the cheat sheet. A new skill, or a make target used in one, goes in the cheat sheet; `tests/unit/test_cheatsheet.py` checks both exist.
 
 Add dependencies with `uv add <pkg>` (or `uv add --dev <pkg>`); never edit `uv.lock` by hand.
 
