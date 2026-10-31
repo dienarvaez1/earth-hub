@@ -4,6 +4,10 @@ A local-first earthquake data platform, built as a QA engineering portfolio proj
 
 **Status:** released as [v1.0.0](https://github.com/dienarvaez1/earth-hub/releases/tag/v1.0.0) on 2026-10-29; `main` is protected and accepts only changes that pass CI ([status](docs/progress/plan.md#status)). The dashboard runs at **https://earth-hub.diego-narvaez.workers.dev**, shared by link and kept out of search engines.
 
+[![The Earth-Hub dashboard as it opens: this week's earthquakes on a world map](docs/images/dashboard.jpg)](https://earth-hub.diego-narvaez.workers.dev)
+
+*As it opens, with every default, on 2026-10-31.*
+
 ## For reviewers
 
 | If you have | Start with |
