@@ -20,6 +20,7 @@ Earth-Hub's documents, in three groups. Start with the [README](../README.md); a
 | [SQL examples](technical/sql-examples.md) | The dashboard's reports and queries for inspecting PostgreSQL, with results replayed by tests |
 | [Data-quality rules](technical/data-quality-rules.md) | The 16 validation rules, with their stable IDs |
 | [CI](technical/ci.md) | The GitHub Actions workflow, reading a run, security |
+| [Deployment](technical/deployment.md) | Where each part runs, setting up a machine for full mode, and the cutover of full mode from one machine to another (`make cutover-a`, `make cutover-b`) |
 
 ## Progress: the plan and the QA evidence
 

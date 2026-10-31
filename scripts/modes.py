@@ -377,7 +377,13 @@ def host_claim(
     code, out = shell.read("uv", "run", "python", "-m", "earth_hub.direct.rebuild", "status")
     empty = code == 0 and "empty" in out
     step("Hand over to full mode, this host the owner (make mode-full)")
-    if empty:
+    if code != 0 and shell.dry_run:  # PostgreSQL not started in a dry run
+        print("    would run: make mode-full REBUILD=1 if this host's database is empty; else make "
+              "mode-full, and if it differs from the bucket, a rebuild (check, backup, the machine "
+              "ID typed, make reset)")  # fmt: skip
+    elif code != 0:
+        raise Failed(f"could not read this host's database: {out.strip()[-300:]}")
+    elif empty:
         shell.run("make", "mode-full", "REBUILD=1")
     elif rebuild:
         _rebuild_database(shell, current.this_host, confirm)
