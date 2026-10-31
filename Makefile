@@ -1,4 +1,4 @@
-.PHONY: help install up down reset ingest ingest-once ingest-logs ingest-stop api api-dev api-stop kafka-ui kafka-ui-stop backfill catchup-once catchup-now reconcile-usgs consume reconcile reconcile-direct repair-rows mode mode-direct mode-full to-full to-direct host-status host-release host-claim host-rebuild host-takeover backfill-full direct-once direct-run direct-runs export-r2 export-r2-runs r2-ls r2-count r2-get dashboard-install dashboard-build dashboard-dev dashboard-deploy trigger-token trigger-check test-dashboard check-db-outage lint format test test-integration test-e2e test-disruptive test-performance load load-ui test-all regression flake-check traceability release smoke smoke-restart migrate coverage
+.PHONY: help install up down reset ingest ingest-once ingest-logs ingest-stop api api-dev api-stop kafka-ui kafka-ui-stop backfill catchup-once catchup-now reconcile-usgs consume reconcile reconcile-direct repair-rows mode mode-direct mode-full to-full to-direct cutover-a cutover-b host-status host-release host-claim host-rebuild host-takeover backfill-full direct-once direct-run direct-runs export-r2 export-r2-runs r2-ls r2-count r2-get dashboard-install dashboard-build dashboard-dev dashboard-deploy trigger-token trigger-check test-dashboard check-db-outage lint format test test-integration test-e2e test-disruptive test-performance load load-ui test-all regression flake-check traceability release smoke smoke-restart migrate coverage
 
 help: ## List the available commands
 	@grep -E '^[a-z0-9-]+:.*## ' $(MAKEFILE_LIST) | awk -F ':.*## ' '{printf "  %-17s %s\n", $$1, $$2}'
@@ -123,6 +123,12 @@ to-full: ## Direct mode to full mode in one command: checks, make mode-full, con
 
 to-direct: ## Full mode to direct mode in one command: consumers caught up, make reconcile, make mode-direct, make down (DRY_RUN=1 lists the steps)
 	uv run python scripts/modes.py $(if $(DRY_RUN),--dry-run) to-direct
+
+cutover-a: ## On the machine giving up full mode: pre-checks, a dry run, then (confirmed) release the bucket if it owns it and stop its containers (DRY_RUN=1: checks and dry run only)
+	@uv run python scripts/cutover.py a $(if $(DRY_RUN),--dry-run)
+
+cutover-b: ## On the machine taking full mode: pre-checks (tools, .env, R2, USGS), the claim's dry run, then (confirmed) make host-claim and checks after (DRY_RUN=1: checks and dry run only)
+	@uv run python scripts/cutover.py b $(if $(DRY_RUN),--dry-run)
 
 host-status: ## Who owns the bucket and its lease, this host, whether its database holds anything the bucket lacks (read-only)
 	@uv run python scripts/modes.py host-status
