@@ -3,7 +3,8 @@
 The other checks compare Earth-Hub with itself (make reconcile: Kafka with PostgreSQL;
 make reconcile-direct: the bucket's parts; the handovers: one mode with the other). This one
 compares what the mode writing the bucket holds with what USGS's FDSN service says now, for the
-last few UTC days, and explains every difference by where Earth-Hub is in reading USGS:
+last few UTC days or any range of them (--start, --end), counted by UTC day, month or year
+(--by), and explains every difference by where Earth-Hub is in reading USGS:
 
 | Difference                         | Explained (pending) when                                  |
 | ---------------------------------- | --------------------------------------------------------- |
@@ -37,7 +38,8 @@ import tempfile
 import time
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
+from datetime import time as clock
 from pathlib import Path
 
 from earth_hub.validation.earthquake_rules import review_status
@@ -102,6 +104,43 @@ class Report:
 
 def _ms(moment: datetime) -> int:
     return int(moment.timestamp() * 1000)
+
+
+PERIODS = {"day": 10, "month": 7, "year": 4}  # how much of YYYY-MM-DD names a period
+STATUSES = ("pending", "unexplained")
+
+
+def _status(d: Difference) -> str:
+    return "pending" if d.explained else "unexplained"
+
+
+def by_period(report: Report, by: str = "day") -> dict[str, dict[str, int]]:
+    """The report's counts per UTC day, month or year of the event, in order: USGS's events,
+    Earth-Hub's, and its differences by status (STATUSES)."""
+    width = PERIODS[by]
+    rows: dict[str, dict[str, int]] = {}
+
+    def row(day: str) -> dict[str, int]:
+        return rows.setdefault(day[:width], dict.fromkeys(("usgs", "ours", *STATUSES), 0))
+
+    for day, n in report.days.items():
+        row(day)["usgs"] += n["usgs"]
+        row(day)["ours"] += n["ours"]
+    for d in report.differences:
+        row(d.day)[_status(d)] += 1
+    return dict(sorted(rows.items()))
+
+
+def window(
+    now: datetime, days: int, first: date | None = None, last: date | None = None
+) -> tuple[datetime, datetime]:
+    """The UTC days to compare, as [start, end): the last `days` days, today included, or
+    from `first` to `last` (both included; `last` defaults to today, and is cut at today)."""
+    tomorrow = datetime.combine(now.astimezone(UTC).date() + DAY, clock(), UTC)
+    if first is None:
+        return tomorrow - days * DAY, tomorrow
+    end = min(tomorrow, datetime.combine(last + DAY, clock(), UTC)) if last else tomorrow
+    return datetime.combine(first, clock(), UTC), end
 
 
 def _day(ms: int) -> str:
@@ -390,21 +429,21 @@ def from_bucket(bucket) -> tuple[list[Event], Marks, datetime | None]:
 # --- The command -------------------------------------------------------------------------------
 
 
-def print_report(report: Report, marks: Marks, where: str) -> None:
+def print_report(report: Report, marks: Marks, where: str, by: str = "day") -> None:
     def show(moment):
         return moment.astimezone(UTC).strftime("%Y-%m-%d %H:%M:%S") if moment else "never"
 
-    print(f"Earth-Hub ({where}) against USGS, by UTC day of the event")
+    print(f"Earth-Hub ({where}) against USGS, by UTC {by} of the event")
     print(
         f"  last read (as USGS generated it): day feed {show(marks.day_feed)}, "
         f"month feed {show(marks.month_feed)}; deletions checked {show(marks.deletions)}"
     )
-    for day, n in report.days.items():
-        mine = [d for d in report.differences if d.day == day]
-        pending = sum(d.explained for d in mine)
+    rows = by_period(report, by)
+    total = {key: sum(n[key] for n in rows.values()) for key in ("usgs", "ours", *STATUSES)}
+    for period, n in [*rows.items(), ("total", total)]:
         print(
-            f"  {day}: USGS {n['usgs']}, Earth-Hub {n['ours']}; "
-            f"{pending} pending, {len(mine) - pending} unexplained"
+            f"  {period}: USGS {n['usgs']}, Earth-Hub {n['ours']}; "
+            + ", ".join(f"{n[status]} {status}" for status in STATUSES)
         )
     for d in report.differences:
         tag = "pending" if d.explained else "UNEXPLAINED"
@@ -412,19 +451,20 @@ def print_report(report: Report, marks: Marks, where: str) -> None:
     print("RESULT: " + ("OK" if report.ok else f"{len(report.unexplained)} unexplained"))
 
 
-def main(argv: list[str] | None = None) -> int:  # noqa: PLR0915 (to refactor: docs/progress/plan.md)
-    from earth_hub.config import get_settings
-    from earth_hub.export import mode
-    from earth_hub.export.bucket import Bucket, MissingSettings, make_s3_client
-    from earth_hub.ingestion.fdsn import FdsnClient
-    from earth_hub.ingestion.usgs_client import make_http_client
-    from earth_hub.logging_config import configure_logging
-
+def _arguments(argv: list[str] | None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Compare Earth-Hub with USGS, explaining every difference."
     )
-    parser.add_argument(
+    span = parser.add_mutually_exclusive_group()
+    span.add_argument(
         "--days", type=int, default=3, help="UTC days back from today, today included"
+    )
+    span.add_argument("--start", type=date.fromisoformat, help="first UTC day, YYYY-MM-DD")
+    parser.add_argument(
+        "--end", type=date.fromisoformat, help="with --start: last UTC day (default today)"
+    )
+    parser.add_argument(
+        "--by", choices=PERIODS, default="day", help="count by UTC day, month or year"
     )
     parser.add_argument(
         "--skip-unless-direct", action="store_true", help="exit 0 unless in direct mode"
@@ -436,6 +476,20 @@ def main(argv: list[str] | None = None) -> int:  # noqa: PLR0915 (to refactor: d
         "--wait", type=float, default=0, help="full mode: seconds to wait for consumer lag 0"
     )
     args = parser.parse_args(argv)
+    if args.end is not None and (args.start is None or args.end < args.start):
+        parser.error("--end needs --start, and not before it")
+    return args
+
+
+def main(argv: list[str] | None = None) -> int:  # noqa: PLR0915 (to refactor: docs/progress/plan.md)
+    from earth_hub.config import get_settings
+    from earth_hub.export import mode
+    from earth_hub.export.bucket import Bucket, MissingSettings, make_s3_client
+    from earth_hub.ingestion.fdsn import FdsnClient
+    from earth_hub.ingestion.usgs_client import make_http_client
+    from earth_hub.logging_config import configure_logging
+
+    args = _arguments(argv)
     configure_logging()
     settings = get_settings()
     try:
@@ -482,8 +536,7 @@ def main(argv: list[str] | None = None) -> int:  # noqa: PLR0915 (to refactor: d
         events, marks = from_postgres(engine, settings.kafka_topic_raw)
         where = "full mode, PostgreSQL"
 
-    end = (now + DAY).replace(hour=0, minute=0, second=0, microsecond=0)
-    start = end - args.days * DAY
+    start, end = window(now, args.days, args.start, args.end)
     with make_http_client(settings.usgs_contact, timeout_s=60.0) as http:
         fdsn = FdsnClient(str(settings.fdsn_url), http, pause_s=settings.fdsn_pause_seconds)
         live = usgs_events(fdsn, start, end, deleted="false")
@@ -495,7 +548,7 @@ def main(argv: list[str] | None = None) -> int:  # noqa: PLR0915 (to refactor: d
             return usgs_lookup(fdsn)(event_id) if lookups[0] <= LOOKUPS else None
 
         report = compare(events, live, gone, marks, start=start, end=end, lookup=lookup)
-    print_report(report, marks, where)
+    print_report(report, marks, where, args.by)
     return 0 if report.ok else 1
 
 

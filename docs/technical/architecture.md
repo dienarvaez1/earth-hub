@@ -338,7 +338,7 @@ Each export with changes uploads the manifest and the snapshot, about 23 MB, hen
 
 ## Reconciliation with USGS
 
-The other checks compare Earth-Hub with itself: `make reconcile` Kafka with PostgreSQL, `make reconcile-direct` the bucket's parts, the handovers one mode with the other. **`make reconcile-usgs [DAYS=3]`** compares the mode that writes the bucket with USGS itself, for the last few UTC days (today included), and explains every difference by when Earth-Hub last read the USGS source that brings it (`earth_hub/usgs_reconcile.py`, read-only):
+The other checks compare Earth-Hub with itself: `make reconcile` Kafka with PostgreSQL, `make reconcile-direct` the bucket's parts, the handovers one mode with the other. **`make reconcile-usgs [DAYS=3]`** compares the mode that writes the bucket with USGS itself, for the last few UTC days (today included) or any range of them (`START=… [END=…]`, counted by `BY=day|month|year` with a total; `/eh-reconcile`), and explains every difference by when Earth-Hub last read the USGS source that brings it (`earth_hub/usgs_reconcile.py`, read-only):
 
 | Difference | Pending (explained) when | Otherwise |
 | --- | --- | --- |

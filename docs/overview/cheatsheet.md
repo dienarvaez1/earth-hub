@@ -25,6 +25,7 @@ Commands that **call live services or change state** are marked ⚠. The skills 
 | `/eh-mode [status\|direct\|full\|usgs\|catchup\|once\|run\|reconcile\|schedule\|runs]` | The mode, switching modes in one command, the check against USGS and catching up, direct mode by hand or on GitHub Actions, and its executions (the audit trail of the hourly rounds the Cloudflare trigger starts) | `make mode`, `make to-direct`, `make to-full`, `gh workflow run direct.yml`, `make direct-runs`, `make reconcile-usgs`, `make catchup-now` |
 | `/eh-host [status\|cutover-a\|cutover-b\|release\|claim\|rebuild\|takeover]` | Which host owns the bucket in full mode and its lease; moving full mode to another host; rebuilding this host's database from the bucket; direct mode taking over from a host that is gone | `make cutover-a`, `make cutover-b`, `make host-status`, `make host-release`, `make host-claim`, `make host-rebuild`, `make host-takeover` |
 | `/eh-dashboard [check\|dev\|build\|test\|deployments\|deploy\|trigger]` | The live page and its data, a local server, tests, deploys, and the Worker's hourly trigger | `make dashboard-dev`, `make dashboard-deploy`, `wrangler secret list` |
+| `/eh-reconcile START [END] [day\|month\|year]` | Earth-Hub against USGS for any range of UTC days, as a side-by-side table per day, month or year with a total, every difference explained | `make reconcile-usgs START=… END=… BY=…` |
 | `/eh-status [reconcile]` | Health of every service, consumer lag, newest event, API, last export, the mode and direct mode's latest executions | `docker compose ps`, `make reconcile`, `make reconcile-usgs`, `make mode`, `make direct-runs` |
 | `/eh-logs [service\|ID\|errors\|rejected\|summary]` | Reads the JSON logs with `jq`, follows one event | `docker compose logs … \| jq` |
 | `/eh-test [layer\|security\|regression\|flake\|REQ-…\|keyword]` | Runs the tests by layer, or everything; GitHub's open security alerts | `make test`, `make regression` |
@@ -69,6 +70,7 @@ Always send a User-Agent: `UA="earth-hub (manual check)"`.
 | `/eh-backfill progress` | `docker compose exec -T postgres psql -U earth_hub_app earth_hub -c "SELECT job, status, count(*), sum(fetched), sum(rejected) FROM backfill_windows GROUP BY 1, 2"` | Which weeks are done, and the features dropped before Kafka |
 | `/eh-status reconcile` | `make reconcile` | Every Kafka message has a database row; 5 invariants hold |
 | `/eh-mode usgs` | `make reconcile-usgs [DAYS=3]` | Earth-Hub against USGS itself: every difference pending (explained) or not ([how](../technical/architecture.md#reconciliation-with-usgs)) |
+| `/eh-reconcile 2026-01-01 2026-10-31 month` | `make reconcile-usgs START=2026-01-01 [END=2026-10-31] [BY=day\|month\|year]` | The same for any range of UTC days, a line per day, month or year and a total; about 2 s a day of range |
 
 ## 4. Kafka
 

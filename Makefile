@@ -156,8 +156,8 @@ catchup-now: ## Catch up with USGS now, in the mode that writes the bucket: day 
 		uv run python -m earth_hub.ingestion.catchup --once; \
 	fi
 
-reconcile-usgs: ## Compare Earth-Hub with USGS for the last days, explaining every difference: [DAYS=3]
-	uv run python -m earth_hub.usgs_reconcile $(if $(DAYS),--days $(DAYS))
+reconcile-usgs: ## Compare Earth-Hub with USGS, explaining every difference: [DAYS=3 | START=YYYY-MM-DD [END=YYYY-MM-DD]] [BY=day|month|year]
+	uv run python -m earth_hub.usgs_reconcile $(if $(DAYS),--days $(DAYS)) $(if $(START),--start $(START)) $(if $(END),--end $(END)) $(if $(BY),--by $(BY))
 
 direct-once: ## Direct mode: one poller round, and catch-up if due, straight to R2
 	uv run python -m earth_hub.direct once
