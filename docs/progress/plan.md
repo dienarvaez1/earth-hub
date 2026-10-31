@@ -47,7 +47,7 @@ As of 2026-10-30. The plan below is the original, with Milestone 7 revised; the 
 | Code quality: Ruff's complexity (`C90`), security (`S`), simplification (`SIM`) and Pylint (`PL`) rules, with their first findings fixed or marked; CodeQL code scanning | Done | #59 |
 | [9. Standby: direct mode takes over from one full-mode machine](#milestone-9--standby-direct-mode-takes-over-from-one-full-mode-machine) | Done, 2026-10-30: steps 1 to 4 (lock fencing, DEF-058; owner and lease; the exporting service and its standby state), steps 5 to 8 (automatic takeover, rebuild from the bucket, `/eh-host`, failover end to end) | #61, #62 |
 
-Current numbers: 199 requirements, all covered by a passing test; 63 defects, all fixed; 1,321 tests in the full regression (2026-10-30), with 91.3% line coverage.
+Current numbers: 199 requirements, all covered by a passing test; 65 defects, all fixed; 1,321 tests in the full regression (2026-10-30), with 91.3% line coverage.
 
 **To refactor** (#59): functions over Ruff's complexity limits when the rules were added, each marked `# noqa: … (to refactor: docs/progress/plan.md)`. New code is held to the limits. Each one is a separate change, with the full regression as its check.
 
