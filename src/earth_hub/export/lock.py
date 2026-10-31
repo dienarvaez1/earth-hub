@@ -6,10 +6,19 @@ Taken with a conditional write (If-None-Match), which R2 evaluates atomically. A
 process that crashed expires; it is taken over only if it is still that lock (If-Match). A run
 longer than the lock's time renews it (`renew`, also If-Match), so a long export keeps the bucket
 for as long as it runs (DEF-048).
+
+A writer confirms the lock before every write (`Held.confirm`, DEF-058), so one paused past
+its lock's expiry (a laptop asleep, a stalled runner) writes nothing once it wakes: a lock is
+never taken over before it expires, so a confirmation is a clock check while the lock is
+young, and a renewal (If-Match) once a third of its time has passed, which fails if another
+run took it. What is left is a pause inside a write already sent: at most the writes in
+flight, found by the weekly deep check and fixed by `make repair-rows` (direct/repair.py).
 """
 
 import json
 import logging
+import threading
+from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 
 from earth_hub.export.bucket import Bucket, PreconditionFailed
@@ -70,6 +79,58 @@ def renew(
         return bucket.put(LOCK_KEY, _body(run_id, started_at, now + ttl), if_match=etag)
     except PreconditionFailed:
         raise LockLost(f"run {run_id} no longer holds the bucket's lock") from None
+
+
+class Held:
+    """The lock as this run holds it. Call `confirm` before every write; it raises LockLost
+    once the lock is not this run's, and on every call after."""
+
+    def __init__(
+        self,
+        bucket: Bucket,
+        run_id: str,
+        started_at: str,
+        now: datetime,
+        ttl: timedelta,
+        clock: Callable[[], datetime],
+        *,
+        renew_after: timedelta | None = None,
+    ):
+        self.bucket = bucket
+        self.run_id = run_id
+        self.started_at = started_at
+        self.ttl = ttl
+        self.clock = clock
+        self.renew_after = ttl / 3 if renew_after is None else renew_after
+        self.etag = acquire(bucket, run_id, started_at, now, ttl)  # LockHeld before any write
+        self.renewed = clock()  # its age is measured on the clock, whatever `now` was
+        self.lost = False
+        self._turn = threading.Lock()  # writers in several threads renew one at a time
+
+    def confirm(self) -> None:
+        with self._turn:
+            if self.lost:
+                raise LockLost(f"run {self.run_id} no longer holds the bucket's lock")
+            now = self.clock()
+            if now - self.renewed < self.renew_after:
+                return  # young: no one can have taken it
+            try:
+                self.etag = renew(
+                    self.bucket, self.run_id, self.started_at, self.etag, now, self.ttl
+                )
+            except LockLost:
+                self.lost = True
+                raise
+            except Exception:
+                # Still ours for at least `renew_after`: tried again at the next write.
+                if now - self.renewed < self.ttl - self.renew_after:
+                    logger.warning("could not renew the lock; trying again", exc_info=True)
+                    return
+                raise
+            self.renewed = now
+
+    def release(self) -> None:
+        release(self.bucket, self.run_id, self.ttl)
 
 
 def release(bucket: Bucket, run_id: str, ttl: timedelta) -> None:

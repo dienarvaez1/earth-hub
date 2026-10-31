@@ -7,9 +7,10 @@
 # token      once a day, when the trigger passes the days its GitHub token has left: fails within
 #            14 days, so GitHub e-mails the token's owner to run make trigger-token. No secrets.
 # reconcile  every day at 05:41 UTC, started by the same Worker's other cron trigger, or by
-#            hand: direct mode's bucket invariants (make reconcile-direct), then the bucket
-#            against USGS (make reconcile-usgs), failing if no round has written for 2 hours
-#            (a failed run e-mails). Read-only.
+#            hand: direct mode's bucket invariants (make reconcile-direct; on Sundays with
+#            DEEP=1, reading every row object, DEF-058), then the bucket against USGS (make
+#            reconcile-usgs), failing if no round has written for 2 hours (a failed run
+#            e-mails). Read-only.
 #
 # No schedule of its own: GitHub disables a public repository's scheduled workflows after
 # 60 days without commits, and the rounds with them (DEF-056). watchdog.yml holds the one
@@ -118,7 +119,11 @@ jobs:
         run: |
           set -o pipefail
           status=0
-          uv run python -m earth_hub.direct.reconcile --skip-unless-direct | tee output.txt || status=1
+          # Weekly, every row object read: ~115k reads, within R2's budget (REQ-MODE-007).
+          deep=""
+          if [ "$(date -u +%u)" = 7 ]; then deep="--deep"; fi
+          uv run python -m earth_hub.direct.reconcile --skip-unless-direct $deep \
+            | tee output.txt || status=1
           uv run python -m earth_hub.usgs_reconcile --skip-unless-direct --max-age-hours 2 \
             | tee -a output.txt || status=1
           exit $status

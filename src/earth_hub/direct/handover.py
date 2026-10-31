@@ -221,7 +221,7 @@ def to_direct(
 
     now = clock()
     run_id = _run_id(now)
-    lock.acquire(bucket, run_id, iso(now), now, LOCK_TTL)
+    held = lock.Held(bucket, run_id, iso(now), now, LOCK_TTL, clock)
     try:
         current = mode.require(bucket, mode.FULL)  # still, now that no one else writes
         with tempfile.TemporaryDirectory() as tmp:
@@ -229,6 +229,7 @@ def to_direct(
             runner.state.refresh()
             if runner.state.pending is not None:
                 raise HandoverFailed("the bucket holds an unfinished direct round")
+            held.confirm()
             bucket.put(
                 IDS_KEY, ids_body(max(order.values(), default=0) + 1, order, ids), content_type=GZIP
             )
@@ -236,9 +237,11 @@ def to_direct(
             status.update(
                 run_id=run_id, written_at=iso(now), sent=sent.entries(), checkpoints=checkpoints
             )
+            held.confirm()
             bucket.put(STATE_KEY, json.dumps(status, indent=1).encode())
             runner.state.refresh()
             runner.state.check()  # the ID map against the export just made
+        held.confirm()
         mode.write(
             bucket,
             current,
@@ -249,7 +252,7 @@ def to_direct(
             replay_from=None,
         )
     finally:
-        lock.release(bucket, run_id, LOCK_TTL)
+        held.release()
     result.step(
         f"direct mode from sequence {status['seq']}: {len(order)} records, {len(ids)} IDs, "
         f"{len(sent)} events in the poller's state"
@@ -279,7 +282,7 @@ def to_full(
     run_id = _run_id(now)
     with tempfile.TemporaryDirectory() as tmp:
         runner = DirectRunner(bucket, workdir=Path(tmp))
-        lock.acquire(bucket, run_id, iso(now), now, LOCK_TTL)
+        held = lock.Held(bucket, run_id, iso(now), now, LOCK_TTL, clock)
         try:
             current = mode.read(bucket)
             if current.state == mode.ACTIVE:
@@ -287,10 +290,12 @@ def to_full(
                 # whose checks failed left its replay_from: what it sent is found from there, not
                 # sent twice (DEF-047). A handover that succeeds clears it.
                 start = topic.end_offset() if current.replay_from is None else current.replay_from
+                held.confirm()
                 current = mode.write(bucket, current, state=mode.HANDING_OVER, replay_from=start)
-            runner._prepare(in_direct_mode=False)  # finishes a round left pending
+            with runner.fenced(held):
+                runner._prepare(in_direct_mode=False)  # finishes a round left pending
         finally:
-            lock.release(bucket, run_id, LOCK_TTL)
+            held.release()
         status = runner.state.status
     result.step(f"direct mode frozen at sequence {status['seq']}")
 

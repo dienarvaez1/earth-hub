@@ -1,4 +1,4 @@
-.PHONY: help install up down reset ingest ingest-once ingest-logs ingest-stop api api-dev api-stop kafka-ui kafka-ui-stop backfill catchup-once catchup-now reconcile-usgs consume reconcile reconcile-direct mode mode-direct mode-full to-full to-direct backfill-full direct-once direct-run direct-runs export-r2 export-r2-runs r2-ls r2-count r2-get dashboard-install dashboard-build dashboard-dev dashboard-deploy trigger-token trigger-check test-dashboard check-db-outage lint format test test-integration test-e2e test-disruptive test-performance load load-ui test-all regression flake-check traceability release smoke smoke-restart migrate coverage
+.PHONY: help install up down reset ingest ingest-once ingest-logs ingest-stop api api-dev api-stop kafka-ui kafka-ui-stop backfill catchup-once catchup-now reconcile-usgs consume reconcile reconcile-direct repair-rows mode mode-direct mode-full to-full to-direct backfill-full direct-once direct-run direct-runs export-r2 export-r2-runs r2-ls r2-count r2-get dashboard-install dashboard-build dashboard-dev dashboard-deploy trigger-token trigger-check test-dashboard check-db-outage lint format test test-integration test-e2e test-disruptive test-performance load load-ui test-all regression flake-check traceability release smoke smoke-restart migrate coverage
 
 help: ## List the available commands
 	@grep -E '^[a-z0-9-]+:.*## ' $(MAKEFILE_LIST) | awk -F ':.*## ' '{printf "  %-17s %s\n", $$1, $$2}'
@@ -92,6 +92,9 @@ reconcile: ## Check every Kafka message has a database row, and the tables' inva
 
 reconcile-direct: ## Check direct mode's state in R2 (read-only): make reconcile-direct [DEEP=1]
 	uv run python -m earth_hub.direct.reconcile $(if $(DEEP),--deep)
+
+repair-rows: ## Write row objects that differ from the snapshot again, in either mode: make repair-rows [DRY_RUN=1]
+	uv run python -m earth_hub.direct.repair $(if $(DRY_RUN),--dry-run)
 
 mode: ## Which mode writes the R2 bucket: full or direct
 	uv run python -m earth_hub.direct.handover status

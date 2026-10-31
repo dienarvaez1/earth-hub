@@ -183,6 +183,7 @@ Only while `make mode` says `direct`. The hourly rounds (a Cloudflare cron trigg
 | | `gh run list --workflow watchdog.yml --limit 3` | The watchdog, hourly: it fails, and GitHub e-mails, when no `direct.yml` run started for 2 hours ([CI](../technical/ci.md#the-watchdog)) |
 | `/eh-mode catchup` | `make catchup-now` ⚠ | Catch up now: a direct round with the day feed, the month feed and the deletions, whether due or not |
 | `/eh-mode reconcile` | `make reconcile-direct [DEEP=1]` | Rows, manifest, snapshot, ID map and log agree, read-only ([direct mode](../technical/architecture.md#direct-mode)) |
+| `/eh-mode repair` | `make repair-rows [DRY_RUN=1]` ⚠ | Row objects that `DEEP=1` finds stale or missing, written again from the snapshot, in either mode (DEF-058) |
 | `/eh-r2 count` | `make r2-get KEY=analytics/meta.json \| jq '{run_id, written_at, rows}'` | Rows in the bucket now (PostgreSQL falls behind until `make mode-full`) |
 | | `gh secret set -f <file>` ⚠ | The workflow's four `R2_*` secrets, from a file of `NAME=value` lines, with `--env r2` (the environment only `main` can use; empty values make every run fail) |
 

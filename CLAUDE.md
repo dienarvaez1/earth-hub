@@ -39,7 +39,7 @@ Local-first earthquake data platform: USGS GeoJSON feed → Python poller → Ka
 - `make load [USERS=] [RUN_TIME=]` / `make load-ui`: Locust against the API over a temporary, seeded database (`scripts/load_test.py`, `tests/load/locustfile.py`); report in `reports/load-report.html`. Locust runs as a subprocess and is never imported by pytest (gevent patches networking on import).
 - `make test-e2e`, `make test-disruptive` (stops shared containers), `make flake-check` (end-to-end suite ×5), `make traceability`.
 - `make reconcile`: topic-versus-database check.
-- `make reconcile-direct [DEEP=1]`: direct mode's bucket invariants (read-only).
+- `make reconcile-direct [DEEP=1]`: direct mode's bucket invariants (read-only). `make repair-rows [DRY_RUN=1]`: row objects that differ from the snapshot written again (writes the bucket: only when the user asks; DEF-058).
 - `make direct-runs [LIMIT=20]`: direct mode's audit trail, one line per execution (read-only; `earth_hub/direct/audit.py`).
 - `make reconcile-usgs [DAYS=3]`: the mode writing the bucket against USGS, every difference explained (read-only; `earth_hub/usgs_reconcile.py`). `make catchup-now`: catch up with USGS now, in either mode. Both run at the end of `make mode-direct` and `make mode-full`.
 - `make to-full` / `make to-direct` / `make backfill-full START=… [END=…]` (`scripts/modes.py`, `DRY_RUN=1` lists the steps): one command each, around the targets below, with their checks (Docker, the mode, no local `direct-run`, consumers caught up, `make reconcile`); `to-direct` ends with `make down`, `backfill-full` with `make export-r2`. They write the real bucket, Kafka or PostgreSQL: only when the user asks.
