@@ -15,8 +15,8 @@ from earth_hub.config import Settings
 REPO = Path(__file__).resolve().parents[2]
 WORKFLOWS = REPO / ".github" / "workflows"
 WORKFLOW = WORKFLOWS / "direct.yml"
-ROUND_CRON = "17 * * * *"  # the dashboard Worker's trigger: every hour, off the top of it
-RECONCILE_CRON = "41 5 * * *"  # the same Worker's other trigger: the daily reconcile
+ROUND_CRON = "5 */4 * * *"  # the dashboard Worker's trigger: every 4 hours, at 00:05, 04:05, …
+RECONCILE_CRON = "10 0 * * *"  # its other trigger: the daily reconcile, after the 00:05 round
 
 sys.path.insert(0, str(REPO / "scripts"))
 from dashboard_config import render  # noqa: E402
@@ -104,7 +104,7 @@ def test_the_round_passes_on_who_asked_for_it(workflow):
 @pytest.mark.req("REQ-REC-003")
 def test_the_daily_reconcile_also_checks_against_usgs_and_for_a_stopped_schedule(workflow):
     lines = run_lines(workflow["jobs"]["reconcile"])
-    assert "python -m earth_hub.usgs_reconcile --skip-unless-direct --max-age-hours 2" in lines
+    assert "python -m earth_hub.usgs_reconcile --skip-unless-direct --max-age-hours 5" in lines
     # Both checks run, and either one failing fails the run (which e-mails).
     assert lines.count("|| status=1") == 2 and "exit $status" in lines
 
@@ -121,10 +121,10 @@ def test_catch_up_intervals_are_shorter_than_the_schedule_and_valid_settings(wor
     env = workflow["env"]
     catchup = int(env["CATCHUP_INTERVAL_SECONDS"])
     deleted = int(env["DELETED_CHECK_INTERVAL_SECONDS"])
-    # Runs that start a few minutes late, unevenly, must still find catch-up due about every
-    # hour and the deleted-events check every day.
-    assert re.fullmatch(r"(\d+,)*\d+ \* \* \* \*", ROUND_CRON)
-    assert 0 < catchup <= 3600 - 10 * 60
+    # Runs that start a few minutes late, unevenly, must still find catch-up due on every
+    # round and the deleted-events check every day.
+    hours = int(re.fullmatch(r"\d+ \*/(\d+) \* \* \*", ROUND_CRON)[1])
+    assert 0 < catchup <= hours * 3600 - 10 * 60
     assert 0 < deleted <= 86400 - 60 * 60
     settings = Settings(
         _env_file=None,
@@ -205,6 +205,8 @@ def test_the_token_job_fails_within_14_days_of_the_expiry(workflow):
 def test_the_worker_and_the_workflow_agree_on_the_reminder():
     source = (REPO / "dashboard" / "src" / "worker.ts").read_text()
     assert "const REMIND_DAYS = 14;" in source and "const CHECK_HOUR_UTC = 8;" in source
+    every = int(re.fullmatch(r"\d+ \*/(\d+) \* \* \*", ROUND_CRON)[1])
+    assert 8 % every == 0  # a round fires in that hour, so the reminder goes out once a day
     assert "inputs.token_days_left = String(days);" in source
     run = yaml.safe_load(WORKFLOW.read_text())["jobs"]["token"]["steps"][0]["run"]
     assert '[ "$DAYS_LEFT" -le 14 ]' in run

@@ -23,7 +23,7 @@ Testing effort follows what would hurt most if it failed.
 | API inputs crashing the service | Medium | Validation tests and property-based contract testing (Schemathesis) |
 | Tests that pass for the wrong reason | High | Mutation spot checks; repeated and combined runs; tests of the test tooling |
 | Secrets leaking into logs or output | High | Negative tests that read whole outputs with dependencies stopped; the trigger's token setup checked never to print, save or pass the token on a command line |
-| Direct mode silently not running | High | The Cloudflare trigger tested under `wrangler dev --test-scheduled` against a local stand-in for GitHub; the daily reconcile fails after 2 hours without a round; an e-mailed reminder before the trigger's token expires; an audit record per execution, whose failures are tested never to stop a round |
+| Direct mode silently not running | High | The Cloudflare trigger tested under `wrangler dev --test-scheduled` against a local stand-in for GitHub; the daily reconcile fails after 5 hours without a round; an e-mailed reminder before the trigger's token expires; an audit record per execution, whose failures are tested never to stop a round |
 
 ## Test levels
 

@@ -19,7 +19,7 @@ const WORKFLOW = "direct.yml";
 const REF = "main";
 const JOB = "round";
 // The daily reconcile's trigger (the other one starts a round), and the job it runs.
-const RECONCILE_CRON = "41 5 * * *";
+const RECONCILE_CRON = "10 0 * * *";
 const RECONCILE = "reconcile";
 // `make trigger-check` fires the handler with this "cron", which no deployed trigger has,
 // under `wrangler dev --remote --test-scheduled`: the deployed token, asked about, starts nothing.
@@ -27,8 +27,9 @@ const CHECK_CRON = "check";
 // Who asked for the round, for its audit record (src/earth_hub/direct/audit.py).
 const STARTED_BY = "cloudflare-trigger";
 
-// Once a day, the trigger at this UTC hour also passes how many days the token has left;
-// within REMIND_DAYS the workflow's token job fails, and GitHub e-mails its owner.
+// Once a day, the round at this UTC hour (one the round cron fires in: every 4 hours from 00:05)
+// also passes how many days the token has left; within REMIND_DAYS the workflow's token job
+// fails, and GitHub e-mails its owner.
 const CHECK_HOUR_UTC = 8;
 const REMIND_DAYS = 14;
 const DAY_MS = 86_400_000;

@@ -1,6 +1,6 @@
 """Earth-Hub against USGS (earth_hub/usgs_reconcile.py): every difference explained or not."""
 
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 
 import pytest
 from support.export import BUCKET, start_direct
@@ -262,8 +262,8 @@ def test_the_command_skips_a_bucket_not_in_direct_mode_when_asked(check, capsys)
 @pytest.mark.req("REQ-REC-003")
 def test_the_command_fails_when_no_direct_round_has_written_for_too_long(check, s3, capsys):
     start_direct(s3)
-    check["last_round"] = datetime.now(UTC) - timedelta(hours=3)
-    assert u.main(["--skip-unless-direct", "--max-age-hours", "2"]) == 1
+    check["last_round"] = datetime.now(UTC) - timedelta(hours=6)
+    assert u.main(["--skip-unless-direct", "--max-age-hours", "5"]) == 1
     assert "is the schedule running?" in capsys.readouterr().err
 
 
@@ -344,3 +344,82 @@ def test_without_a_generation_time_the_last_round_and_the_checkpoint_stand_in(
     runner.set_checkpoint("catchup", NOW - timedelta(minutes=5))
     _, marks, _ = u.from_bucket(runner.bucket)
     assert (marks.day_feed, marks.month_feed) == (NOW, NOW - timedelta(minutes=5))
+
+
+# --- a range of days, counted by day, month or year ------------------------------------------
+
+
+@pytest.mark.req("REQ-REC-005")
+def test_the_window_is_the_last_days_or_a_range_of_whole_utc_days_cut_at_today():
+    now = datetime(2026, 10, 31, 6, 30, tzinfo=UTC)
+    midnight = datetime(2026, 11, 1, tzinfo=UTC)
+    assert u.window(now, 3) == (midnight - 3 * u.DAY, midnight)
+    assert u.window(now, 3, date(2026, 1, 1), date(2026, 3, 31)) == (
+        datetime(2026, 1, 1, tzinfo=UTC),
+        datetime(2026, 4, 1, tzinfo=UTC),
+    )
+    assert u.window(now, 3, date(2026, 10, 1)) == (datetime(2026, 10, 1, tzinfo=UTC), midnight)
+    assert u.window(now, 3, date(2026, 10, 1), date(2027, 1, 1))[1] == midnight
+
+
+@pytest.mark.req("REQ-REC-005")
+def test_counts_and_differences_add_up_by_month_and_year():
+    report = u.Report(
+        days={
+            "2025-12-31": {"usgs": 5, "ours": 5},
+            "2026-01-01": {"usgs": 3, "ours": 2},
+            "2026-01-31": {"usgs": 4, "ours": 4},
+            "2026-02-01": {"usgs": 1, "ours": 2},
+        },
+        differences=[
+            u.Difference("2025-12-31", "no origin at FDSN", "c", True, ""),  # settled
+            u.Difference("2026-01-01", "missing", "a", True, ""),
+            u.Difference("2026-02-01", "unknown at USGS", "b", False, ""),
+        ],
+    )
+    assert u.by_period(report, "month") == {
+        "2025-12": {"usgs": 5, "ours": 5, "pending": 0, "explained": 1, "unexplained": 0},
+        "2026-01": {"usgs": 7, "ours": 6, "pending": 1, "explained": 0, "unexplained": 0},
+        "2026-02": {"usgs": 1, "ours": 2, "pending": 0, "explained": 0, "unexplained": 1},
+    }
+    assert u.by_period(report, "year") == {
+        "2025": {"usgs": 5, "ours": 5, "pending": 0, "explained": 1, "unexplained": 0},
+        "2026": {"usgs": 8, "ours": 8, "pending": 1, "explained": 0, "unexplained": 1},
+    }
+    assert list(u.by_period(report)) == sorted(report.days)
+
+
+@pytest.mark.req("REQ-REC-005")
+def test_the_command_compares_the_range_asked_and_prints_a_line_per_period_and_a_total(
+    check, s3, monkeypatch, capsys
+):
+    start_direct(s3)
+    asked = []
+    monkeypatch.setattr(
+        u, "usgs_events", lambda fdsn, start, end, deleted: asked.append((start, end)) or []
+    )
+    assert u.main(["--start", "2026-01-01", "--end", "2026-02-28", "--by", "month"]) == 0
+    assert set(asked) == {(datetime(2026, 1, 1, tzinfo=UTC), datetime(2026, 3, 1, tzinfo=UTC))}
+    lines = capsys.readouterr().out.splitlines()
+    assert "by UTC month of the event" in lines[0]
+    assert lines[2:5] == [
+        "  2026-01: USGS 0, Earth-Hub 0; 0 pending, 0 unexplained",
+        "  2026-02: USGS 0, Earth-Hub 0; 0 pending, 0 unexplained",
+        "  total: USGS 0, Earth-Hub 0; 0 pending, 0 unexplained",
+    ]
+
+
+@pytest.mark.req("REQ-REC-005")
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["--end", "2026-01-31"],
+        ["--start", "2026-02-01", "--end", "2026-01-31"],
+        ["--days", "3", "--start", "2026-01-01"],
+        ["--start", "2026-01-01", "--by", "week"],
+    ],
+)
+def test_a_range_without_a_start_backwards_or_with_days_is_refused(check, argv):
+    with pytest.raises(SystemExit) as exc:
+        u.main(argv)
+    assert exc.value.code == 2

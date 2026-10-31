@@ -6,7 +6,7 @@ The sections follow the data, as in the [architecture](../technical/architecture
 
 Commands that **call live services or change state** are marked ⚠. The skills ask before the destructive ones.
 
-**Which mode first.** `make mode` says who writes the R2 bucket. In **full** mode your machine runs the pipeline (Docker, Kafka, PostgreSQL) and `make export-r2` updates the dashboard. In **direct** mode GitHub Actions updates the bucket every hour with no machine of yours running, and full mode's poller, catch-up, backfill and export stay stopped. See [Modes](#9-modes-full-and-direct).
+**Which mode first.** `make mode` says who writes the R2 bucket. In **full** mode your machine runs the pipeline (Docker, Kafka, PostgreSQL) and `make export-r2` updates the dashboard. In **direct** mode GitHub Actions updates the bucket every 4 hours with no machine of yours running, and full mode's poller, catch-up, backfill and export stay stopped. See [Modes](#9-modes-full-and-direct).
 
 ## Skills
 
@@ -22,9 +22,10 @@ Commands that **call live services or change state** are marked ⚠. The skills 
 | `/eh-api [health\|list\|event\|stats\|hourly\|magnitude\|export]` | Calls the REST API (served from PostgreSQL) | `curl` on `/api/v1/…` |
 | `/eh-export [dry\|run\|verify\|runs]` | Copies PostgreSQL's table to R2 through the API, and the dashboard's snapshot | `make export-r2` |
 | `/eh-r2 [ls\|count\|get\|snapshot\|runs\|audit]` | Looks inside the R2 bucket, read-only, direct mode's audit trail included | `make r2-ls`, `make r2-get`, `make direct-runs` |
-| `/eh-mode [status\|direct\|full\|usgs\|catchup\|once\|run\|reconcile\|schedule\|runs]` | The mode, switching modes in one command, the check against USGS and catching up, direct mode by hand or on GitHub Actions, and its executions (the audit trail of the hourly rounds the Cloudflare trigger starts) | `make mode`, `make to-direct`, `make to-full`, `gh workflow run direct.yml`, `make direct-runs`, `make reconcile-usgs`, `make catchup-now` |
+| `/eh-mode [status\|direct\|full\|usgs\|catchup\|once\|run\|reconcile\|schedule\|runs]` | The mode, switching modes in one command, the check against USGS and catching up, direct mode by hand or on GitHub Actions, and its executions (the audit trail of the 4-hourly rounds the Cloudflare trigger starts) | `make mode`, `make to-direct`, `make to-full`, `gh workflow run direct.yml`, `make direct-runs`, `make reconcile-usgs`, `make catchup-now` |
 | `/eh-host [status\|cutover-a\|cutover-b\|release\|claim\|rebuild\|takeover]` | Which host owns the bucket in full mode and its lease; moving full mode to another host; rebuilding this host's database from the bucket; direct mode taking over from a host that is gone | `make cutover-a`, `make cutover-b`, `make host-status`, `make host-release`, `make host-claim`, `make host-rebuild`, `make host-takeover` |
-| `/eh-dashboard [check\|dev\|build\|test\|deployments\|deploy\|trigger]` | The live page and its data, a local server, tests, deploys, and the Worker's hourly trigger | `make dashboard-dev`, `make dashboard-deploy`, `wrangler secret list` |
+| `/eh-dashboard [check\|dev\|build\|test\|deployments\|deploy\|trigger]` | The live page and its data, a local server, tests, deploys, and the Worker's 4-hourly trigger | `make dashboard-dev`, `make dashboard-deploy`, `wrangler secret list` |
+| `/eh-reconcile START [END] [day\|month\|year]` | Earth-Hub against USGS for any range of UTC days, as a side-by-side table per day, month or year with a total, every difference explained | `make reconcile-usgs START=… END=… BY=…` |
 | `/eh-status [reconcile]` | Health of every service, consumer lag, newest event, API, last export, the mode and direct mode's latest executions | `docker compose ps`, `make reconcile`, `make reconcile-usgs`, `make mode`, `make direct-runs` |
 | `/eh-logs [service\|ID\|errors\|rejected\|summary]` | Reads the JSON logs with `jq`, follows one event | `docker compose logs … \| jq` |
 | `/eh-test [layer\|security\|regression\|flake\|REQ-…\|keyword]` | Runs the tests by layer, or everything; GitHub's open security alerts | `make test`, `make regression` |
@@ -69,6 +70,7 @@ Always send a User-Agent: `UA="earth-hub (manual check)"`.
 | `/eh-backfill progress` | `docker compose exec -T postgres psql -U earth_hub_app earth_hub -c "SELECT job, status, count(*), sum(fetched), sum(rejected) FROM backfill_windows GROUP BY 1, 2"` | Which weeks are done, and the features dropped before Kafka |
 | `/eh-status reconcile` | `make reconcile` | Every Kafka message has a database row; 5 invariants hold |
 | `/eh-mode usgs` | `make reconcile-usgs [DAYS=3]` | Earth-Hub against USGS itself: every difference pending (explained) or not ([how](../technical/architecture.md#reconciliation-with-usgs)) |
+| `/eh-reconcile 2026-01-01 2026-10-31 month` | `make reconcile-usgs START=2026-01-01 [END=2026-10-31] [BY=day\|month\|year]` | The same for any range of UTC days, a line per day, month or year and a total; about 2 s a day of range |
 
 ## 4. Kafka
 
@@ -145,16 +147,16 @@ Full mode only: in direct mode the exporter refuses, and direct rounds write the
 
 ## 9. Modes: full and direct
 
-One marker in the bucket, `_state/mode.json`, says which mode writes it ([how it works](../technical/architecture.md#switching-modes)). Full mode is the whole pipeline on your machine; direct mode needs only Python and the R2 credentials, and runs [every hour on GitHub Actions](../technical/ci.md#direct-mode-on-a-schedule), so the dashboard stays current with your computer closed.
+One marker in the bucket, `_state/mode.json`, says which mode writes it ([how it works](../technical/architecture.md#switching-modes)). Full mode is the whole pipeline on your machine; direct mode needs only Python and the R2 credentials, and runs [every 4 hours on GitHub Actions](../technical/ci.md#direct-mode-on-a-schedule), so the dashboard stays current with your computer closed.
 
 ### Which mode, and switching between them
 
 | Skill | Command | What it does |
 | --- | --- | --- |
 | `/eh-mode` | `make mode` | Which mode writes the bucket: `full` or `direct`, and since when |
-| `/eh-mode direct` | `make to-direct` ⚠ | **Full → direct, in one command:** waits for the consumers, `make reconcile`, then `make mode-direct` (stops the poller and catch-up, exports, writes direct mode's state, catches up, checks against USGS), then `make down`. The hourly rounds take over; `DRY_RUN=1` lists the steps |
-| `/eh-mode full` | `make to-full` ⚠ | **Direct → full, in one command:** checks Docker and the mode, `make up`, `make mode-full` (replays direct mode's log into Kafka and PostgreSQL, checks, switches back, restarts the poller), waits for the consumers, `make reconcile`. The hourly rounds then skip |
-| `/eh-host cutover-a` | `make cutover-a [DRY_RUN=1]` ⚠ | **On the machine giving up full mode:** pre-checks (R2, the mode, no local `direct-run`, the hourly rounds recent, Docker), a dry run, then, once confirmed, `make host-release` if it owns the bucket and `make down` |
+| `/eh-mode direct` | `make to-direct` ⚠ | **Full → direct, in one command:** waits for the consumers, `make reconcile`, then `make mode-direct` (stops the poller and catch-up, exports, writes direct mode's state, catches up, checks against USGS), then `make down`. The 4-hourly rounds take over; `DRY_RUN=1` lists the steps |
+| `/eh-mode full` | `make to-full` ⚠ | **Direct → full, in one command:** checks Docker and the mode, `make up`, `make mode-full` (replays direct mode's log into Kafka and PostgreSQL, checks, switches back, restarts the poller), waits for the consumers, `make reconcile`. The 4-hourly rounds then skip |
+| `/eh-host cutover-a` | `make cutover-a [DRY_RUN=1]` ⚠ | **On the machine giving up full mode:** pre-checks (R2, the mode, no local `direct-run`, the 4-hourly rounds recent, Docker), a dry run, then, once confirmed, `make host-release` if it owns the bucket and `make down` |
 | `/eh-host cutover-b` | `make cutover-b [DRY_RUN=1]` ⚠ | **On the machine taking it:** pre-checks (uv, Docker, `.env`, R2, the USGS feed, the bucket claimable, B's database not ahead of it), the claim's dry run, then, once confirmed, `make host-claim` and checks after (owner, lease, services running) |
 | `/eh-host` | `make host-status` | The bucket's owner in full mode, its lease (live or expired), this host, what its database holds against the bucket, direct mode's latest executions (read-only) |
 | `/eh-host release` | `make host-release` ⚠ | On the owner: `make to-direct`, so another host can claim the bucket; direct mode writes meanwhile |
@@ -180,7 +182,7 @@ Only while `make mode` says `full`. These write PostgreSQL, or the bucket throug
 
 ### Direct mode: no machine needed
 
-Only while `make mode` says `direct`. The hourly rounds (a Cloudflare cron trigger starting `direct.yml`) do this by itself; the rest is for running or checking it by hand.
+Only while `make mode` says `direct`. The 4-hourly rounds (a Cloudflare cron trigger starting `direct.yml`) do this by itself; the rest is for running or checking it by hand.
 
 | Skill | Command | What it does |
 | --- | --- | --- |
@@ -188,7 +190,7 @@ Only while `make mode` says `direct`. The hourly rounds (a Cloudflare cron trigg
 | `/eh-mode once` | `make direct-once` ⚠ | One direct round from your machine (and catch-up if due) |
 | `/eh-mode run` | `make direct-run` ⚠ | Direct mode from your machine until Ctrl-C: a round a minute instead of an hour. Not while the schedule is on |
 | `/eh-mode runs` | `make direct-runs [LIMIT=20]` | Direct mode's audit trail: each execution's status, who started it (Cloudflare trigger, GitHub schedule or by hand, `direct-run`, local), the mode, messages by part and outcome, elapsed time (read-only) |
-| | `gh run list --workflow watchdog.yml --limit 3` | The watchdog, hourly: it fails, and GitHub e-mails, when no `direct.yml` run started for 2 hours ([CI](../technical/ci.md#the-watchdog)) |
+| | `gh run list --workflow watchdog.yml --limit 3` | The watchdog, hourly: it fails, and GitHub e-mails, when no `direct.yml` run started for 5 hours ([CI](../technical/ci.md#the-watchdog)) |
 | `/eh-mode catchup` | `make catchup-now` ⚠ | Catch up now: a direct round with the day feed, the month feed and the deletions, whether due or not |
 | `/eh-mode reconcile` | `make reconcile-direct [DEEP=1]` | Rows, manifest, snapshot, ID map and log agree, read-only ([direct mode](../technical/architecture.md#direct-mode)) |
 | `/eh-mode repair` | `make repair-rows [DRY_RUN=1]` ⚠ | Row objects that `DEEP=1` finds stale or missing, written again from the snapshot, in either mode (DEF-058) |
@@ -210,9 +212,9 @@ Only while `make mode` says `direct`. The hourly rounds (a Cloudflare cron trigg
 | `/eh-dashboard test` | `make test-dashboard` | The page in Chromium, against a simulated R2 |
 | `/eh-dashboard deploy` | `make dashboard-deploy` ⚠ | Publishes to Cloudflare Workers |
 | `/eh-dashboard deployments` | `cd dashboard && npx --no-install wrangler deployments list 2>&1 \| grep -v '@'` | Past deploys and their versions |
-| `/eh-dashboard trigger` | `make trigger-check`, `cd dashboard && npx --no-install wrangler secret list` and `make direct-runs LIMIT=3` | The hourly trigger: its token stored (never shown), and the latest rounds it started |
+| `/eh-dashboard trigger` | `make trigger-check`, `cd dashboard && npx --no-install wrangler secret list` and `make direct-runs LIMIT=3` | The 4-hourly trigger: its token stored (never shown), and the latest rounds it started |
 | | `make dashboard-install` | Once: Node dependencies and the test browser |
-| | `make trigger-token` ⚠ | The hourly trigger's GitHub token: opens GitHub's form, checks the token you paste (never shown), stores it on the Worker, prints its expiry; run it in a terminal, again before the token expires: GitHub e-mails you from 14 days before ([CI](../technical/ci.md#the-trigger)) |
+| | `make trigger-token` ⚠ | The 4-hourly trigger's GitHub token: opens GitHub's form, checks the token you paste (never shown), stores it on the Worker, prints its expiry; run it in a terminal, again before the token expires: GitHub e-mails you from 14 days before ([CI](../technical/ci.md#the-trigger)) |
 | | `make trigger-check` | Whether the Worker's deployed token works now: asks GitHub with it, on Cloudflare, and prints `OK … (N days left)`; starts nothing, and the token never leaves Cloudflare |
 
 ## 11. Containers and logs: watching it run

@@ -106,7 +106,7 @@ mode-direct: ## Hand over to direct mode: stop the poller and catch-up, export, 
 	@echo "Direct mode: catching up with USGS, then checking against it"
 	uv run python -m earth_hub.direct once --all
 	uv run python -m earth_hub.usgs_reconcile || { echo "Direct mode is on; the check against USGS found differences it cannot explain (above)"; exit 1; }
-	@echo "Direct mode: the hourly schedule writes the bucket now (or make direct-run, not both)"
+	@echo "Direct mode: the 4-hourly schedule writes the bucket now (or make direct-run, not both)"
 
 mode-full: ## Hand over to full mode: replay direct mode's log into Kafka (REBUILD=1: load an empty PostgreSQL from the bucket), check, then switch
 	docker compose --profile ingest build migrate
@@ -156,8 +156,8 @@ catchup-now: ## Catch up with USGS now, in the mode that writes the bucket: day 
 		uv run python -m earth_hub.ingestion.catchup --once; \
 	fi
 
-reconcile-usgs: ## Compare Earth-Hub with USGS for the last days, explaining every difference: [DAYS=3]
-	uv run python -m earth_hub.usgs_reconcile $(if $(DAYS),--days $(DAYS))
+reconcile-usgs: ## Compare Earth-Hub with USGS, explaining every difference: [DAYS=3 | START=YYYY-MM-DD [END=YYYY-MM-DD]] [BY=day|month|year]
+	uv run python -m earth_hub.usgs_reconcile $(if $(DAYS),--days $(DAYS)) $(if $(START),--start $(START)) $(if $(END),--end $(END)) $(if $(BY),--by $(BY))
 
 direct-once: ## Direct mode: one poller round, and catch-up if due, straight to R2
 	uv run python -m earth_hub.direct once
