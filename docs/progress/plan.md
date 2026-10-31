@@ -8,7 +8,7 @@ The project is designed to showcase your experience in software quality assuranc
 
 ## Status
 
-As of 2026-10-29. The plan below is the original, with Milestone 7 revised; the work as built is described in the [architecture](../technical/architecture.md), and what each step found in the [defect log](defects.md).
+As of 2026-10-30. The plan below is the original, with Milestone 7 revised; the work as built is described in the [architecture](../technical/architecture.md), and what each step found in the [defect log](defects.md).
 
 | Milestone | Status | Merged in |
 | --- | --- | --- |
@@ -45,9 +45,9 @@ As of 2026-10-29. The plan below is the original, with Milestone 7 revised; the 
 | The USGS credit and a disclaimer (research purposes, not affiliated with or endorsed by USGS, data that may be late or inaccurate when a part fails, no warranty, not for emergencies) in the dashboard's footer and the README | Done | #57 |
 | A privacy notice (`/privacy`, linked from the footer): no cookies, storage, tracking or location; the Worker's invocation logs, which recorded visitors' IP addresses and IP-derived locations, switched off | Done | #58 |
 | Code quality: Ruff's complexity (`C90`), security (`S`), simplification (`SIM`) and Pylint (`PL`) rules, with their first findings fixed or marked; CodeQL code scanning | Done | #59 |
-| [9. Standby: direct mode takes over from one full-mode machine](#milestone-9--standby-direct-mode-takes-over-from-one-full-mode-machine) | Steps 1 to 4 in review (#61, green); steps 5 to 8 in review | #61, `feat/m9-failover` |
+| [9. Standby: direct mode takes over from one full-mode machine](#milestone-9--standby-direct-mode-takes-over-from-one-full-mode-machine) | Done, 2026-10-30: steps 1 to 4 (lock fencing, DEF-058; owner and lease; the exporting service and its standby state), steps 5 to 8 (automatic takeover, rebuild from the bucket, `/eh-host`, failover end to end) | #61, #62 |
 
-Current numbers: 198 requirements, all covered by a passing test; 58 defects, all fixed; about 1,200 tests in the full regression.
+Current numbers: 198 requirements, all covered by a passing test; 58 defects, all fixed; 1,321 tests in the full regression (2026-10-30), with 91.3% line coverage.
 
 **To refactor** (#59): functions over Ruff's complexity limits when the rules were added, each marked `# noqa: … (to refactor: docs/progress/plan.md)`. New code is held to the limits. Each one is a separate change, with the full regression as its check.
 
@@ -554,7 +554,7 @@ Full mode stays the reference implementation; none of its behavior, tests or evi
 
 ### Milestone 9 — Standby: direct mode takes over from one full-mode machine
 
-**Approved on 2026-10-30, with the decisions below.** One machine runs full mode as the bucket's writer, polling USGS every minute; direct mode's rounds on GitHub Actions stay as they are and become its standby. While the machine is alive, they write nothing; when it stops, the next round takes the bucket over and keeps the dashboard current; when the machine returns, it hands back with `make to-full`. Only one machine can run full mode, so there is never a second full-mode writer to coordinate.
+**Approved and done on 2026-10-30 (#61, #62), with the decisions below.** One machine runs full mode as the bucket's writer, polling USGS every minute; direct mode's rounds on GitHub Actions stay as they are and become its standby. While the machine is alive, they write nothing; when it stops, the next round takes the bucket over and keeps the dashboard current; when the machine returns, it hands back with `make to-full`. Only one machine can run full mode, so there is never a second full-mode writer to coordinate.
 
 The guarantees are those of Milestone 8, kept across an unplanned failure: **one writer at a time** (no conflicts), **one ledger over one state** (no duplicate records), **catch-up from the last exported checkpoints** (no lost event or revision). Idempotent writes alone would not give them: two writers deciding from different states make different decisions (record keys, merges, processing times), and the exporter would delete what the other created.
 
