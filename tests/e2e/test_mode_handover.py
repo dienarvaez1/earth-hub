@@ -111,6 +111,7 @@ class RoundTrip:
             sent=SentState(),
             problems=self.problems,
             local_dir=self.tmp / "runs",
+            machine="host-a",
         )
 
     def to_full(self):
@@ -125,6 +126,7 @@ class RoundTrip:
             wait=self.pipeline.sync,
             problems=self.problems,
             local_dir=self.tmp / "runs",
+            machine="host-a",
         )
 
     def runner(self) -> DirectRunner:
@@ -196,11 +198,12 @@ def phase_two(trip, runner):
     )
 
 
-@pytest.mark.req("REQ-MODE-009", "REQ-MODE-010")
+@pytest.mark.req("REQ-MODE-009", "REQ-MODE-010", "REQ-MODE-018")
 def test_full_to_direct_to_full_leaves_postgresql_as_if_it_had_stayed_in_full_mode(trip):
     phase_one(trip)
     trip.to_direct()
     assert mode.read(trip.bucket).mode == mode.DIRECT
+    assert mode.read(trip.bucket).owner is None  # direct mode has no owner
     with pytest.raises(mode.WrongMode):
         Exporter(trip.api, trip.bucket, api_url="x", local_dir=trip.tmp).run()  # nothing written
 
@@ -209,6 +212,7 @@ def test_full_to_direct_to_full_leaves_postgresql_as_if_it_had_stayed_in_full_mo
     assert result.replayed == 7 and result.already_replayed == 0
     marker = mode.read(trip.bucket)
     assert (marker.mode, marker.state, marker.checkpoint_seq) == (mode.FULL, mode.ACTIVE, 7)
+    assert marker.owner == "host-a" and marker.lease_live(datetime.now(UTC))
     assert tables(trip.pipeline.db) == tables(trip.reference)
 
     # Full mode again: a direct round is refused, an export finds nothing to do.

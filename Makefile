@@ -1,4 +1,4 @@
-.PHONY: help install up down reset ingest ingest-once ingest-logs ingest-stop api api-dev api-stop kafka-ui kafka-ui-stop backfill catchup-once catchup-now reconcile-usgs consume reconcile reconcile-direct mode mode-direct mode-full to-full to-direct backfill-full direct-once direct-run direct-runs export-r2 export-r2-runs r2-ls r2-count r2-get dashboard-install dashboard-build dashboard-dev dashboard-deploy trigger-token trigger-check test-dashboard check-db-outage lint format test test-integration test-e2e test-disruptive test-performance load load-ui test-all regression flake-check traceability release smoke smoke-restart migrate coverage
+.PHONY: help install up down reset ingest ingest-once ingest-logs ingest-stop api api-dev api-stop kafka-ui kafka-ui-stop backfill catchup-once catchup-now reconcile-usgs consume reconcile reconcile-direct repair-rows mode mode-direct mode-full to-full to-direct backfill-full direct-once direct-run direct-runs export-r2 export-r2-runs r2-ls r2-count r2-get dashboard-install dashboard-build dashboard-dev dashboard-deploy trigger-token trigger-check test-dashboard check-db-outage lint format test test-integration test-e2e test-disruptive test-performance load load-ui test-all regression flake-check traceability release smoke smoke-restart migrate coverage
 
 help: ## List the available commands
 	@grep -E '^[a-z0-9-]+:.*## ' $(MAKEFILE_LIST) | awk -F ':.*## ' '{printf "  %-17s %s\n", $$1, $$2}'
@@ -16,18 +16,19 @@ down: ## Stop all services, including the poller (data volumes are kept)
 reset: ## Stop all services and delete their data volumes
 	docker compose --profile ingest --profile api --profile tools down --volumes
 
-ingest: up ## Build and start the pipeline (migrate, poller, consumers, catch-up) on the live feed
+ingest: up ## Build and start the pipeline (migrate, poller, consumers, catch-up, the exporting service) on the live feed
 	docker compose --profile ingest build migrate
 	docker compose --profile ingest up -d --wait poller consumer consumer-backfill catchup
+	docker compose --profile ingest --profile api up -d exporter
 
 ingest-once: ## Poll the live feed once from this machine and exit
 	uv run python -m earth_hub.ingestion --once
 
 ingest-logs: ## Follow the pipeline services' logs
-	docker compose --profile ingest logs -f poller consumer consumer-backfill catchup
+	docker compose --profile ingest logs -f poller consumer consumer-backfill catchup exporter
 
 ingest-stop: ## Stop the pipeline services, leaving Kafka and PostgreSQL running
-	docker compose --profile ingest stop poller consumer consumer-backfill catchup
+	docker compose --profile ingest stop poller consumer consumer-backfill catchup exporter
 
 api: up ## Build and start the API container (http://127.0.0.1:8000/docs by default)
 	docker compose --profile api build migrate
@@ -93,12 +94,15 @@ reconcile: ## Check every Kafka message has a database row, and the tables' inva
 reconcile-direct: ## Check direct mode's state in R2 (read-only): make reconcile-direct [DEEP=1]
 	uv run python -m earth_hub.direct.reconcile $(if $(DEEP),--deep)
 
+repair-rows: ## Write row objects that differ from the snapshot again, in either mode: make repair-rows [DRY_RUN=1]
+	uv run python -m earth_hub.direct.repair $(if $(DRY_RUN),--dry-run)
+
 mode: ## Which mode writes the R2 bucket: full or direct
 	uv run python -m earth_hub.direct.handover status
 
 mode-direct: ## Hand over to direct mode: stop the poller and catch-up, export, write direct mode's state, catch up
-	docker compose stop poller catchup
-	uv run python -m earth_hub.direct.handover direct || { docker compose start poller catchup; echo "Handover failed: full mode resumed"; exit 1; }
+	docker compose stop exporter poller catchup
+	uv run python -m earth_hub.direct.handover direct || { docker compose start poller catchup exporter; echo "Handover failed: full mode resumed"; exit 1; }
 	@echo "Direct mode: catching up with USGS, then checking against it"
 	uv run python -m earth_hub.direct once --all
 	uv run python -m earth_hub.usgs_reconcile || { echo "Direct mode is on; the check against USGS found differences it cannot explain (above)"; exit 1; }
@@ -108,7 +112,7 @@ mode-full: ## Hand over to full mode: replay direct mode's log into Kafka, check
 	docker compose --profile ingest build migrate
 	docker compose --profile ingest --profile api up -d --wait consumer consumer-backfill api
 	uv run python -m earth_hub.direct.handover full
-	docker compose up -d poller catchup
+	docker compose --profile ingest --profile api up -d poller catchup exporter
 	@echo "Full mode: catching up with USGS, then checking against it"
 	uv run python -m earth_hub.ingestion.catchup --once
 	uv run python -m earth_hub.usgs_reconcile --wait 300 || { echo "Full mode is on; the check against USGS found differences it cannot explain (above)"; exit 1; }

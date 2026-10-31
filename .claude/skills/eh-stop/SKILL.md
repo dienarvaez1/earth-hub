@@ -10,7 +10,7 @@ Run from the repository root.
 
 | Argument | Command | Effect |
 | --- | --- | --- |
-| `pipeline` (default) | `make ingest-stop` | Stops poller, consumers and catch-up; Kafka and PostgreSQL keep running |
+| `pipeline` (default) | `make ingest-stop` | Stops poller, consumers, catch-up and the exporting service; Kafka and PostgreSQL keep running |
 | `api` | `make api-stop` | Stops the API container |
 | `ui` | `make kafka-ui-stop` | Stops the Kafka viewer |
 | `all` | `make down` | Stops every container; **data is kept** in the Docker volumes |

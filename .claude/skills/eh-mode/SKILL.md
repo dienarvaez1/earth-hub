@@ -14,7 +14,7 @@ cron trigger, keeping the dashboard current while no machine runs.
 
 | Argument | Command | Writes |
 | --- | --- | --- |
-| `status` (default) | `make -s mode`, `make -s direct-runs LIMIT=5` | no |
+| `status` (default) | `make -s mode` (in full mode also the owner, its lease, live or expired, and this host), `make -s direct-runs LIMIT=5` | no |
 | `direct` | `make to-direct` ⚠ (in the background: waits for the consumers, `make reconcile`, `make mode-direct`, which stops the poller and catch-up, exports, hands over, catches up and checks against USGS, then `make down`; a few minutes) | bucket, stops services |
 | `full` | `make to-full` ⚠ (in the background: Docker and the mode checked, `make up`, `make mode-full`, which replays direct mode's log into Kafka, checks and switches back, then waits for the consumers and `make reconcile`; the hourly rounds then skip) | bucket, Kafka, PostgreSQL |
 | `usgs [DAYS]` | `make reconcile-usgs [DAYS=3]`: the mode writing the bucket against USGS, every difference pending (explained) or not | no |
@@ -22,6 +22,7 @@ cron trigger, keeping the dashboard current while no machine runs.
 | `once` | `make direct-once` ⚠ (one poller round, and catch-up if due) | bucket |
 | `run` | `make direct-run` ⚠ (until stopped; run it in the background) | bucket |
 | `reconcile` | `make reconcile-direct` (`deep`: `make reconcile-direct DEEP=1`, one read per row) | no |
+| `repair` | `make repair-rows DRY_RUN=1`, then, if it lists rows and the user asked for the repair, `make repair-rows` ⚠: row objects that differ from the snapshot written again from it (a writer paused past its lock, DEF-058), in either mode, under the lock | bucket (not with `DRY_RUN=1`) |
 | `schedule` | `gh workflow run direct.yml -f job=round` ⚠, then wait for `gh run list --workflow direct.yml --limit 1` | bucket |
 | `runs` | `make -s direct-runs LIMIT=10` (the audit trail: every execution, who started it, what it did), then `gh run list --workflow direct.yml --limit 5` | no |
 
@@ -31,7 +32,7 @@ cron trigger, keeping the dashboard current while no machine runs.
   step: exit 2 means it refused to start (the wrong mode, Docker not running, a local `direct-run`) and changed
   nothing; exit 1 means a step failed (named in its output) and the steps before it stand; rerunning is safe.
   `DRY_RUN=1` lists the steps. `make mode-full` / `make mode-direct` remain, for the handover alone.
-- **Everything but `status`, `usgs`, `reconcile` and `runs` writes the real bucket or stops services:** run it only
+- **Everything but `status`, `usgs`, `reconcile`, `runs` and `repair`'s dry run writes the real bucket or stops services:** run it only
   when the user asked for that (the argument counts). Never edit `_state/mode.json` by hand.
 - **One direct process.** Before `once`, `run` or `schedule`, check `pgrep -fl 'earth_hub.direct run'`; a local
   `direct-run` and the schedule would take turns writing. Say so rather than stopping one silently.

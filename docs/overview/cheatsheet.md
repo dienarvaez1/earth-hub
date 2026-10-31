@@ -183,6 +183,7 @@ Only while `make mode` says `direct`. The hourly rounds (a Cloudflare cron trigg
 | | `gh run list --workflow watchdog.yml --limit 3` | The watchdog, hourly: it fails, and GitHub e-mails, when no `direct.yml` run started for 2 hours ([CI](../technical/ci.md#the-watchdog)) |
 | `/eh-mode catchup` | `make catchup-now` ⚠ | Catch up now: a direct round with the day feed, the month feed and the deletions, whether due or not |
 | `/eh-mode reconcile` | `make reconcile-direct [DEEP=1]` | Rows, manifest, snapshot, ID map and log agree, read-only ([direct mode](../technical/architecture.md#direct-mode)) |
+| `/eh-mode repair` | `make repair-rows [DRY_RUN=1]` ⚠ | Row objects that `DEEP=1` finds stale or missing, written again from the snapshot, in either mode (DEF-058) |
 | `/eh-r2 count` | `make r2-get KEY=analytics/meta.json \| jq '{run_id, written_at, rows}'` | Rows in the bucket now (PostgreSQL falls behind until `make mode-full`) |
 | | `gh secret set -f <file>` ⚠ | The workflow's four `R2_*` secrets, from a file of `NAME=value` lines, with `--env r2` (the environment only `main` can use; empty values make every run fail) |
 
@@ -214,7 +215,7 @@ Only while `make mode` says `direct`. The hourly rounds (a Cloudflare cron trigg
 | `/eh-logs poller` | `docker compose logs --no-log-prefix --since 1h poller` | One service's recent logs (`-f` to follow) |
 | `/eh-logs` | `make ingest-logs` | Follows the four pipeline services |
 | `/eh-logs us7000abcd` | `docker compose logs --no-log-prefix poller consumer consumer-backfill catchup \| jq -cR --arg id us7000abcd 'fromjson? \| select(.event_id == $id)'` | Everything about one event, across services, in order |
-| `/eh-logs errors` | `docker compose logs --no-log-prefix --since 1h poller consumer consumer-backfill catchup api \| jq -cR 'fromjson? \| select(.level == "WARNING" or .level == "ERROR")'` | Warnings and errors only |
+| `/eh-logs errors` | `docker compose logs --no-log-prefix --since 1h poller consumer consumer-backfill catchup exporter api \| jq -cR 'fromjson? \| select(.level == "WARNING" or .level == "ERROR")'` | Warnings and errors only |
 | `/eh-logs rejected` | `docker compose logs --no-log-prefix consumer consumer-backfill \| jq -cR 'fromjson? \| select(.message == "message rejected") \| {ts, event_id, reason}'` | Rejections and the rule behind each |
 | `/eh-logs summary` | `docker compose logs --no-log-prefix --since 1h consumer consumer-backfill \| jq -cR 'fromjson? \| select(.message == "consumer summary") \| {ts, logger, lag, outcomes}' \| tail -10` | The consumers' minute summaries: counts and lag |
 | `/eh-poller restart` | `docker compose --profile ingest restart poller` | Restarts one service (any of `poller`, `consumer`, `consumer-backfill`, `catchup`) |

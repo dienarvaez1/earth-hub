@@ -194,6 +194,7 @@ class Exporter:
         lock_ttl: timedelta = LOCK_TTL,
         git_commit: str | None = None,
         local_dir: Path | None = LOCAL_RUNS_DIR,
+        machine: str | None = None,
     ):
         self.api = api
         self.bucket = bucket
@@ -205,12 +206,27 @@ class Exporter:
         self.lock_ttl = lock_ttl
         self.git_commit = git_commit
         self.local_dir = local_dir
+        # Full mode's host (settings.machine_id): the export writes only as the bucket's owner,
+        # and renews the lease (mode.hold). None: no owner checked (tests of the export alone).
+        self.machine = machine
         self._saved: dict[str, str] = {}
         self._ids: dict[str, int] = {}  # each row read: key -> the API's id, for paging
-        self._lock_etag: str | None = None  # held by this run (None on a dry run)
-        self._lock_renewed: datetime | None = None
+        self._held: lock.Held | None = None  # this run's lock (None on a dry run)
 
-    def run(self, *, dry_run: bool = False, verify: bool = False) -> RunRecord:
+    @property
+    def manifest(self) -> dict[str, str]:
+        """What the bucket's manifest lists, as this run last wrote or read it."""
+        return dict(self._saved)
+
+    def run(
+        self,
+        *,
+        dry_run: bool = False,
+        verify: bool = False,
+        after: Callable[[lock.Held], None] | None = None,
+    ) -> RunRecord:
+        """`after`: called once the run succeeded, still holding the lock (the exporting
+        service writes direct mode's state there); its failure fails the run."""
         started = self.clock()
         record = RunRecord(
             run_id=f"{started:%Y-%m-%dT%H-%M-%SZ}-{secrets.token_hex(2)}",
@@ -227,6 +243,10 @@ class Exporter:
             self._save(record)
         try:
             self._export(record, dry_run=dry_run, verify=verify)
+            if not record.errors and not dry_run:
+                self._hold_lease()
+                if after is not None:
+                    after(self._held)
             record.status = "failed" if record.errors else "succeeded"
         except KeyboardInterrupt:
             record.status = "interrupted"
@@ -240,7 +260,7 @@ class Exporter:
             record.duration_s = round((finished - started).total_seconds(), 3)
             self._save(record)
             if locked:
-                self._release_lock(record)
+                self._release_lock()
         return record
 
     # The export itself.
@@ -276,7 +296,6 @@ class Exporter:
             if not dry_run and known != self._saved:
                 self._checkpoint(known, record)
             raise
-        self._keep_lock(record)
 
         # What the bucket holds: listed, or as the manifest and this run's uploads say.
         stored = self._stored_keys() if verify else set(known)
@@ -284,7 +303,7 @@ class Exporter:
         if dry_run:
             counts.deleted = len(gone)
             return
-        failed = set(self.bucket.delete(row_key(key) for key in gone))
+        failed = set(self._delete(row_key(key) for key in gone))
         counts.deleted = len(gone) - len(failed)
         for key in sorted(failed):
             counts.failed += 1
@@ -302,7 +321,6 @@ class Exporter:
         if not record.verification["match"]:
             record.error("the bucket does not hold exactly the rows read; see verification")
         if not record.errors:  # only a bucket that holds exactly the rows read
-            self._keep_lock(record)
             self._write_snapshot(record, rows, snapshot)
 
     def _write_snapshot(self, record: RunRecord, rows: dict[str, str], snapshot) -> None:
@@ -316,10 +334,12 @@ class Exporter:
             return
         try:
             body = snapshot.build()
-            self.bucket.put(SNAPSHOT_KEY, body, content_type=PARQUET_TYPE)
+            self._put(SNAPSHOT_KEY, body, content_type=PARQUET_TYPE)
             meta = snapshot_meta(record.run_id, _iso(self.clock()), len(rows), body, content)
             # After the file: meta.json never describes a snapshot that is not there.
-            self.bucket.put(META_KEY, meta)
+            self._put(META_KEY, meta)
+        except lock.LockLost:
+            raise
         except Exception as exc:
             record.error(f"snapshot not written: {type(exc).__name__}: {exc}")
             return
@@ -346,7 +366,9 @@ class Exporter:
                 continue  # gone from the table since it was read; the verification reports it
             body = encode(published(rows[0]))
             try:
-                self.bucket.put(row_key(key), body)
+                self._put(row_key(key), body)
+            except lock.LockLost:
+                raise
             except Exception as exc:
                 counts.failed += 1
                 record.error(f"upload of row {key} failed: {exc}")
@@ -367,7 +389,7 @@ class Exporter:
         unsaved = 0  # uploads confirmed since the manifest was last saved
         with ThreadPoolExecutor(self.workers) as pool:
             for number, page in enumerate(self._pages(), start=1):
-                self._keep_lock(record)
+                self._confirm()  # also while nothing changes, so a long run keeps it (DEF-048)
                 pending = []
                 for row in page:
                     key = row["key"]
@@ -388,7 +410,7 @@ class Exporter:
                         setattr(counts, kind, getattr(counts, kind) + 1)
                     continue
                 futures = {
-                    pool.submit(self.bucket.put, row_key(key), body): (
+                    pool.submit(self._put, row_key(key), body): (
                         key,
                         digest,
                         kind,
@@ -400,6 +422,8 @@ class Exporter:
                     key, digest, kind, size = futures[future]
                     try:
                         future.result()
+                    except lock.LockLost:
+                        raise
                     except Exception as exc:
                         counts.failed += 1
                         failed_keys.add(key)
@@ -425,6 +449,8 @@ class Exporter:
         """Save progress on the way out of an interrupted or failed run, if possible."""
         try:
             self._save_manifest(known, record)
+        except lock.LockLost:
+            logger.warning("the lock was taken over; no checkpoint")
         except Exception:
             logger.exception("could not save the manifest; the next run uploads more again")
 
@@ -470,14 +496,28 @@ class Exporter:
         return {} if found is None else parse_manifest(found[0])
 
     def _save_manifest(self, rows: dict[str, str], record: RunRecord) -> None:
-        self.bucket.put(
+        self._put(
             MANIFEST_KEY,
             manifest_body(rows, record.run_id, _iso(self.clock())),
             content_type="application/gzip",
         )
         self._saved = dict(rows)
 
-    # Run records and the lock.
+    # Writes, each after confirming the lock (DEF-058).
+
+    def _confirm(self) -> None:
+        if self._held is not None:
+            self._held.confirm()
+
+    def _put(self, key: str, body: bytes, **kwargs) -> str:
+        self._confirm()
+        return self.bucket.put(key, body, **kwargs)
+
+    def _delete(self, keys) -> list[str]:
+        self._confirm()
+        return self.bucket.delete(keys)
+
+    # Run records and the lock. A run's record is its own object, written without the lock.
 
     def _save(self, record: RunRecord) -> None:
         body = record.to_json()
@@ -492,39 +532,34 @@ class Exporter:
 
     def _acquire_lock(self, record: RunRecord, now: datetime) -> None:
         """The lock, and only in full mode: in direct mode the bucket is direct mode's."""
-        self._lock_etag = lock.acquire(
-            self.bucket, record.run_id, record.started_at, now, self.lock_ttl
+        self._held = lock.Held(
+            self.bucket,
+            record.run_id,
+            record.started_at,
+            now,
+            self.lock_ttl,
+            self.clock,
+            renew_after=LOCK_RENEW,
         )
-        self._lock_renewed = now
         try:
-            mode.require(self.bucket, mode.FULL)
+            current = mode.require(self.bucket, mode.FULL)
+            if self.machine is not None:
+                self._held.confirm()
+                mode.hold(self.bucket, current, self.machine, now)
         except BaseException:
-            self._release_lock(record)
+            self._release_lock()
             raise
 
-    def _release_lock(self, record: RunRecord) -> None:
-        lock.release(self.bucket, record.run_id, self.lock_ttl)
-        self._lock_etag = None
+    def _hold_lease(self) -> None:
+        """Renew the lease after a run, which may have lasted longer than it."""
+        if self.machine is not None:
+            self._confirm()
+            current = mode.require(self.bucket, mode.FULL)
+            mode.hold(self.bucket, current, self.machine, self.clock())
 
-    def _keep_lock(self, record: RunRecord) -> None:
-        """Renew the lock every LOCK_RENEW, so no other run takes it while this one lasts
-        (DEF-048). A lock taken over stops the run (LockLost); a failed request is tried again
-        at the next call, long before the lock expires."""
-        if self._lock_etag is None:
-            return
-        now = self.clock()
-        if now - self._lock_renewed < LOCK_RENEW:
-            return
-        try:
-            self._lock_etag = lock.renew(
-                self.bucket, record.run_id, record.started_at, self._lock_etag, now, self.lock_ttl
-            )
-            self._lock_renewed = now
-        except lock.LockLost:
-            self._lock_etag = None  # not ours any more: never released by this run
-            raise
-        except Exception:
-            logger.warning("could not renew the lock; trying again", exc_info=True)
+    def _release_lock(self) -> None:
+        self._held.release()
+        self._held = None
 
 
 def list_runs(bucket: Bucket, *, limit: int = 20, now: datetime | None = None) -> list[dict]:
@@ -602,6 +637,7 @@ def main(argv: list[str] | None = None) -> int:
             api_url=api_url,
             workers=settings.export_workers,
             git_commit=_git_commit(),
+            machine=settings.machine_id,
         )
         try:
             record = exporter.run(dry_run=args.dry_run, verify=args.verify)

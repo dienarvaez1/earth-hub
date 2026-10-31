@@ -44,7 +44,16 @@ from earth_hub.consumers.earthquake_consumer import PROCESSED_AT_HEADER
 from earth_hub.database.models import Earthquake, EarthquakeId, IngestionCheckpoint
 from earth_hub.database.progress import Progress
 from earth_hub.direct.runner import LOCK_TTL, DirectRunner
-from earth_hub.direct.store import GZIP, IDS_KEY, LOG_PREFIX, STATE_KEY, ids_body, iso
+from earth_hub.direct.store import (
+    GZIP,
+    IDS_KEY,
+    LOG_PREFIX,
+    PENDING_KEY,
+    STATE_KEY,
+    empty_status,
+    ids_body,
+    iso,
+)
 from earth_hub.export import lock, mode
 from earth_hub.export.bucket import Bucket
 from earth_hub.export.r2 import Exporter
@@ -175,8 +184,70 @@ def _run_id(now: datetime) -> str:
     return f"handover-{now:%Y-%m-%dT%H-%M-%SZ}-{secrets.token_hex(2)}"
 
 
-def _exporter(api: httpx.Client, bucket: Bucket, api_url: str, local_dir) -> Exporter:
-    return Exporter(api, bucket, api_url=api_url, local_dir=local_dir)
+def _exporter(
+    api: httpx.Client, bucket: Bucket, api_url: str, local_dir, machine: str | None = None
+) -> Exporter:
+    return Exporter(api, bucket, api_url=api_url, local_dir=local_dir, machine=machine)
+
+
+@dataclass
+class Standby:
+    """Direct mode's state as full mode's PostgreSQL holds it: each record's creation number
+    (`earthquakes.id`), each USGS ID's record and first-seen time, catch-up's checkpoints."""
+
+    order: dict[str, int]
+    ids: dict[str, tuple[str, str]]
+    checkpoints: dict[str, str]
+
+
+def read_standby(conn) -> Standby:
+    order = {k: n for k, n in conn.execute(select(Earthquake.key, Earthquake.id)).all()}
+    ids = {
+        r.event_id: (r.key, iso(r.first_seen_at))
+        for r in conn.execute(
+            select(EarthquakeId.event_id, Earthquake.key, EarthquakeId.first_seen_at).join(
+                Earthquake, Earthquake.id == EarthquakeId.earthquake_id
+            )
+        )
+    }
+    checkpoints = {
+        name: iso(value)
+        for name, value in conn.execute(select(IngestionCheckpoint.name, IngestionCheckpoint.value))
+    }
+    return Standby(order, ids, checkpoints)
+
+
+def write_standby(
+    bucket: Bucket,
+    held: lock.Held,
+    standby: Standby,
+    sent: SentState,
+    *,
+    run_id: str,
+    now: datetime,
+    checkpoints: bool = True,
+) -> dict:
+    """Write direct mode's ID map and state object from full mode's, under `held`, as
+    `make mode-direct` and every export of the exporting service do (REQ-MODE-019). The log's
+    sequence number stays. `checkpoints=False` keeps the ones the bucket holds: catch-up's are
+    copied only when everything it published is stored. Returns the state written."""
+    if bucket.get(PENDING_KEY) is not None:
+        raise HandoverFailed("the bucket holds an unfinished direct round")
+    found = bucket.get(STATE_KEY)
+    status = json.loads(found[0]) if found else empty_status()
+    held.confirm()
+    order = standby.order
+    bucket.put(
+        IDS_KEY,
+        ids_body(max(order.values(), default=0) + 1, order, standby.ids),
+        content_type=GZIP,
+    )
+    status.update(run_id=run_id, written_at=iso(now), sent=sent.entries())
+    if checkpoints:
+        status["checkpoints"] = standby.checkpoints
+    held.confirm()
+    bucket.put(STATE_KEY, json.dumps(status, indent=1).encode())
+    return status
 
 
 def to_direct(
@@ -189,6 +260,7 @@ def to_direct(
     problems: Callable[[], list[str]],
     clock: Callable[[], datetime] = lambda: datetime.now(UTC),
     local_dir: Path | None = None,
+    machine: str | None = None,
 ) -> Result:
     """Full -> direct. `sent`: the poller's 26-hour state; `problems`: what stops full mode
     from being idle and consistent (reconcile, lag), empty when it is."""
@@ -196,49 +268,26 @@ def to_direct(
     current = mode.require(bucket, mode.FULL)
     if found := problems():
         raise HandoverFailed(f"full mode is not idle and consistent: {'; '.join(found)}")
-    record = _exporter(api, bucket, api_url, local_dir).run()
+    record = _exporter(api, bucket, api_url, local_dir, machine).run()
     result.exported = {"run_id": record.run_id, "status": record.status, **record.counts.__dict__}
     if record.status != "succeeded":
         raise HandoverFailed(f"the export did not succeed: {record.errors[:3]}")
     result.step(f"exported: run {record.run_id}")
 
     with engine.connect() as conn:
-        order = {k: n for k, n in conn.execute(select(Earthquake.key, Earthquake.id)).all()}
-        ids = {
-            r.event_id: (r.key, iso(r.first_seen_at))
-            for r in conn.execute(
-                select(EarthquakeId.event_id, Earthquake.key, EarthquakeId.first_seen_at).join(
-                    Earthquake, Earthquake.id == EarthquakeId.earthquake_id
-                )
-            )
-        }
-        checkpoints = {
-            name: iso(value)
-            for name, value in conn.execute(
-                select(IngestionCheckpoint.name, IngestionCheckpoint.value)
-            )
-        }
+        standby = read_standby(conn)
 
     now = clock()
     run_id = _run_id(now)
-    lock.acquire(bucket, run_id, iso(now), now, LOCK_TTL)
+    held = lock.Held(bucket, run_id, iso(now), now, LOCK_TTL, clock)
     try:
         current = mode.require(bucket, mode.FULL)  # still, now that no one else writes
         with tempfile.TemporaryDirectory() as tmp:
+            status = write_standby(bucket, held, standby, sent, run_id=run_id, now=now)
             runner = DirectRunner(bucket, workdir=Path(tmp))
             runner.state.refresh()
-            if runner.state.pending is not None:
-                raise HandoverFailed("the bucket holds an unfinished direct round")
-            bucket.put(
-                IDS_KEY, ids_body(max(order.values(), default=0) + 1, order, ids), content_type=GZIP
-            )
-            status = dict(runner.state.status)
-            status.update(
-                run_id=run_id, written_at=iso(now), sent=sent.entries(), checkpoints=checkpoints
-            )
-            bucket.put(STATE_KEY, json.dumps(status, indent=1).encode())
-            runner.state.refresh()
             runner.state.check()  # the ID map against the export just made
+        held.confirm()
         mode.write(
             bucket,
             current,
@@ -247,11 +296,14 @@ def to_direct(
             since=iso(now),
             checkpoint_seq=status["seq"],
             replay_from=None,
+            owner=None,
+            lease_expires_at=None,
         )
     finally:
-        lock.release(bucket, run_id, LOCK_TTL)
+        held.release()
     result.step(
-        f"direct mode from sequence {status['seq']}: {len(order)} records, {len(ids)} IDs, "
+        f"direct mode from sequence {status['seq']}: {len(standby.order)} records, "
+        f"{len(standby.ids)} IDs, "
         f"{len(sent)} events in the poller's state"
     )
     return result
@@ -268,8 +320,10 @@ def to_full(
     problems: Callable[[], list[str]],
     clock: Callable[[], datetime] = lambda: datetime.now(UTC),
     local_dir: Path | None = None,
+    machine: str | None = None,
 ) -> Result:
-    """Direct -> full. `wait`: returns once the consumers have stored every replayed message;
+    """Direct -> full, with `machine` (settings.machine_id) the bucket's owner. `wait`:
+    returns once the consumers have stored every replayed message;
     `problems`: what reconciliation finds wrong in full mode, empty when nothing."""
     result = Result(mode.FULL)
     current = mode.read(bucket)
@@ -279,7 +333,7 @@ def to_full(
     run_id = _run_id(now)
     with tempfile.TemporaryDirectory() as tmp:
         runner = DirectRunner(bucket, workdir=Path(tmp))
-        lock.acquire(bucket, run_id, iso(now), now, LOCK_TTL)
+        held = lock.Held(bucket, run_id, iso(now), now, LOCK_TTL, clock)
         try:
             current = mode.read(bucket)
             if current.state == mode.ACTIVE:
@@ -287,10 +341,12 @@ def to_full(
                 # whose checks failed left its replay_from: what it sent is found from there, not
                 # sent twice (DEF-047). A handover that succeeds clears it.
                 start = topic.end_offset() if current.replay_from is None else current.replay_from
+                held.confirm()
                 current = mode.write(bucket, current, state=mode.HANDING_OVER, replay_from=start)
-            runner._prepare(in_direct_mode=False)  # finishes a round left pending
+            with runner.fenced(held):
+                runner._prepare(in_direct_mode=False)  # finishes a round left pending
         finally:
-            lock.release(bucket, run_id, LOCK_TTL)
+            held.release()
         status = runner.state.status
     result.step(f"direct mode frozen at sequence {status['seq']}")
 
@@ -328,17 +384,31 @@ def to_full(
     progress = Progress(engine)
     for name, value in status["checkpoints"].items():
         progress.set_checkpoint(name, datetime.fromisoformat(value))
+    switched = clock()
     mode.write(
         bucket,
         mode.read(bucket),
         mode=mode.FULL,
         state=mode.ACTIVE,
-        since=iso(clock()),
+        since=iso(switched),
         checkpoint_seq=status["seq"],
         replay_from=None,
+        owner=machine,
+        lease_expires_at=iso(switched + mode.LEASE_TTL) if machine else None,
     )
-    result.step("full mode")
+    result.step(f"full mode, owned by {machine}" if machine else "full mode")
     return result
+
+
+def _print_status(current: mode.Mode, machine: str) -> None:
+    print(
+        f"{current.mode} ({current.state}) since {current.since or 'the start'}; "
+        f"log sequence at the last change: {current.checkpoint_seq}"
+    )
+    if current.owner is not None:
+        live = "live" if current.lease_live(datetime.now(UTC)) else "expired"
+        print(f"owner {current.owner}, lease until {current.lease_expires_at} ({live})")
+    print(f"this host: {machine}")
 
 
 def main(argv: list[str] | None = None) -> int:  # noqa: C901 (to refactor: docs/progress/plan.md)
@@ -364,10 +434,7 @@ def main(argv: list[str] | None = None) -> int:  # noqa: C901 (to refactor: docs
         return 2
     current = mode.read(bucket)
     if args.command == "status":
-        print(
-            f"{current.mode} ({current.state}) since {current.since or 'the start'}; "
-            f"log sequence at the last change: {current.checkpoint_seq}"
-        )
+        _print_status(current, settings.machine_id)
         return 0
 
     engine = make_engine(settings)
@@ -408,6 +475,7 @@ def main(argv: list[str] | None = None) -> int:  # noqa: C901 (to refactor: docs
                     api_url=api_url,
                     sent=state_from_messages(values),
                     problems=problems,
+                    machine=settings.machine_id,
                 )
             else:
                 result = to_full(
@@ -418,6 +486,7 @@ def main(argv: list[str] | None = None) -> int:  # noqa: C901 (to refactor: docs
                     topic=ReplayTopic(bootstrap, settings.kafka_topic_backfill),
                     wait=wait,
                     problems=problems,
+                    machine=settings.machine_id,
                 )
     except (HandoverFailed, mode.WrongMode, lock.LockHeld) as exc:
         print(f"mode: {exc}", file=sys.stderr)

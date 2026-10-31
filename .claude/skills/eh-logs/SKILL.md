@@ -14,7 +14,7 @@ the arguments if given). Services: `poller`, `consumer`, `consumer-backfill`, `c
 | --- | --- |
 | a service name | `docker compose logs --no-log-prefix --since 1h <service> \| jq -cR 'fromjson? \| {ts, level, stage, message, event_id}' \| tail -40` |
 | an event ID (e.g. `us7000abcd`) | `docker compose logs --no-log-prefix poller consumer consumer-backfill catchup \| jq -cR --arg id <ID> 'fromjson? \| select(.event_id == $id)'` |
-| `errors` | `docker compose logs --no-log-prefix --since 1h poller consumer consumer-backfill catchup api \| jq -cR 'fromjson? \| select(.level == "WARNING" or .level == "ERROR")'` |
+| `errors` | `docker compose logs --no-log-prefix --since 1h poller consumer consumer-backfill catchup exporter api \| jq -cR 'fromjson? \| select(.level == "WARNING" or .level == "ERROR")'` |
 | `rejected` | `docker compose logs --no-log-prefix consumer consumer-backfill \| jq -cR 'fromjson? \| select(.message == "message rejected") \| {ts, event_id, reason}'` |
 | `summary` | `docker compose logs --no-log-prefix --since 1h consumer consumer-backfill \| jq -cR 'fromjson? \| select(.message == "consumer summary") \| {ts, logger, lag, outcomes}' \| tail -10` |
 | nothing | the last 20 lines of each pipeline service, as for a service name |

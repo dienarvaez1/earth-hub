@@ -35,7 +35,7 @@ import gzip
 import hashlib
 import json
 import logging
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -171,6 +171,9 @@ class BucketState:
         self.status = empty_status()
         self.pending: dict | None = None
         self.has_snapshot = False
+        # Called before every write: the holder's lock.Held.confirm, set while a round holds the
+        # lock (DEF-058); it raises LockLost once the lock is another run's.
+        self.fence: Callable[[], None] = lambda: None
 
     # Reading.
 
@@ -258,6 +261,7 @@ class BucketState:
     def begin(self, pending: dict) -> None:
         """Save a round's writes before making them; refused if another round's are there."""
         body = json.dumps(pending, separators=(",", ":")).encode()
+        self.fence()
         self._etags[PENDING_KEY] = self.bucket.put(PENDING_KEY, body, if_none_match=True)
         self.pending = pending
 
@@ -266,8 +270,9 @@ class BucketState:
         rows = {key: body.encode() for key, body in pending["rows"].items()}
         removed = set(pending["removed"])
         with ThreadPoolExecutor(self.workers) as pool:
-            list(pool.map(lambda item: self.bucket.put(row_key(item[0]), item[1]), rows.items()))
+            list(pool.map(lambda item: self._write_row(*item), rows.items()))
         if removed:
+            self.fence()
             failed = self.bucket.delete(row_key(key) for key in sorted(removed))
             if failed:
                 raise OSError(f"could not delete {failed[:5]}")
@@ -286,6 +291,7 @@ class BucketState:
             self.manifest = manifest
         self._apply_snapshot(pending, list(rows.values()), removed)
         if pending["log"]:
+            self.fence()
             with contextlib.suppress(PreconditionFailed):  # written before an interruption
                 self.bucket.put(
                     pending["log_key"],
@@ -295,6 +301,7 @@ class BucketState:
                 )
         self._put(STATE_KEY, json.dumps(pending["status"], indent=1).encode())
         self.status = pending["status"]
+        self.fence()
         self.bucket.delete([PENDING_KEY])
         self._etags[PENDING_KEY] = None
         self.pending = None
@@ -335,8 +342,13 @@ class BucketState:
         self._put(META_KEY, meta)  # after the file, as the exporter does
         self.meta = json.loads(meta)
 
+    def _write_row(self, key: str, body: bytes) -> None:
+        self.fence()
+        self.bucket.put(row_key(key), body)
+
     def _put(self, key: str, body: bytes, **kwargs) -> None:
         """A write that fails if someone else changed the object since this cache read it."""
+        self.fence()
         etag = self._etags.get(key)
         if etag is None:
             self._etags[key] = self.bucket.put(key, body, if_none_match=True, **kwargs)

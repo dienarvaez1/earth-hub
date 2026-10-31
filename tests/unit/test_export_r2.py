@@ -371,6 +371,25 @@ def test_a_long_run_renews_its_lock_so_a_second_run_is_refused(export, s3, monke
     assert s3.list_objects_v2(Bucket=BUCKET, Prefix=LOCK_KEY)["KeyCount"] == 0  # released
 
 
+@pytest.mark.req("REQ-EXP-006", "REQ-MODE-017")
+def test_a_long_run_with_nothing_to_write_still_keeps_its_lock(export, s3, monkeypatch):
+    """DEF-058 confirms the lock before each write; a run whose rows are all unchanged writes
+    none for hours, and must still renew it once a page (DEF-048)."""
+    export(page_size=1)
+    refused = []
+
+    def second_export(n, now):
+        if n == 6:
+            with pytest.raises(LockHeld, match="has been in progress"):
+                export(clock=lambda: now)
+            refused.append(now)
+
+    clock = advancing_pages(monkeypatch, 25, second_export)
+    record = export(clock=clock, page_size=1)
+    assert record.status == "succeeded" and record.counts.unchanged == record.counts.read
+    assert refused == [NOW + timedelta(minutes=150)]
+
+
 @pytest.mark.req("REQ-EXP-006")
 def test_a_run_whose_lock_was_taken_over_stops_writing(export, s3, monkeypatch):
     other = {"run_id": "other", "started_at": "", "expires_at": "2026-10-19T00:00:00Z"}

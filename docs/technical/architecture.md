@@ -58,7 +58,7 @@ Each arrow is the only way data moves between those two parts:
 - **Kafka carries the unchanged USGS feature** in a versioned envelope. Only the consumer interprets it.
 - **PostgreSQL is written only by the consumers**, apart from backfill's progress table and catch-up's checkpoint.
 - **The API only reads PostgreSQL:** never Kafka or USGS.
-- **The exporter reads only the API** (`GET /api/v1/export/earthquakes`), never PostgreSQL. It runs on demand, never on a schedule.
+- **The exporter reads only the API** (`GET /api/v1/export/earthquakes`), never PostgreSQL. It runs on demand (`make export-r2`), and in full mode from the exporting service, at most every `EXPORT_INTERVAL_SECONDS` (5 minutes) after something was stored ([the standby](#the-standby)).
 - **One mode writes the bucket at a time** ([switching modes](#switching-modes)): in full mode the exporter, in [direct mode](#direct-mode) the direct rounds, run hourly on GitHub Actions (started by the dashboard Worker's cron trigger) or by hand. The only path from the bucket back into Kafka is the handover to full mode, which replays direct mode's log onto `earthquakes.backfill`.
 - **The Worker exposes two files of the bucket** (the Parquet snapshot and its `meta.json`) and nothing else. The browser runs every report itself. The Worker's other job, its cron trigger, only asks GitHub to run a round: it holds a GitHub token, never R2 credentials.
 
@@ -76,6 +76,7 @@ Each arrow is the only way data moves between those two parts:
 | `consumer` | `make ingest` | `earthquakes.raw` → PostgreSQL, one message at a time | heartbeat |
 | `consumer-backfill` | `make ingest` | `earthquakes.backfill` → PostgreSQL, in batches of up to `CONSUMER_BATCH_SIZE` (500) | heartbeat |
 | `catchup` | `make ingest` | `all_month` hourly and deleted events daily → `earthquakes.backfill` | heartbeat |
+| `exporter` | `make ingest` | PostgreSQL → R2 through the API, as the bucket's owner, then direct mode's state ([the standby](#the-standby)); stops (exit 0) when the bucket is not full mode's or another host owns it | |
 | `api` | `make api` | The REST API on port 8000 | `/api/v1/health` |
 | `kafka-ui` | `make kafka-ui` | A read-only web viewer for the topics, on port 8080 | |
 
@@ -155,8 +156,8 @@ How a message changes the tables, one transaction per message, is in [the schema
 | --- | --- |
 | `earthquakes/<key>.json` | One object per row, every column but the database's `id`; `key` is the USGS ID the record was created with |
 | `_state/earthquakes-manifest.json.gz` | SHA-256 of each row as last uploaded |
-| `_state/lock.json` | Held while a run is in progress: taken for 30 minutes and renewed every 5 while the run lasts, so a second export is refused however long the first takes; a run that crashes frees it within 30 minutes. A run whose lock was taken over stops writing (DEF-048) |
-| `_state/mode.json` | Which mode writes the bucket; an export runs only in full mode ([direct mode](#switching-modes)) |
+| `_state/lock.json` | Held while a run is in progress: taken for 30 minutes and renewed every 5 while the run lasts, so a second export is refused however long the first takes; a run that crashes frees it within 30 minutes. Every writer (export, direct round, handover, `make repair-rows`) confirms it before every write (`lock.Held`: a clock check while it is young, a conditional renewal after a third of its time), so a run whose lock was taken over, even one that slept past its time, writes nothing more (DEF-048, DEF-058); what was already in flight is found by the weekly deep check and fixed by `make repair-rows` |
+| `_state/mode.json` | Which mode writes the bucket; an export runs only in full mode ([direct mode](#switching-modes)), and only on the host that owns it ([the standby](#the-standby)) |
 | `runs/<run_id>.json` | One record per run: status, counts, timings, errors (also in `reports/exports/`) |
 | `analytics/earthquakes.parquet` | The whole table in one Parquet file for the dashboard, every row and published column with types kept, in `key` order, compressed with zstd at level 19 (18.1 MB for 424,000 rows; `ZSTD_LEVEL` in `export/snapshot.py`) |
 | `analytics/meta.json` | What the snapshot holds: run, row count, size, SHA-256, column types |
@@ -191,7 +192,7 @@ Milestone 8: the same pipeline without Docker, Kafka or PostgreSQL. The real pol
 | In the bucket, added by direct mode | What it is |
 | --- | --- |
 | `_state/ids.json.gz` | The ID map: every USGS ID ever seen → its record's key and when the ID was first seen (`earthquake_ids`); and each record's creation number, full mode's `id` order, which decides the survivor of a merge |
-| `_state/mode.json` | Which mode writes the bucket (`full` or `direct`), and the log's sequence number at the last handover. No marker means full mode |
+| `_state/mode.json` | Which mode writes the bucket (`full` or `direct`), and the log's sequence number at the last handover; in full mode, the host that owns it and its lease. No marker means full mode |
 | `_state/direct.json` | The last sequence number, the poller's 26-hour state (rebuilt from `earthquakes.raw` in full mode), catch-up's checkpoints, and when USGS generated the newest copy of each feed a round processed (`generated`, for the check against USGS) |
 | `_state/direct-pending.json` | A round's writes, while they are being made |
 | `audit/direct/<date>/<run_id>.json` | One record per execution of direct mode (`direct/audit.py`): the command; who started it (`cloudflare-trigger`, `github-schedule`, `github-manual`, `direct-run`, `local`); the mode when it started; its status (running, succeeded, failed, skipped; `interrupted` when a `running` record has not been saved for 30 minutes); start, end and elapsed seconds; messages by part (feed, catchup, deleted) and outcome, rows written and removed; the log's sequence numbers; the errors logged and the rejected messages. Written at the start and the end (and every 10 minutes for `run`); a failure to write it never fails a round. `make direct-runs` lists the latest |
@@ -220,7 +221,7 @@ flowchart TB
 **What a round does:**
 - **Loads the records it touches from the snapshot**, which holds every column of every row and is updated in the same round as the rows, so it costs no request per record. The cache is refreshed with conditional requests: only what another process changed is read again.
 - **Refuses a bucket whose parts disagree** before writing anything: a snapshot that doesn't match the manifest (as after an export that failed), or an ID map and a manifest that list different records.
-- **Holds the bucket's lock**, the exporter's, so a round and an export never write at once. A round that finds it held fails, and the poller retries its messages next round.
+- **Holds the bucket's lock**, the exporter's, so a round and an export never write at once. A round that finds it held fails, and the poller retries its messages next round. Every write confirms the lock first, so a round paused past its lock's time writes nothing once it wakes; the run that took the lock finishes its writes from the redo record (DEF-058).
 - **Writes behind a redo record.** The round's writes are first saved whole to `_state/direct-pending.json`, only if no other is there. Then come the rows (and deletes of merged records), the ID map, the manifest, the snapshot and its `meta.json`, the log and the state, and then the record is removed. Each step gives the same result when repeated, so a round interrupted anywhere is finished by the next one before it does anything else.
 - **Logs what it processed** as the consumer does, with each message's sequence number and record key; a record's key is one of its USGS IDs, so the ID map says where a merged record is now.
 - **Is counted in its execution's audit record** (`direct/audit.py`, `audit/direct/<date>/<run_id>.json`, in the table above): the runner tells it of each round (`on_round`), and the entry point writes it when the execution starts and ends, with who started it, the mode, the status, the times, the messages by part and outcome, and the errors and rejected messages. Saving it can fail without failing the round, and it sits outside what full and direct mode must write identically. `make direct-runs` lists the latest; `/eh-mode runs`.
@@ -316,6 +317,20 @@ Catch-up's "is this stored?" is answered from the ID map and the snapshot, with 
 **`make reconcile-direct [DEEP=1]`** checks the bucket without writing: row objects, manifest, snapshot and ID map list the same records, and the snapshot gives the manifest's fingerprints; every record's key, preferred ID and revision IDs point to it; the log's sequence numbers have no gap; no round is unfinished. `DEEP=1` also reads every row object (one request each). It exits 1 if anything is broken.
 
 **R2 operations:** about 10 writes and 7 reads per live round (lock, redo record, rows, ID map, manifest, snapshot, `meta.json`, log, state). At the measured live load (437 rounds and 24 catch-up passes a day), that is about 16% of R2's 1,000,000 free Class A operations a month, and under half at three times the load (`tests/unit/test_direct_budget.py`). Reads stay near 1% of the 10,000,000 Class B allowance.
+
+### The standby
+
+Only one host runs full mode; direct mode's hourly rounds are its standby (Milestone 9). In full mode the marker names the **owner**, a machine ID (`EARTH_HUB_MACHINE_ID`, the hostname when empty), and a **lease** of 20 minutes. Only the owner exports: an export on another host writes nothing, and one that finds no owner takes it. `make mode-full` makes its host the owner; `make mode-direct` clears it.
+
+The `exporter` service (`earth_hub/direct/standby.py`) keeps the standby ready. When something was stored since its last export, at most every 5 minutes, it:
+
+1. takes a **cut**: an exclusive PostgreSQL advisory lock that every consumer batch takes shared (`repository.export_cut`), so no batch commits until it ends; Kafka buffers meanwhile;
+2. exports, as `make export-r2` does, as the owner, renewing the lease;
+3. still holding the bucket's lock, writes **direct mode's state** from the same cut, with the function `make mode-direct` uses (`handover.write_standby`): the ID map, the poller's 26-hour state and catch-up's checkpoints.
+
+That state is never ahead of the rows exported. The poller's state comes from `earthquakes.raw` below the live consumer's committed offsets only, which are all stored. Catch-up saves its checkpoint when it publishes, not when the messages are stored, so its checkpoints are copied only when the backfill consumer has no lag; otherwise the bucket keeps its older ones. Between exports the service renews the lease every 5 minutes. Once the bucket is not in full mode, or another host owns it, the service logs why and stops. It cannot stop the poller and catch-up, which keep filling this host's database; nothing of it reaches the bucket.
+
+Each export with changes uploads the manifest and the snapshot, about 23 MB, hence the 5 minutes: up to about 6.6 GB a day. With hourly rounds that skip, it uses about 27% of R2's free Class A operations at three times the rate (`tests/unit/test_standby.py`).
 
 ## Reconciliation with USGS
 

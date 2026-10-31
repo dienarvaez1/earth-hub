@@ -83,9 +83,16 @@ def state_from_messages(values: Iterable[bytes]) -> SentState:
 
 
 def read_topic_since(
-    bootstrap_servers: str, topic: str, since: datetime, timeout_s: float = 30.0
+    bootstrap_servers: str,
+    topic: str,
+    since: datetime,
+    timeout_s: float = 30.0,
+    *,
+    until: dict[int, int] | None = None,
 ) -> list[bytes]:
-    """Every message value in `topic` produced at or after `since`, across all partitions."""
+    """Every message value in `topic` produced at or after `since`, across all partitions;
+    with `until`, only below each partition's offset there (a consumer group's committed
+    offsets: what is stored), none from a partition it does not name."""
     consumer = Consumer(
         {
             "bootstrap.servers": bootstrap_servers,
@@ -107,6 +114,8 @@ def read_topic_since(
             _, high = with_retries(
                 lambda tp=tp: consumer.get_watermark_offsets(tp, timeout=timeout_s)
             )
+            if until is not None:
+                high = min(high, until.get(tp.partition, 0))
             # offset -1: no message at or after `since` in this partition.
             if tp.offset >= 0 and tp.offset < high:
                 assignments.append(tp)

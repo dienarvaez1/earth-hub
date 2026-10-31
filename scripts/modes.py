@@ -96,7 +96,9 @@ def mode(shell: Shell) -> str:
     code, out = shell.read("uv", "run", "python", "-m", "earth_hub.direct.handover", "status")
     if code != 0:
         raise Failed(f"could not read the mode: {out.strip()[-300:]}")
-    return out.strip().splitlines()[-1] if out.strip() else ""
+    # The mode's line ("full (active) since …"); log lines and the owner's come around it.
+    lines = [line for line in out.splitlines() if line.startswith(("full (", "direct ("))]
+    return lines[-1] if lines else ""
 
 
 def require_no_direct_run(shell: Shell) -> None:

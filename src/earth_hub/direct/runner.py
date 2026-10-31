@@ -167,11 +167,21 @@ class DirectRunner:
 
     @contextmanager
     def _locked(self, run_id: str, now: datetime) -> Iterator[None]:
-        lock.acquire(self.bucket, run_id, iso(now), now, self.lock_ttl)
+        held = lock.Held(self.bucket, run_id, iso(now), now, self.lock_ttl, self.clock)
+        with self.fenced(held):
+            try:
+                yield
+            finally:
+                held.release()
+
+    @contextmanager
+    def fenced(self, held: lock.Held) -> Iterator[None]:
+        """Every write of the state confirms `held` first (DEF-058)."""
+        self.state.fence = held.confirm
         try:
             yield
         finally:
-            lock.release(self.bucket, run_id, self.lock_ttl)
+            self.state.fence = lambda: None
 
     def _prepare(self, *, in_direct_mode: bool = True) -> None:
         """Check the mode, read what changed, finish a round left pending, and check the
@@ -342,6 +352,11 @@ class DirectPublisher:
                 self.on_wrong_mode()
             return PublishResult(failed=[(m, str(exc)) for m in messages])
         except (lock.LockHeld, Inconsistent) as exc:
+            return PublishResult(failed=[(m, str(exc)) for m in messages])
+        except lock.LockLost as exc:  # paused past its lock: another run finishes the round
+            logger.warning(
+                "direct round stopped: its lock was taken over", extra={"error": str(exc)}
+            )
             return PublishResult(failed=[(m, str(exc)) for m in messages])
         except Exception as exc:  # retried next round; a pending round is finished first
             logger.exception("direct round failed")
