@@ -366,7 +366,7 @@ Earth-Hub (direct mode, the bucket) against USGS, by UTC day of the event
 RESULT: OK
 ```
 
-**`make catchup-now`** closes what is pending, in either mode: in direct mode a direct round with catch-up and the deleted-events check whether due or not (`python -m earth_hub.direct once --all`), in full mode `make catchup-once` (the running poller reads the day feed every minute).
+**`make catchup-now`** closes what is pending, in either mode: in direct mode a direct round with catch-up and the daily checks (deleted events, history pass, audit) whether due or not (`python -m earth_hub.direct once --all`), in full mode `make catchup-once` (the running poller reads the day feed every minute).
 
 **When it runs by itself:** at the end of `make mode-direct` and `make mode-full` (above), and every day in the daily reconcile, started at 00:10 UTC by the Worker's second cron trigger ([CI](ci.md#direct-mode-on-a-schedule)), which also fails if no direct round has written for 5 hours: the alarm for a schedule GitHub stopped running.
 

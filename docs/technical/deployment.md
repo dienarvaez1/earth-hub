@@ -27,6 +27,10 @@ Once per machine, before it can take full mode:
    - `EARTH_HUB_MACHINE_ID`: a name no other machine uses, such as `host-b`. Empty means the hostname.
    - `EXPORT_INTERVAL_SECONDS`: see above.
 4. Start the container runtime (`colima start`, or open Docker Desktop).
+5. Only to develop or deploy from this machine, sign in once, in a terminal on it (each opens a browser):
+   - `gh auth login`, then `gh auth refresh -h github.com -s workflow`, then `gh auth setup-git`, so `git push` works, including changes to `.github/workflows/`. GitHub refuses those from a login without the `workflow` scope.
+   - `cd dashboard && npx --no-install wrangler login`, after `make dashboard-install`, for `make dashboard-deploy` and `make trigger-check`. Wrangler keeps its login per machine: a machine that never signed in cannot deploy.
+   Running full mode needs neither.
 
 `make mode` then prints the bucket's mode and `this host: <its ID>`: the machine reaches the bucket.
 
@@ -79,14 +83,14 @@ Run both in a terminal: they ask for confirmation, and `make cutover-b` may ask 
    - the bucket is frozen (the 4-hourly rounds pause);
    - B's database is loaded from the bucket when it is empty, about 425,000 records (2026-10-31). If it holds data that differs from the bucket, as on a machine that ran full mode before, and the handover's comparison says so, it is rebuilt instead (any other failure stops with nothing wiped): `rebuild check` must find nothing the bucket lacks, a backup goes to `reports/backup/<time>/` and is checked to restore, and you type B's machine ID before Kafka and PostgreSQL are wiped;
    - `make reconcile` must pass, and an export dry run must find B's database and the bucket the same;
-   - the bucket switches to full mode, owned by B with a live lease; the poller, catch-up and the `exporter` start; it catches up with USGS and checks against it.
+   - the bucket switches to full mode, owned by B with a live lease; the poller, catch-up and the `exporter` start; it catches up with USGS and checks against it. Catch-up's state comes with the bucket (its checkpoints, the history pass's last run, and which month the audit reached), so B carries on where A or the rounds left off.
 
    Then `make cutover-b` checks that B owns the bucket with a live lease and that the poller, both consumers, catch-up, the API and the `exporter` run. If a step fails, the bucket goes back to direct mode with nothing lost: fix the cause and run it again.
 
 ### Checking the result
 
 - `make host-status` on B: owner B, the lease live, `(the owner)` beside this host.
-- `make direct-runs LIMIT=3`, after the next hour: a skipped round, its reason naming B as the owner.
+- `make direct-runs LIMIT=3`, after the next round (every 4 hours, at 00:05, 04:05, … UTC): a skipped round, its reason naming B as the owner.
 - `make -s export-r2-runs | tail -1` on B: a recent export. After a new earthquake, the dashboard updates within `EXPORT_INTERVAL_SECONDS`.
 
 ### Afterwards
