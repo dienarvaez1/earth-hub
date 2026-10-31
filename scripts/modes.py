@@ -22,6 +22,26 @@ with what failed; every step can be run again.
 
 All three write the real bucket, Kafka or PostgreSQL: run them only when meant (the /eh-mode and
 /eh-backfill skills run them when asked).
+
+Moving full mode between hosts (Milestone 9; the /eh-host skill):
+
+    uv run python scripts/modes.py host-status     # make host-status: read-only
+    uv run python scripts/modes.py host-release    # make host-release: on the owner
+    uv run python scripts/modes.py host-claim      # make host-claim: on the new host
+    uv run python scripts/modes.py host-rebuild    # make host-rebuild
+    uv run python scripts/modes.py host-takeover   # make host-takeover: for a host known gone
+
+- host-status:   who owns the bucket and its lease, this host's ID, whether this host's database
+                 is empty or holds anything the bucket lacks, direct mode's latest executions.
+- host-release:  only on the owner: to-direct. Direct mode's hourly rounds write from then on.
+- host-claim:    on any host: the bucket in direct mode (a host whose lease expired is taken over
+                 first), make up, then make mode-full, which makes this host the owner; when its
+                 database is empty, or differs from the bucket, it is rebuilt from it (below).
+- host-rebuild:  what wiping this host's database would lose must be nothing (`rebuild check`),
+                 a backup of PostgreSQL and the topics in reports/backup/ that restores, and the
+                 machine ID typed; then make reset, make up, make migrate, make mode-full
+                 REBUILD=1. Run in a terminal: it asks for the confirmation.
+- host-takeover: direct mode takes the bucket over now, without waiting for the lease.
 """
 
 import argparse
@@ -99,6 +119,28 @@ def mode(shell: Shell) -> str:
     # The mode's line ("full (active) since …"); log lines and the owner's come around it.
     lines = [line for line in out.splitlines() if line.startswith(("full (", "direct ("))]
     return lines[-1] if lines else ""
+
+
+@dataclass
+class Marker:
+    line: str  # "full (active) since …"
+    owner: str | None
+    lease_live: bool
+    this_host: str
+
+
+def marker(shell: Shell) -> Marker:
+    code, out = shell.read("uv", "run", "python", "-m", "earth_hub.direct.handover", "status")
+    if code != 0:
+        raise Failed(f"could not read the mode: {out.strip()[-300:]}")
+    owner = re.search(r"^owner (\S+), lease until \S+ \((live|expired)\)", out, re.M)
+    host = re.search(r"^this host: (\S+)", out, re.M)
+    return Marker(
+        line=mode(shell),
+        owner=owner.group(1) if owner else None,
+        lease_live=bool(owner) and owner.group(2) == "live",
+        this_host=host.group(1) if host else "",
+    )
 
 
 def require_no_direct_run(shell: Shell) -> None:
@@ -232,6 +274,139 @@ def to_direct(shell: Shell, *, wait_s: float = 600) -> None:
     print("Direct mode: the hourly rounds write the bucket; this computer can be closed.")
 
 
+def host_status(shell: Shell) -> None:
+    """Read-only."""
+    current = marker(shell)
+    print(f"The bucket: {current.line}")
+    if current.owner:
+        lease = "live" if current.lease_live else "expired: the next direct round takes over"
+        print(f"Owner: {current.owner}, lease {lease}")
+    print(
+        f"This host: {current.this_host}"
+        + ("  (the owner)" if current.owner == current.this_host else "")
+    )
+    code, _ = shell.read("docker", "info")
+    if code != 0:
+        print("This host's database: Docker is not running")
+    else:
+        code, out = shell.read("uv", "run", "python", "-m", "earth_hub.direct.rebuild", "check")
+        print(f"This host's database: {out.strip().splitlines()[-1] if out.strip() else '?'}")
+    _, runs = shell.read("make", "-s", "direct-runs", "LIMIT=5")
+    print("Direct mode's latest executions:\n" + runs.rstrip())
+
+
+def host_release(shell: Shell) -> None:
+    current = marker(shell)
+    if not current.line.startswith(FULL):
+        raise Refused(f"the bucket is not in full mode ({current.line}): nothing to release")
+    if current.owner != current.this_host:
+        raise Refused(
+            f"this host ({current.this_host}) is not the owner ({current.owner}): release it on "
+            "the owner, or claim it here with make host-claim"
+        )
+    to_direct(shell)
+    print("Released: claim it on the new host with make host-claim (/eh-host claim).")
+
+
+def host_takeover(shell: Shell) -> None:
+    current = marker(shell)
+    if not current.line.startswith(FULL) or current.owner is None:
+        raise Refused(
+            f"no host owns the bucket in full mode ({current.line}): nothing to take over"
+        )
+    print(f"Direct mode takes the bucket over from {current.owner} now.")
+    shell.run("uv", "run", "python", "-m", "earth_hub.direct", "once", "--take-over")
+
+
+def _ready_to_claim(shell: Shell) -> Marker:
+    current = marker(shell)
+    if current.line.startswith(FULL):
+        if current.owner == current.this_host:
+            raise Refused(
+                f"this host ({current.this_host}) owns the bucket already; if another host uses "
+                "this ID too, give each its own EARTH_HUB_MACHINE_ID"
+            )
+        if current.owner is None:
+            raise Refused(
+                "full mode with no owner (a bucket from before): on the host that runs it, "
+                "make to-direct, then claim it here"
+            )
+        if current.lease_live:
+            raise Refused(
+                f"{current.owner} owns the bucket and its lease is live: release it there "
+                "(make host-release), or, if that host is gone, make host-takeover first"
+            )
+        print(f"    {current.owner}'s lease has expired: direct mode takes the bucket over first")
+        shell.run("uv", "run", "python", "-m", "earth_hub.direct", "once")
+    elif not current.line.startswith(DIRECT):
+        raise Refused(f"the bucket is mid-handover or unreadable ({current.line}): see /eh-mode")
+    return current
+
+
+def _rebuild_database(shell: Shell, machine: str, confirm: Callable[[str], bool]) -> None:
+    """Check, back up, confirm, wipe, migrate: this host's database ready for a load."""
+    shell.run("make", "ingest-stop")
+    code, out = shell.read("uv", "run", "python", "-m", "earth_hub.direct.rebuild", "check")
+    if code == 1:
+        raise Refused(f"wiping this host's database would lose data:\n{out.strip()}")
+    if code != 0:
+        raise Failed(f"could not compare the database with the bucket: {out.strip()[-300:]}")
+    directory = f"reports/backup/{time.strftime('%Y-%m-%dT%H-%M-%S')}"
+    shell.run("uv", "run", "python", "-m", "earth_hub.direct.rebuild", "backup", directory)
+    if shell.dry_run:
+        print(f"    would ask for this host's machine ID ({machine}) before wiping")
+    elif not confirm(machine):
+        raise Refused("not confirmed: nothing was wiped")
+    shell.run("make", "reset")
+    shell.run("make", "up")
+    shell.run("make", "migrate")
+
+
+def host_claim(
+    shell: Shell, *, confirm: Callable[[str], bool], rebuild: bool = False, wait_s: float = 600
+) -> None:
+    step = Steps(shell, 6)
+    step("Docker is running")
+    require_docker(shell)
+    step("The bucket can be claimed (direct mode, or a host whose lease expired)")
+    current = _ready_to_claim(shell)
+    require_no_direct_run(shell)
+    step("Kafka and PostgreSQL up")
+    shell.run("make", "up")
+    shell.run("make", "migrate")
+    code, out = shell.read("uv", "run", "python", "-m", "earth_hub.direct.rebuild", "status")
+    empty = code == 0 and "empty" in out
+    step("Hand over to full mode, this host the owner (make mode-full)")
+    if empty:
+        shell.run("make", "mode-full", "REBUILD=1")
+    elif rebuild:
+        _rebuild_database(shell, current.this_host, confirm)
+        shell.run("make", "mode-full", "REBUILD=1")
+    else:
+        try:
+            shell.run("make", "mode-full")
+        except Failed:
+            print("    this host's database differs from the bucket: rebuilding it from the bucket")
+            _rebuild_database(shell, current.this_host, confirm)
+            shell.run("make", "mode-full", "REBUILD=1")
+    step("The consumers caught up")
+    wait_for_consumers(shell, GROUPS, wait_s)
+    step("Kafka against PostgreSQL (make reconcile)")
+    shell.run("make", "reconcile")
+    if shell.dry_run:
+        print("Dry run: nothing was changed.")
+        return
+    print(f"Claimed: {mode(shell)}. This host exports every 5 minutes after a change.")
+
+
+def ask(machine: str) -> bool:
+    answer = input(
+        f"Type this host's machine ID ({machine}) to wipe its Kafka and PostgreSQL "
+        "(the backup is above): "
+    )
+    return answer.strip() == machine
+
+
 def parse_date(text: str) -> date:
     try:
         return date.fromisoformat(text)
@@ -248,16 +423,28 @@ def main(argv: list[str] | None = None, shell: Shell | None = None) -> int:
     fill = commands.add_parser("backfill", help="backfill a range in full mode, then export")
     fill.add_argument("start", type=parse_date)
     fill.add_argument("end", type=parse_date, nargs="?")
+    commands.add_parser("host-status", help="who owns the bucket, this host (read-only)")
+    commands.add_parser("host-release", help="on the owner: hand the bucket to direct mode")
+    commands.add_parser("host-takeover", help="direct mode takes the bucket over now")
+    for name in ("host-claim", "host-rebuild"):
+        command = commands.add_parser(name, help="make this host the bucket's owner")
+        command.add_argument("--yes", action="store_true", help=argparse.SUPPRESS)  # tests only
     args = parser.parse_args(argv)
     shell = shell or Shell()
     shell.dry_run = shell.dry_run or args.dry_run
     try:
-        if args.command == "to-full":
-            to_full(shell)
-        elif args.command == "to-direct":
-            to_direct(shell)
-        else:
-            backfill(shell, args.start, args.end)
+        confirm = (lambda _: True) if getattr(args, "yes", False) else ask
+        commands = {
+            "to-full": lambda: to_full(shell),
+            "to-direct": lambda: to_direct(shell),
+            "backfill": lambda: backfill(shell, args.start, args.end),
+            "host-status": lambda: host_status(shell),
+            "host-release": lambda: host_release(shell),
+            "host-takeover": lambda: host_takeover(shell),
+            "host-claim": lambda: host_claim(shell, confirm=confirm),
+            "host-rebuild": lambda: host_claim(shell, confirm=confirm, rebuild=True),
+        }
+        commands[args.command]()
     except Refused as exc:
         print(f"Not started: {exc}.")
         return 2

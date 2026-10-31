@@ -1,4 +1,4 @@
-.PHONY: help install up down reset ingest ingest-once ingest-logs ingest-stop api api-dev api-stop kafka-ui kafka-ui-stop backfill catchup-once catchup-now reconcile-usgs consume reconcile reconcile-direct repair-rows mode mode-direct mode-full to-full to-direct backfill-full direct-once direct-run direct-runs export-r2 export-r2-runs r2-ls r2-count r2-get dashboard-install dashboard-build dashboard-dev dashboard-deploy trigger-token trigger-check test-dashboard check-db-outage lint format test test-integration test-e2e test-disruptive test-performance load load-ui test-all regression flake-check traceability release smoke smoke-restart migrate coverage
+.PHONY: help install up down reset ingest ingest-once ingest-logs ingest-stop api api-dev api-stop kafka-ui kafka-ui-stop backfill catchup-once catchup-now reconcile-usgs consume reconcile reconcile-direct repair-rows mode mode-direct mode-full to-full to-direct host-status host-release host-claim host-rebuild host-takeover backfill-full direct-once direct-run direct-runs export-r2 export-r2-runs r2-ls r2-count r2-get dashboard-install dashboard-build dashboard-dev dashboard-deploy trigger-token trigger-check test-dashboard check-db-outage lint format test test-integration test-e2e test-disruptive test-performance load load-ui test-all regression flake-check traceability release smoke smoke-restart migrate coverage
 
 help: ## List the available commands
 	@grep -E '^[a-z0-9-]+:.*## ' $(MAKEFILE_LIST) | awk -F ':.*## ' '{printf "  %-17s %s\n", $$1, $$2}'
@@ -123,6 +123,21 @@ to-full: ## Direct mode to full mode in one command: checks, make mode-full, con
 
 to-direct: ## Full mode to direct mode in one command: consumers caught up, make reconcile, make mode-direct, make down (DRY_RUN=1 lists the steps)
 	uv run python scripts/modes.py $(if $(DRY_RUN),--dry-run) to-direct
+
+host-status: ## Who owns the bucket and its lease, this host, whether its database holds anything the bucket lacks (read-only)
+	@uv run python scripts/modes.py host-status
+
+host-release: ## On the bucket's owner: hand it to direct mode (make to-direct) so another host can claim it (DRY_RUN=1 lists the steps)
+	uv run python scripts/modes.py $(if $(DRY_RUN),--dry-run) host-release
+
+host-claim: ## Make this host the bucket's owner in full mode, rebuilding its database from the bucket if it differs (DRY_RUN=1 lists the steps)
+	uv run python scripts/modes.py $(if $(DRY_RUN),--dry-run) host-claim
+
+host-rebuild: ## Back up, wipe and reload this host's database from the bucket, then claim it; asks for the machine ID (DRY_RUN=1 lists the steps)
+	uv run python scripts/modes.py $(if $(DRY_RUN),--dry-run) host-rebuild
+
+host-takeover: ## Direct mode takes the bucket over from its host now, without waiting for the lease (for a host known gone)
+	uv run python scripts/modes.py host-takeover
 
 backfill-full: ## Backfill in full mode in one command: make ingest, make backfill, consumers caught up, make reconcile, make export-r2: START=2026-01-01 [END=...] [DRY_RUN=1]
 	@test -n "$(START)" || (echo "usage: make backfill-full START=2026-01-01 [END=2026-06-01]"; exit 1)
