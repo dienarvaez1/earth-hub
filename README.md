@@ -2,7 +2,7 @@
 
 A local-first earthquake data platform, built as a QA engineering portfolio project. The live USGS feed flows through Apache Kafka into validated PostgreSQL tables. A read-only REST API serves them, and a public dashboard shows them from an export to Cloudflare R2. The point is less the pipeline than the evidence that it works: every requirement traces to a passing test, every defect found is logged with how it was found and how it was fixed, and CI runs the regression on every pull request.
 
-**Status:** Milestones 1 to 8 are complete. Released on 2026-10-29 as [v1.0.0](https://github.com/dienarvaez1/earth-hub/releases/tag/v1.0.0): the repository is public, `main` is protected (CI must pass), and direct mode's R2 credentials are in an environment only `main` can use. Milestone 8 adds a second mode that runs without Docker, keeps its state in R2, and runs every hour on GitHub Actions, started by a Cloudflare cron trigger, with an audit record of every run ([status](docs/progress/plan.md#status)). The dashboard runs at **https://earth-hub.diego-narvaez.workers.dev**, shared by link and kept out of search engines.
+**Status:** Milestones 1 to 8 are complete. Released on 2026-10-29 as [v1.0.0](https://github.com/dienarvaez1/earth-hub/releases/tag/v1.0.0): the repository is public, `main` is protected (CI must pass), and direct mode's R2 credentials are in an environment only `main` can use. Milestone 8 adds a second mode that runs without Docker, keeps its state in R2, and runs every 4 hours on GitHub Actions, started by a Cloudflare cron trigger, with an audit record of every run ([status](docs/progress/plan.md#status)). The dashboard runs at **https://earth-hub.diego-narvaez.workers.dev**, shared by link and kept out of search engines.
 
 ## For reviewers
 
@@ -21,7 +21,7 @@ flowchart LR
         poller --> kafka[["Kafka"]] --> consumer["consumer +<br/>validation"]
         consumer --> pg[("PostgreSQL")] --> api["REST API"]
     end
-    direct["<b>direct mode</b><br/>poller + validation<br/>(GitHub Actions,<br/>hourly)"]
+    direct["<b>direct mode</b><br/>poller + validation<br/>(GitHub Actions,<br/>every 4 hours)"]
     subgraph cf["Cloudflare"]
         direction TB
         r2[("R2 bucket")] --> dash["dashboard<br/>(DuckDB in<br/>the browser)"]
@@ -31,16 +31,16 @@ flowchart LR
     usgs --> direct
     full -- "make export-r2" --> r2
     direct --> r2
-    cron -. "hourly" .-> direct
+    cron -. "every 4 hours" .-> direct
 ```
 
-Two modes write the same bucket, one at a time: **full** (the whole pipeline, on a developer machine) and **direct** (no Docker, Kafka or PostgreSQL, run every hour on GitHub Actions, started by a Cloudflare cron trigger, so the dashboard stays current with no machine on). A marker in the bucket says which one; the handovers check both agree before switching:
+Two modes write the same bucket, one at a time: **full** (the whole pipeline, on a developer machine) and **direct** (no Docker, Kafka or PostgreSQL, run every 4 hours on GitHub Actions, started by a Cloudflare cron trigger, so the dashboard stays current with no machine on). A marker in the bucket says which one; the handovers check both agree before switching:
 
 ```mermaid
 stateDiagram-v2
     direction TB
     full: full mode<br/>(your machine)
-    direct: direct mode<br/>(GitHub Actions, hourly)
+    direct: direct mode<br/>(GitHub Actions, every 4 hours)
     full --> direct: make mode-direct<br/>export, write direct state
     direct --> full: make mode-full<br/>replay the log, reconcile
 ```
@@ -112,8 +112,8 @@ The [demo walkthrough](docs/overview/demo.md) goes through these with what to lo
 | `make direct-once` / `make direct-run` / `make reconcile-direct` | Direct mode: one round / run until stopped / check its state in the bucket |
 | `make direct-runs [LIMIT=20]` | Direct mode's audit trail: each execution's status, who started it (Cloudflare trigger, GitHub, `direct-run`, local), the mode, what it processed |
 | `make reconcile-usgs [DAYS=3]` / `make catchup-now` | The mode writing the bucket against USGS itself, every difference explained / catch up with USGS now, in either mode (both run after each switch) |
-| `gh workflow run direct.yml -f job=round` / `gh run list --workflow direct.yml` | Direct mode on GitHub Actions, a round started every hour by the dashboard Worker's cron trigger: a round now / the recent runs |
-| `make dashboard-install` / `make dashboard-dev` / `make dashboard-deploy` | The dashboard's Node dependencies and test browser / a local server over the real bucket / publish the page and the Worker's hourly trigger to Cloudflare Workers |
+| `gh workflow run direct.yml -f job=round` / `gh run list --workflow direct.yml` | Direct mode on GitHub Actions, a round started every 4 hours by the dashboard Worker's cron trigger: a round now / the recent runs |
+| `make dashboard-install` / `make dashboard-dev` / `make dashboard-deploy` | The dashboard's Node dependencies and test browser / a local server over the real bucket / publish the page and the Worker's 4-hourly trigger to Cloudflare Workers |
 | `make trigger-token` | The trigger's GitHub token: opens GitHub's form, checks the token you paste (never shown), stores it on the Worker; run it in a terminal, again before it expires |
 | `make lint` / `make format` | Check / fix style, formatting, complexity and security rules with Ruff |
 | `make test` | Unit tests; no Docker or network needed |
@@ -136,7 +136,7 @@ The [demo walkthrough](docs/overview/demo.md) goes through these with what to lo
 | **Persistence** | The consumer validates each message against [16 data-quality rules](docs/technical/data-quality-rules.md), merges records USGS turns out to be one event, and stores the newest revision. Every message is kept with its outcome, rejected ones included | [Schema](docs/technical/schema.md) |
 | **REST API** | Read-only, over PostgreSQL: events, lookups by any former ID, statistics, hourly and magnitude summaries, with one error format | [API reference](docs/technical/api.md) |
 | **Export** | `make export-r2` copies the table to R2 on demand, uploading only what changed, then writes a Parquet snapshot | [Architecture](docs/technical/architecture.md#export-to-r2) |
-| **Direct mode** | The same poller and catch-up straight to R2, with no Docker, Kafka or PostgreSQL: the bucket full mode's export would write, byte for byte, which tests check against full mode. A marker in the bucket says which mode writes it; the handovers replay direct mode's log into Kafka and check both sides agree before switching. GitHub Actions runs it every hour, started by the dashboard Worker's Cloudflare cron trigger (GitHub's own schedule skipped runs, DEF-052), so the dashboard stays current with no machine on; each run leaves an audit record in the bucket (Milestone 8) | [Architecture](docs/technical/architecture.md#direct-mode) |
+| **Direct mode** | The same poller and catch-up straight to R2, with no Docker, Kafka or PostgreSQL: the bucket full mode's export would write, byte for byte, which tests check against full mode. A marker in the bucket says which mode writes it; the handovers replay direct mode's log into Kafka and check both sides agree before switching. GitHub Actions runs it every 4 hours, started by the dashboard Worker's Cloudflare cron trigger (GitHub's own schedule skipped runs, DEF-052), so the dashboard stays current with no machine on; each run leaves an audit record in the bucket (Milestone 8) | [Architecture](docs/technical/architecture.md#direct-mode) |
 | **Dashboard** | A Cloudflare Worker serves the page and the snapshot; the browser runs the reports itself with DuckDB-WASM, and draws the map and charts: menus that recount under the other filters (a tsunami filter among them), a map that counts cells in SQL above 25,000 events and shows each event's time to the second where it happened, the significant events under it (10, 25 or 50, each opening on the map), events over time as columns, areas, lines or trends (per hour to month), and the top countries and regions as shares split by magnitude | [Architecture](docs/technical/architecture.md#dashboard), [SQL](docs/technical/sql-examples.md#dashboard-reports) |
 | **Observability** | JSON logs where every pipeline line has a `stage` and every line about an event its `event_id`, plus a consumer summary every minute | [Observability](docs/technical/architecture.md#observability) |
 

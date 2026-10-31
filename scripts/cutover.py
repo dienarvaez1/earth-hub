@@ -13,7 +13,7 @@ part 3:
 4. The steps, then checks that they did what they should.
 
 A (cutover-a): R2 reachable and the mode readable; no local `make direct-run`; direct mode's
-hourly rounds ran within 2 hours (the standby that writes until B claims). If A owns the bucket in
+rounds ran within 5 hours (the standby that writes until B claims). If A owns the bucket in
 full mode, it releases it (make host-release); then it stops A's containers (make down, data
 kept). Docker or Colima itself stays up, so A can claim again later.
 
@@ -40,7 +40,7 @@ import modes
 
 REPO = Path(__file__).resolve().parents[1]
 FEED = "https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/all_day.geojson"
-ROUNDS_WITHIN = timedelta(hours=2)
+ROUNDS_WITHIN = timedelta(hours=5)
 RUN_ID = re.compile(r"^(\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}Z)-")
 SERVICES = ("poller", "consumer", "consumer-backfill", "catchup", "api", "exporter")
 REQUIRED = ("R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY", "R2_BUCKET", "USGS_CONTACT",
@@ -175,7 +175,7 @@ def cutover_a(shell: modes.Shell, ask, now: Callable[[], datetime]) -> None:
     no_direct_run(shell, check)
     last = latest_round(shell)
     check(
-        "direct mode's hourly rounds ran within 2 hours",
+        "direct mode's rounds ran within 5 hours",
         last is not None and now() - last <= ROUNDS_WITHIN,
         f"last {last:%Y-%m-%d %H:%M} UTC" if last else "none found (make direct-runs)",
         warn=True,  # the standby; not needed for the cutover itself
@@ -274,7 +274,7 @@ def cutover_b(shell: modes.Shell, ask, env: dict[str, str]) -> None:
     if code != 0 or down:
         raise modes.Failed(f"not running: {', '.join(down) or 'docker compose ps failed'}")
     print(f"  [ok  ] running: {', '.join(SERVICES)}")
-    print("Done on B: full mode here, the hourly rounds standing by. `make host-status` any time.")
+    print("Done on B: full mode here, direct rounds standing by. `make host-status` any time.")
 
 
 def main(argv: list[str] | None = None, shell=None, ask=input, env=None, now=None) -> int:

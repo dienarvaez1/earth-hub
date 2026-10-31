@@ -22,7 +22,7 @@ flowchart TB
         api["api (FastAPI, read-only),<br/>read by make export-r2"]
     end
 
-    direct["<b>direct mode</b><br/>GitHub Actions, hourly<br/>(Cloudflare cron trigger):<br/>poller + catch-up<br/>+ validation + ledger<br/>over BucketStore"]
+    direct["<b>direct mode</b><br/>GitHub Actions, every 4 h<br/>(Cloudflare cron trigger):<br/>poller + catch-up<br/>+ validation + ledger<br/>over BucketStore"]
 
     subgraph cloud["Cloudflare"]
         r2[("R2 bucket<br/>_state/mode.json<br/>says who writes")]
@@ -49,7 +49,7 @@ flowchart TB
     direct -- "rows, snapshot, log,<br/>state, audit" --> r2
     r2 --> worker
     worker --> browser
-    worker -. "cron :17 hourly:<br/>run direct.yml" .-> direct
+    worker -. "cron every 4 h at :05:<br/>run direct.yml" .-> direct
 ```
 
 Each arrow is the only way data moves between those two parts:
@@ -187,7 +187,7 @@ make export-r2-runs        # past runs; one that never finished shows as interru
 
 ## Direct mode
 
-Milestone 8: the same pipeline without Docker, Kafka or PostgreSQL. The real poller and catch-up publish to the bucket instead of Kafka, and each publish is one **round**: its messages are decoded and validated as the consumer does, then the ledger (`processing/ledger.py`) makes the same decisions over a second store, `BucketStore` (`direct/store.py`). The result is the bucket full mode's export would write from the same messages, byte for byte: the same row objects, manifest and snapshot. `make direct-once` runs one poller round (and catch-up if due) and exits; `make direct-run` runs the poller and catch-up until stopped. Both need only R2 credentials, and run only while the bucket is in direct mode ([switching modes](#switching-modes)). Without a machine of ours, a GitHub Actions workflow runs `direct once` every hour ([direct mode on a schedule](ci.md#direct-mode-on-a-schedule)); with `--skip-unless-direct` it succeeds without writing while the bucket is in another mode.
+Milestone 8: the same pipeline without Docker, Kafka or PostgreSQL. The real poller and catch-up publish to the bucket instead of Kafka, and each publish is one **round**: its messages are decoded and validated as the consumer does, then the ledger (`processing/ledger.py`) makes the same decisions over a second store, `BucketStore` (`direct/store.py`). The result is the bucket full mode's export would write from the same messages, byte for byte: the same row objects, manifest and snapshot. `make direct-once` runs one poller round (and catch-up if due) and exits; `make direct-run` runs the poller and catch-up until stopped. Both need only R2 credentials, and run only while the bucket is in direct mode ([switching modes](#switching-modes)). Without a machine of ours, a GitHub Actions workflow runs `direct once` every 4 hours ([direct mode on a schedule](ci.md#direct-mode-on-a-schedule)); with `--skip-unless-direct` it succeeds without writing while the bucket is in another mode.
 
 | In the bucket, added by direct mode | What it is |
 | --- | --- |
@@ -242,7 +242,7 @@ stateDiagram-v2
     handing_over --> direct: a check failed
     state "handing-over" as handing_over
     note left of full: exporter writes,<br/>schedule skips
-    note right of direct: direct rounds write<br/>(hourly on GitHub Actions),<br/>exporter refuses
+    note right of direct: direct rounds write<br/>(every 4 h on GitHub Actions),<br/>exporter refuses
 ```
 
 While the marker says `handing-over`, neither mode writes. The handover to direct mode needs no such state: it holds the bucket's lock, so no export can run, and changes the marker from `full` to `direct` in one conditional write. If anything fails before that write, the marker still says `full`.
@@ -281,7 +281,7 @@ sequenceDiagram
     H->>R: marker: direct (active), from this sequence number
     H->>R: release the lock
     Note over M,R: on any failure: marker still full,<br/>make restarts poller and catch-up
-    Note over R: the hourly rounds (or make direct-run) write from now on
+    Note over R: the 4-hourly rounds (or make direct-run) write from now on
 ```
 
 It needs full mode idle: the poller and catch-up stopped, every message stored, `make reconcile` clean. It exports, then writes direct mode's state from PostgreSQL and Kafka: the ID map from `earthquake_ids`, with each record's `id` as its creation number; the poller's 26-hour state from `earthquakes.raw`, as a restarted poller rebuilds it; and catch-up's checkpoints. Then the marker says `direct`, with the log's sequence number at that moment.
@@ -320,7 +320,7 @@ Catch-up's "is this stored?" is answered from the ID map and the snapshot, with 
 
 ### The standby
 
-Only one host runs full mode; direct mode's hourly rounds are its standby (Milestone 9). In full mode the marker names the **owner**, a machine ID (`EARTH_HUB_MACHINE_ID`, the hostname when empty), and a **lease** of 20 minutes. Only the owner exports: an export on another host writes nothing, and one that finds no owner takes it. `make mode-full` makes its host the owner; `make mode-direct` clears it.
+Only one host runs full mode; direct mode's 4-hourly rounds are its standby (Milestone 9). In full mode the marker names the **owner**, a machine ID (`EARTH_HUB_MACHINE_ID`, the hostname when empty), and a **lease** of 20 minutes. Only the owner exports: an export on another host writes nothing, and one that finds no owner takes it. `make mode-full` makes its host the owner; `make mode-direct` clears it.
 
 The `exporter` service (`earth_hub/direct/standby.py`) keeps the standby ready. When something was stored since its last export, at most every 5 minutes, it:
 
@@ -330,11 +330,11 @@ The `exporter` service (`earth_hub/direct/standby.py`) keeps the standby ready. 
 
 That state is never ahead of the rows exported. The poller's state comes from `earthquakes.raw` below the live consumer's committed offsets only, which are all stored. Catch-up saves its checkpoint when it publishes, not when the messages are stored, so its checkpoints are copied only when the backfill consumer has no lag; otherwise the bucket keeps its older ones. Between exports the service renews the lease every 5 minutes. Once the bucket is not in full mode, or another host owns it, the service logs why and stops. It cannot stop the poller and catch-up, which keep filling this host's database; nothing of it reaches the bucket.
 
-**Takeover.** Every direct execution, the hourly round included, first looks at the marker (`direct/takeover.py`). Full mode with an owner whose lease has expired means the host stopped exporting: holding the bucket's lock, the round checks that direct mode's state describes the bucket, switches the marker to direct mode with a conditional write (of two racing rounds, one takes over), and runs as usual from the state of the host's last export. Catch-up then fetches again from USGS what the host stored after that export; only those events' processing times differ from what the host had. A bucket left by an export that died midway (rows and manifest newer than the snapshot) is first rolled back to its last complete export, and the run then fails so GitHub e-mails. The audit record names the previous owner. A host that wakes after a takeover finds the bucket in direct mode and stops exporting.
+**Takeover.** Every direct execution, the 4-hourly round included, first looks at the marker (`direct/takeover.py`). Full mode with an owner whose lease has expired means the host stopped exporting: holding the bucket's lock, the round checks that direct mode's state describes the bucket, switches the marker to direct mode with a conditional write (of two racing rounds, one takes over), and runs as usual from the state of the host's last export. Catch-up then fetches again from USGS what the host stored after that export; only those events' processing times differ from what the host had. A bucket left by an export that died midway (rows and manifest newer than the snapshot) is first rolled back to its last complete export, and the run then fails so GitHub e-mails. The audit record names the previous owner. A host that wakes after a takeover finds the bucket in direct mode and stops exporting.
 
 **Moving between hosts** (`/eh-host`, `scripts/modes.py`; in one command per machine, `make cutover-a` on the old host and `make cutover-b` on the new one, `scripts/cutover.py`, each with read-only pre-checks, a dry run and a confirmation before it changes anything; step by step in [the deployment page](deployment.md#cutover-from-a-to-b)). `make host-release` on the owner is `make to-direct`; `make host-claim` on the new host hands back to full mode with that host the owner. A host whose database is empty is loaded from the bucket (`direct/rebuild.py`, inside the handover while the bucket is frozen: records with their creation numbers, IDs with their first-seen times, one `bootstrap` message per record). One whose database differs, such as a host back after a takeover, is rebuilt, but only when the handover's own comparison found the difference (`HandoverDiffers`, recorded in `reports/handover.json`, as `make` hides which step failed; any other failure of `make mode-full` wipes nothing, DEF-062): `rebuild check` must find nothing the bucket lacks, a backup of PostgreSQL and the topics in `reports/backup/` must restore, and the machine ID must be typed before Kafka and PostgreSQL are wiped. Either way the handover's checks still decide: `make reconcile`, and an export dry run that finds nothing to change.
 
-Each export with changes uploads the manifest and the snapshot, about 23 MB, hence the 5 minutes: up to about 6.6 GB a day. With hourly rounds that skip, it uses about 27% of R2's free Class A operations at three times the rate (`tests/unit/test_standby.py`).
+Each export with changes uploads the manifest and the snapshot, about 23 MB, hence the 5 minutes: up to about 6.6 GB a day. With 4-hourly rounds that skip, it uses about 27% of R2's free Class A operations at three times the rate (`tests/unit/test_standby.py`).
 
 ## Reconciliation with USGS
 
@@ -365,7 +365,7 @@ RESULT: OK
 
 **`make catchup-now`** closes what is pending, in either mode: in direct mode a direct round with catch-up and the deleted-events check whether due or not (`python -m earth_hub.direct once --all`), in full mode `make catchup-once` (the running poller reads the day feed every minute).
 
-**When it runs by itself:** at the end of `make mode-direct` and `make mode-full` (above), and every day in the daily reconcile, started at 05:41 UTC by the Worker's second cron trigger ([CI](ci.md#direct-mode-on-a-schedule)), which also fails if no direct round has written for 2 hours: the alarm for a schedule GitHub stopped running.
+**When it runs by itself:** at the end of `make mode-direct` and `make mode-full` (above), and every day in the daily reconcile, started at 00:10 UTC by the Worker's second cron trigger ([CI](ci.md#direct-mode-on-a-schedule)), which also fails if no direct round has written for 5 hours: the alarm for a schedule GitHub stopped running.
 
 **With Claude Code:** `/eh-mode usgs` runs the check, `/eh-mode catchup` the catch-up.
 
@@ -393,12 +393,12 @@ sequenceDiagram
 
 | Part | What it does |
 | --- | --- |
-| `dashboard/src/worker.ts` | Serves `/data/earthquakes.parquet` and `/data/meta.json` from the bucket through an R2 binding, with `ETag`, `304`, byte ranges and a 5-minute browser cache. Nothing else in the bucket is reachable, and the page holds no credentials. Its scheduled handler (cron `17 * * * *`, not reachable over HTTP) starts direct mode's hourly round on GitHub Actions with the `GITHUB_TOKEN` secret, and once a day passes the token's days left ([the trigger](ci.md#the-trigger)) |
+| `dashboard/src/worker.ts` | Serves `/data/earthquakes.parquet` and `/data/meta.json` from the bucket through an R2 binding, with `ETag`, `304`, byte ranges and a 5-minute browser cache. Nothing else in the bucket is reachable, and the page holds no credentials. Its scheduled handler (cron `5 */4 * * *`, not reachable over HTTP) starts direct mode's 4-hourly round on GitHub Actions with the `GITHUB_TOKEN` secret, and once a day passes the token's days left ([the trigger](ci.md#the-trigger)) |
 | `dashboard/src/places.ts` | How the place menus show their options, without changing their values or the SQL: US states (region menu) and the territories USGS names as the country (country menu) as `US-<name>`, grouped, and Unknown right after All |
 | `dashboard/index.html`, `dashboard/src/` | The page. DuckDB-WASM runs `dashboard/queries/*.sql` over the snapshot in the browser; MapLibre GL draws the map on OpenFreeMap tiles; Observable Plot draws the charts |
 | `dashboard/queries/` | The reports, as SQL files; see [the SQL examples](sql-examples.md#dashboard-reports) |
 | `scripts/fetch_duckdb_extensions.py` | Downloads DuckDB's Parquet extension (pinned by SHA-256), so the page serves it itself |
-| `scripts/dashboard_config.py` | Writes `dashboard/wrangler.jsonc` with the bucket from `R2_BUCKET` (generated, never committed), the two cron triggers (the hourly round, the daily reconcile), their GitHub settings, and Workers Logs without invocation logs |
+| `scripts/dashboard_config.py` | Writes `dashboard/wrangler.jsonc` with the bucket from `R2_BUCKET` (generated, never committed), the two cron triggers (the 4-hourly round, the daily reconcile), their GitHub settings, and Workers Logs without invocation logs |
 | `scripts/trigger_token.py` | `make trigger-token`: the trigger's GitHub token, created in GitHub's form, checked and stored on the Worker as an encrypted secret without being shown |
 | `scripts/trigger_check.py` | `make trigger-check`: whether the stored token works, asked of the Worker itself on Cloudflare (`wrangler dev --remote --test-scheduled`, the handler's `check`); starts nothing |
 | `dashboard/public/privacy.html` | The privacy notice, at `/privacy` |

@@ -1,5 +1,5 @@
 """The watchdog (.github/workflows/watchdog.yml, scripts/watchdog.py): the repository's only
-schedule, failing when the dashboard Worker's trigger has started no direct.yml run for 2 hours
+schedule, failing when the dashboard Worker's trigger has started no direct.yml run for 5 hours
 (DEF-056)."""
 
 import re
@@ -25,11 +25,11 @@ def workflow() -> dict:
     return yaml.safe_load((WORKFLOWS / "watchdog.yml").read_text())
 
 
-def test_the_trigger_is_alive_within_two_hours_of_its_last_run():
+def test_the_trigger_is_alive_within_five_hours_of_its_last_run():
     alive, text = watchdog.check("2026-10-29T18:17:15Z", NOW)
     assert alive and text.endswith("29 minutes ago.")
-    assert watchdog.check("2026-10-29T16:47:00Z", NOW)[0]  # 2 hours exactly
-    alive, text = watchdog.check("2026-10-29T16:46:59Z", NOW)
+    assert watchdog.check("2026-10-29T13:47:00Z", NOW)[0]  # 5 hours exactly
+    alive, text = watchdog.check("2026-10-29T13:46:59Z", NOW)
     assert not alive and "make trigger-token" in text
     assert not watchdog.check("", NOW)[0]  # never started one
 

@@ -1,20 +1,20 @@
 # Direct mode on a schedule (docs/technical/ci.md#direct-mode-on-a-schedule): USGS straight to
 # R2 with no machine of ours running.
 #
-# round      every hour, started by the dashboard Worker's cron trigger (dashboard/src/worker.ts:
+# round      every 4 hours (00:05, 04:05, … UTC), started by the dashboard Worker's cron trigger (dashboard/src/worker.ts:
 #            GitHub's own schedule fired late or not at all, DEF-052), or by hand: one poller
 #            round, and catch-up if due (make direct-once)
 # token      once a day, when the trigger passes the days its GitHub token has left: fails within
 #            14 days, so GitHub e-mails the token's owner to run make trigger-token. No secrets.
-# reconcile  every day at 05:41 UTC, started by the same Worker's other cron trigger, or by
+# reconcile  every day at 00:10 UTC, started by the same Worker's other cron trigger, or by
 #            hand: direct mode's bucket invariants (make reconcile-direct; on Sundays with
 #            DEEP=1, reading every row object, DEF-058), then the bucket against USGS (make
-#            reconcile-usgs), failing if no round has written for 2 hours (a failed run
+#            reconcile-usgs), failing if no round has written for 5 hours (a failed run
 #            e-mails). Read-only.
 #
 # No schedule of its own: GitHub disables a public repository's scheduled workflows after
 # 60 days without commits, and the rounds with them (DEF-056). watchdog.yml holds the one
-# schedule, and fails when the Worker has started no run here for 2 hours.
+# schedule, and fails when the Worker has started no run here for 5 hours.
 #
 # Both skip (exit 0) while the bucket is not in direct mode: `make mode-full` pauses the
 # schedule, `make mode-direct` resumes it. Only one direct process should write: stop any
@@ -55,8 +55,9 @@ concurrency:
 
 env:
   UV_PYTHON_DOWNLOADS: automatic
-  # Catch-up about every hour, and the deleted-events check every day: due a little early, as
-  # rounds start a little unevenly; the first round after that runs them.
+  # Catch-up on every round (4 hours apart; a round by hand within 50 minutes of one skips it),
+  # and the deleted-events check every day: due a little early, as rounds start a little
+  # unevenly; the first round after that runs them.
   CATCHUP_INTERVAL_SECONDS: "3000"
   DELETED_CHECK_INTERVAL_SECONDS: "82800"
 
@@ -124,7 +125,7 @@ jobs:
           if [ "$(date -u +%u)" = 7 ]; then deep="--deep"; fi
           uv run python -m earth_hub.direct.reconcile --skip-unless-direct $deep \
             | tee output.txt || status=1
-          uv run python -m earth_hub.usgs_reconcile --skip-unless-direct --max-age-hours 2 \
+          uv run python -m earth_hub.usgs_reconcile --skip-unless-direct --max-age-hours 5 \
             | tee -a output.txt || status=1
           exit $status
       - name: Summary on the run page

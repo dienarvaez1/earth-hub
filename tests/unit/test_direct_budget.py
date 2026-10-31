@@ -120,8 +120,8 @@ def test_direct_mode_stays_well_inside_the_free_operations(
 @pytest.mark.req("REQ-MODE-007")
 def test_the_schedule_makes_fewer_rounds_than_the_load_measured_above():
     """The dashboard Worker's trigger (dashboard/wrangler.template.jsonc) starts a feed round
-    every hour, and catch-up runs about every hour, so their operations are within what the
-    test above allows; so would a round every 15 minutes."""
+    every 4 hours, and catch-up on each of them, so their operations are well within what the
+    test above allows (24 a day); so would a round every 15 minutes."""
     import json
     import sys
     from pathlib import Path
@@ -133,9 +133,9 @@ def test_the_schedule_makes_fewer_rounds_than_the_load_measured_above():
         line for line in render("earth-hub-test").splitlines() if not line.strip().startswith("//")
     ]
     cron, reconcile = json.loads("\n".join(lines))["triggers"]["crons"]
-    assert reconcile == "41 5 * * *"  # once a day, read-only: no round
-    minutes, *rest = cron.split()
-    assert rest == ["*"] * 4  # the same minutes every hour
-    rounds_per_day = 24 * len(minutes.split(","))
-    assert rounds_per_day == 24 and FEED_ROUNDS_PER_DAY >= 96
-    assert CATCHUP_PASSES_PER_DAY >= 24  # catch-up is due about hourly (CATCHUP_INTERVAL_SECONDS)
+    assert reconcile == "10 0 * * *"  # once a day, read-only: no round
+    minutes, hours, *rest = cron.split()
+    assert rest == ["*"] * 3 and hours.startswith("*/")  # every N hours, at the same minutes
+    rounds_per_day = 24 // int(hours[2:]) * len(minutes.split(","))
+    assert rounds_per_day == 6 and FEED_ROUNDS_PER_DAY >= 96
+    assert rounds_per_day <= CATCHUP_PASSES_PER_DAY  # catch-up is due on every round

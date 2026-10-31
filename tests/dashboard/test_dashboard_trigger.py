@@ -79,7 +79,7 @@ def worker(state, github, *token: str) -> LocalDashboard:
 
 
 def fire(
-    local: LocalDashboard, at: str = "2026-10-22T09:17:00+00:00", cron: str = "17 * * * *"
+    local: LocalDashboard, at: str = "2026-10-22T12:05:00+00:00", cron: str = "5 */4 * * *"
 ) -> httpx.Response:
     """What Cloudflare does on a cron trigger: run the scheduled handler, as at `at`."""
     time = int(datetime.fromisoformat(at).timestamp() * 1000)
@@ -116,9 +116,9 @@ def test_each_trigger_asks_github_for_one_round_on_main(with_token, github):
 @pytest.mark.parametrize(
     ("expiry", "days"),
     [
-        ("2026-11-05 07:00:00 UTC", "13"),  # 13 days and 22 h 43 min after 08:17
+        ("2026-11-05 07:00:00 UTC", "13"),  # 13 days and 22 h 55 min after 08:05
         ("2026-11-05 00:00:00 -0700", "13"),  # the same moment, in another zone
-        ("2027-10-22 08:17:00 UTC", "365"),
+        ("2027-10-22 08:05:00 UTC", "365"),
         (None, None),  # a token that never expires: nothing passed
     ],
 )
@@ -128,7 +128,7 @@ def test_once_a_day_the_trigger_passes_the_days_the_token_has_left(
     github.requests.clear()
     github.expiry = expiry
     try:
-        assert fire(with_token, at="2026-10-22T08:17:00+00:00").status_code == 200
+        assert fire(with_token, at="2026-10-22T08:05:00+00:00").status_code == 200
     finally:
         github.expiry = None
     check, dispatch = github.requests
@@ -144,7 +144,7 @@ def test_the_other_hours_only_start_the_round(with_token, github):
     github.requests.clear()
     github.expiry = "2026-11-05 07:00:00 UTC"
     try:
-        assert fire(with_token, at="2026-10-22T09:17:00+00:00").status_code == 200
+        assert fire(with_token, at="2026-10-22T12:05:00+00:00").status_code == 200
     finally:
         github.expiry = None
     (dispatch,) = github.requests
@@ -157,10 +157,10 @@ def test_the_daily_trigger_asks_github_for_the_reconcile(with_token, github):
     github.requests.clear()
     github.expiry = "2026-11-05 07:00:00 UTC"
     try:
-        assert fire(with_token, at="2026-10-22T05:41:00+00:00", cron="41 5 * * *").is_success
+        assert fire(with_token, at="2026-10-22T00:10:00+00:00", cron="10 0 * * *").is_success
     finally:
         github.expiry = None
-    (dispatch,) = github.requests  # no token check: that rides on the 08:17 round
+    (dispatch,) = github.requests  # no token check: that rides on the 08:05 round
     assert dispatch["path"] == DISPATCHES
     assert dispatch["body"] == {
         "ref": "main",

@@ -1,6 +1,6 @@
 ---
 name: eh-status
-description: Health of the whole Earth-Hub stack in one look — which containers run and are healthy, consumer lag per topic, newest stored event, API health, the last R2 export, the mode and direct mode's latest executions (its audit trail, the hourly rounds the Cloudflare trigger starts) — or a full topic-versus-database reconciliation. Use for /eh-status, "is everything running", "is the pipeline healthy", "any lag", or "reconcile".
+description: Health of the whole Earth-Hub stack in one look — which containers run and are healthy, consumer lag per topic, newest stored event, API health, the last R2 export, the mode and direct mode's latest executions (its audit trail, the 4-hourly rounds the Cloudflare trigger starts) — or a full topic-versus-database reconciliation. Use for /eh-status, "is everything running", "is the pipeline healthy", "any lag", or "reconcile".
 argument-hint: "[reconcile]"
 ---
 
@@ -20,7 +20,7 @@ Read-only. Run from the repository root.
 - Last export: `make -s export-r2-runs | tail -1` (runs are listed oldest first), only if `.env` has `R2_BUCKET` set (check with
   `grep -q '^R2_BUCKET=.' .env`; never print `.env`).
 - Mode (same condition): `make -s mode`; in direct mode also its latest executions from the audit trail,
-  `make -s direct-runs LIMIT=3` (status, who started each: `cloudflare-trigger` for the hourly rounds, and
+  `make -s direct-runs LIMIT=3` (status, who started each: `cloudflare-trigger` for the 4-hourly rounds, and
   what it processed), `gh run list --workflow direct.yml --limit 3` for the GitHub runs, the daily
   reconcile and the `Trigger token` check included, and `gh run list --workflow watchdog.yml --limit 1` (filter
   lines with `@`).
@@ -46,5 +46,5 @@ the mode (and in direct mode, the latest executions from `make direct-runs` and 
 With `reconcile`: each topic's RESULT, and any lost or pending messages. Flag anything wrong first: an
 unhealthy service, lag that isn't 0, a newest event older than ~15 minutes while the poller runs, lost messages,
 a `failed` or `interrupted` execution, a failed `Trigger token` run (the trigger's token expires within 14 days:
-the user runs `make trigger-token`), a failed `Watchdog` run or a last direct round older than ~2 hours (the
+the user runs `make trigger-token`), a failed `Watchdog` run or a last direct round older than ~5 hours (the
 trigger may have stopped: `/eh-dashboard trigger`), or any open scanning alert (`/eh-test security`).

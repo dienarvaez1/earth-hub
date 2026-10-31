@@ -33,7 +33,7 @@ Moving full mode between hosts (Milestone 9; the /eh-host skill):
 
 - host-status:   who owns the bucket and its lease, this host's ID, whether this host's database
                  is empty or holds anything the bucket lacks, direct mode's latest executions.
-- host-release:  only on the owner: to-direct. Direct mode's hourly rounds write from then on.
+- host-release:  only on the owner: to-direct. Direct mode's rounds write from then on.
 - host-claim:    on any host: the bucket in direct mode (a host whose lease expired is taken over
                  first), make up, then make mode-full, which makes this host the owner; when its
                  database is empty, or differs from the bucket, it is rebuilt from it (below).
@@ -275,7 +275,7 @@ def to_direct(shell: Shell, *, wait_s: float = 600) -> None:
     if shell.dry_run:
         print("Dry run: nothing was changed.")
         return
-    print("Direct mode: the hourly rounds write the bucket; this computer can be closed.")
+    print("Direct mode: the rounds every 4 hours write the bucket; this computer can be closed.")
 
 
 def host_status(shell: Shell) -> None:

@@ -11,7 +11,7 @@ the check holds in both. Standard library only: the workflow installs nothing.
 import sys
 from datetime import UTC, datetime, timedelta
 
-MAX_AGE = timedelta(hours=2)  # two hourly rounds missed
+MAX_AGE = timedelta(hours=5)  # a round every 4 hours, and an hour for GitHub's delays
 
 
 def check(created_at: str, now: datetime) -> tuple[bool, str]:
