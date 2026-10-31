@@ -6,8 +6,8 @@ cutover guide, months after rounds went to every 4 hours; "190 of them" in the R
 requirements. A fact that changes is stated in its homes below, and only there; other pages name
 it and link. Changing a fact = changing it in its homes (and here, if a home moves).
 
-History is left out on purpose: the plan, the defect log and the generated traceability matrix
-record what was true then.
+History is left out on purpose: the plan history, the defect log and the generated traceability
+matrix record what was true then.
 """
 
 import re
@@ -17,7 +17,7 @@ import pytest
 
 REPO = Path(__file__).resolve().parents[2]
 HISTORY = {
-    "docs/progress/plan.md",
+    "docs/progress/history.md",
     "docs/progress/defects.md",
     "docs/progress/traceability-matrix.md",
 }
@@ -80,6 +80,13 @@ FACTS = {
         r"at most 50|50 a day",
         {"docs/technical/architecture.md", "docs/progress/requirements.md"},
     ),
+    # Left at 2 in ci.md after the workflow moved to 5 (#70).
+    "the daily reconcile's age limit": (r"max-age-hours \d", {"docs/technical/ci.md"}),
+    # "Up to an hour late" outlived the hourly rounds in the README and ci.md (#70).
+    "how late direct mode is": (
+        r"(?i)up to (?:an|one|two|three|four|five|six|\d+) hours? (?:late|after)",
+        {"docs/overview/limitations.md"},
+    ),
 }
 
 
@@ -141,9 +148,10 @@ BUDGETS = {
     "docs/overview/cheatsheet.md": 2900,
     "docs/overview/demo.md": 1600,
     "docs/overview/limitations.md": 1900,
-    "docs/technical/architecture.md": 9200,
+    "docs/technical/architecture.md": 7700,
     "docs/technical/deployment.md": 1800,
-    "docs/technical/ci.md": 2600,
+    "docs/technical/ci.md": 2300,
+    "docs/progress/plan.md": 1600,
     "docs/progress/test-strategy.md": 2800,
     ".claude/skills/eh-api/SKILL.md": 400,
     ".claude/skills/eh-backfill/SKILL.md": 400,
