@@ -1,5 +1,6 @@
 """Typed application settings loaded from the environment and an optional .env file."""
 
+import socket
 import tempfile
 from functools import lru_cache
 from pathlib import Path
@@ -64,6 +65,15 @@ class Settings(BaseSettings):
     # Uploads in flight at once. Each is one HTTPS request to R2 (~0.6 s measured), so the
     # first full export is bound by this; later runs upload only changes.
     export_workers: int = Field(default=64, ge=1, le=256)
+    # Full mode's host (Milestone 9): the name it owns the bucket under in _state/mode.json,
+    # the hostname when empty; two hosts must never share one. The exporting service exports
+    # at most this often, so each export's ~23 MB upload (manifest and snapshot) stays rare.
+    earth_hub_machine_id: str = ""
+    export_interval_seconds: int = Field(default=300, ge=60)
+
+    @property
+    def machine_id(self) -> str:
+        return self.earth_hub_machine_id or socket.gethostname()
 
     @property
     def consumer_topic(self) -> str:

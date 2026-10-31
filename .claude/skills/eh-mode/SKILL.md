@@ -14,7 +14,7 @@ cron trigger, keeping the dashboard current while no machine runs.
 
 | Argument | Command | Writes |
 | --- | --- | --- |
-| `status` (default) | `make -s mode`, `make -s direct-runs LIMIT=5` | no |
+| `status` (default) | `make -s mode` (in full mode also the owner, its lease, live or expired, and this host), `make -s direct-runs LIMIT=5` | no |
 | `direct` | `make to-direct` ⚠ (in the background: waits for the consumers, `make reconcile`, `make mode-direct`, which stops the poller and catch-up, exports, hands over, catches up and checks against USGS, then `make down`; a few minutes) | bucket, stops services |
 | `full` | `make to-full` ⚠ (in the background: Docker and the mode checked, `make up`, `make mode-full`, which replays direct mode's log into Kafka, checks and switches back, then waits for the consumers and `make reconcile`; the hourly rounds then skip) | bucket, Kafka, PostgreSQL |
 | `usgs [DAYS]` | `make reconcile-usgs [DAYS=3]`: the mode writing the bucket against USGS, every difference pending (explained) or not | no |

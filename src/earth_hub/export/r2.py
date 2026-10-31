@@ -194,6 +194,7 @@ class Exporter:
         lock_ttl: timedelta = LOCK_TTL,
         git_commit: str | None = None,
         local_dir: Path | None = LOCAL_RUNS_DIR,
+        machine: str | None = None,
     ):
         self.api = api
         self.bucket = bucket
@@ -205,11 +206,27 @@ class Exporter:
         self.lock_ttl = lock_ttl
         self.git_commit = git_commit
         self.local_dir = local_dir
+        # Full mode's host (settings.machine_id): the export writes only as the bucket's owner,
+        # and renews the lease (mode.hold). None: no owner checked (tests of the export alone).
+        self.machine = machine
         self._saved: dict[str, str] = {}
         self._ids: dict[str, int] = {}  # each row read: key -> the API's id, for paging
         self._held: lock.Held | None = None  # this run's lock (None on a dry run)
 
-    def run(self, *, dry_run: bool = False, verify: bool = False) -> RunRecord:
+    @property
+    def manifest(self) -> dict[str, str]:
+        """What the bucket's manifest lists, as this run last wrote or read it."""
+        return dict(self._saved)
+
+    def run(
+        self,
+        *,
+        dry_run: bool = False,
+        verify: bool = False,
+        after: Callable[[lock.Held], None] | None = None,
+    ) -> RunRecord:
+        """`after`: called once the run succeeded, still holding the lock (the exporting
+        service writes direct mode's state there); its failure fails the run."""
         started = self.clock()
         record = RunRecord(
             run_id=f"{started:%Y-%m-%dT%H-%M-%SZ}-{secrets.token_hex(2)}",
@@ -226,6 +243,10 @@ class Exporter:
             self._save(record)
         try:
             self._export(record, dry_run=dry_run, verify=verify)
+            if not record.errors and not dry_run:
+                self._hold_lease()
+                if after is not None:
+                    after(self._held)
             record.status = "failed" if record.errors else "succeeded"
         except KeyboardInterrupt:
             record.status = "interrupted"
@@ -521,10 +542,20 @@ class Exporter:
             renew_after=LOCK_RENEW,
         )
         try:
-            mode.require(self.bucket, mode.FULL)
+            current = mode.require(self.bucket, mode.FULL)
+            if self.machine is not None:
+                self._held.confirm()
+                mode.hold(self.bucket, current, self.machine, now)
         except BaseException:
             self._release_lock()
             raise
+
+    def _hold_lease(self) -> None:
+        """Renew the lease after a run, which may have lasted longer than it."""
+        if self.machine is not None:
+            self._confirm()
+            current = mode.require(self.bucket, mode.FULL)
+            mode.hold(self.bucket, current, self.machine, self.clock())
 
     def _release_lock(self) -> None:
         self._held.release()
@@ -606,6 +637,7 @@ def main(argv: list[str] | None = None) -> int:
             api_url=api_url,
             workers=settings.export_workers,
             git_commit=_git_commit(),
+            machine=settings.machine_id,
         )
         try:
             record = exporter.run(dry_run=args.dry_run, verify=args.verify)

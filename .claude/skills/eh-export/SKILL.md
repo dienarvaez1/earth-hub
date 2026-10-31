@@ -13,6 +13,9 @@ and if it doesn't answer, start it with `make api` first (say so).
 **Full mode only.** The exporter checks the bucket's mode marker after taking the lock, and refuses in
 direct mode ("the bucket is in direct mode, not full (make mode)"): there, the direct rounds (every hour) write the
 rows and the snapshot themselves. Check `make -s mode` first; to export again, hand back with `/eh-mode full`.
+**Only on the bucket's owner** (`make -s mode` names it in full mode): on another host the export refuses
+("the bucket is owned by …") and writes nothing. With the pipeline running (`make ingest`), the `exporter`
+service already exports every 5 minutes after a change; an export by hand just waits for the lock.
 A **dry run** is not refused in direct mode (it takes no lock and writes nothing to the bucket), but its counts
 then compare a PostgreSQL that has fallen behind with the bucket: the rows direct mode stored show as
 `deleted` or `updated`. Say so instead of reporting them as changes; after `make mode-full` it should find

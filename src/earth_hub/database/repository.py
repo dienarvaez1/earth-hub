@@ -7,10 +7,23 @@ a failure leaves no partial state and the messages can simply be processed again
 
 import json
 import logging
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
-from sqlalchemy import Connection, bindparam, delete, func, insert, select, text, tuple_, update
+from sqlalchemy import (
+    Connection,
+    Engine,
+    bindparam,
+    delete,
+    func,
+    insert,
+    select,
+    text,
+    tuple_,
+    update,
+)
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from earth_hub.database.models import Earthquake, EarthquakeId, RawEvent
@@ -120,6 +133,8 @@ def _process(
 ) -> list[ProcessResult]:
     if not messages:
         return []
+    # Shared with every other batch; the exporting service takes it exclusively for a cut.
+    conn.execute(text("SELECT pg_advisory_xact_lock_shared(:a, :b)"), _EXPORT_CUT)
     decoded = [decode_value(m.value) for m in messages]
     if not locked:
         # Serialize work on these IDs, in a fixed order to avoid deadlocks, so two consumers
@@ -335,6 +350,27 @@ def envelope_ids(envelope) -> set[str]:
     if isinstance(envelope.get("event_id"), str) and envelope["event_id"]:
         ids.add(envelope["event_id"])
     return ids
+
+
+# The export cut (Milestone 9): a two-key advisory lock, a separate space from the one-key
+# ID locks below. Every batch holds it shared in its transaction; `export_cut` holds it
+# exclusively, so no batch commits while the exporting service exports and writes direct
+# mode's state, and the two describe the same moment.
+_EXPORT_CUT = {"a": 0x45484231, "b": 1}  # "EHB1"
+
+
+@contextmanager
+def export_cut(engine: Engine) -> Iterator[Connection]:
+    """A connection that sees no batch commit until the block ends; batches wait meanwhile."""
+    with engine.connect() as conn:
+        conn.execute(text("SELECT pg_advisory_lock(:a, :b)"), _EXPORT_CUT)
+        conn.commit()  # the lock is the session's; reads below start fresh transactions
+        try:
+            yield conn
+        finally:
+            conn.rollback()
+            conn.execute(text("SELECT pg_advisory_unlock(:a, :b)"), _EXPORT_CUT)
+            conn.commit()
 
 
 def _lock(conn: Connection, ids) -> None:

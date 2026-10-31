@@ -178,6 +178,28 @@ services:
       retries: 3
       start_period: 120s
 
+  exporter:
+    # Full mode's exporting service (earth_hub/direct/standby.py): exports to R2 as the bucket's
+    # owner, at most every EXPORT_INTERVAL_SECONDS, and keeps direct mode's state ready to take
+    # over. In direct mode, or when another host owns the bucket, it logs why and exits 0;
+    # on-failure leaves it stopped then, and make mode-full or make ingest start it again.
+    profiles: [ingest]
+    image: earth-hub:dev
+    env_file: .env
+    environment:
+      <<: *in-network
+      EXPORT_API_URL: http://api:8000/api/v1
+    command: ["python", "-m", "earth_hub.direct.standby"]
+    depends_on:
+      kafka:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+      api:
+        condition: service_healthy
+    restart: on-failure
+    stop_grace_period: 60s
+
   api:
     # Read-only: queries PostgreSQL only. `make api`, then http://127.0.0.1:8000/docs
     profiles: [api]

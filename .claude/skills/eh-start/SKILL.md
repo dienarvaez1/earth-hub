@@ -1,6 +1,6 @@
 ---
 name: eh-start
-description: Start Earth-Hub services — the infrastructure (Kafka, PostgreSQL), the live pipeline (poller, consumers, catch-up), the API, the Kafka UI or the local dashboard — and confirm they are healthy. Use for /eh-start, "start the pipeline", "bring up the API", "start everything".
+description: Start Earth-Hub services — the infrastructure (Kafka, PostgreSQL), the live pipeline (poller, consumers, catch-up, the exporting service), the API, the Kafka UI or the local dashboard — and confirm they are healthy. Use for /eh-start, "start the pipeline", "bring up the API", "start everything".
 argument-hint: "[infra | pipeline | api | ui | dashboard | all]  (default: infra)"
 ---
 
