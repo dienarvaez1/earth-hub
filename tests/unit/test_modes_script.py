@@ -1,6 +1,7 @@
 """scripts/modes.py: switching modes and backfilling in full mode, each one command with its
 checks, run here against a fake shell (no Docker, Kafka, PostgreSQL or R2)."""
 
+import re
 import sys
 from datetime import date
 from pathlib import Path
@@ -173,3 +174,165 @@ def test_lag_reads_the_brokers_table():
     shell = Fake(lags={"earth-hub-consumer": [7]})
     assert modes.lag(shell, "earth-hub-consumer") == 7
     assert modes.parse_date("2026-01-01") == date(2026, 1, 1)
+
+
+# Moving full mode between hosts (Milestone 9, step 7).
+
+
+class Hosts(Fake):
+    """Fake adds the owner, this host and its database to what the checks read."""
+
+    def __init__(self, *, owner=None, live=False, host="host-b", db="empty", check=0, **kwargs):
+        super().__init__(**kwargs)
+        self.owner, self.live, self.host = owner, live, host
+        self.db, self.check = db, check  # db: "empty" or "data"; check: rebuild check's exit
+
+    def read(self, *cmd):
+        line = " ".join(cmd)
+        if "earth_hub.direct.handover" in line:
+            out = f"{self.mode}\n"
+            if self.owner:
+                state = "live" if self.live else "expired"
+                out += f"owner {self.owner}, lease until 2026-10-30T12:00:00Z ({state})\n"
+            return 0, out + f"this host: {self.host}\n"
+        if "earth_hub.direct.rebuild status" in line:
+            return 0, "rebuild: this database is empty" if self.db == "empty" else "rebuild: ok"
+        if "earth_hub.direct.rebuild check" in line:
+            return (
+                self.check,
+                "rebuild: REFUSED: 1 USGS IDs the bucket lacks" if self.check else "ok",
+            )
+        if line == "make -s direct-runs LIMIT=5":
+            return 0, "run-1 succeeded"
+        return super().read(*cmd)
+
+    def run(self, *cmd):
+        super().run(*cmd)
+        line = " ".join(cmd)
+        if line.startswith("make mode-full") and not self.dry_run and line != self.fail:
+            self.mode = "full (active) since now"
+            self.owner, self.live = self.host, True
+
+
+def without_backup_dir(lines: list[str]) -> list[str]:
+    return [re.sub(r"reports/backup/\S+", "reports/backup/<time>", line) for line in lines]
+
+
+MODE_REQ = pytest.mark.req("REQ-MODE-024")
+
+
+@MODE_REQ
+def test_a_claim_on_a_new_host_loads_its_empty_database_from_the_bucket(capsys):
+    shell = Hosts()
+    assert modes.main(["host-claim"], shell) == 0
+    assert ran(shell) == ["make up", "make migrate", "make mode-full REBUILD=1", "make reconcile"]
+    assert "Claimed: full (active)" in capsys.readouterr().out
+
+
+@MODE_REQ
+def test_a_returning_host_whose_database_matches_hands_back_without_a_rebuild():
+    shell = Hosts(db="data")
+    assert modes.main(["host-claim"], shell) == 0
+    assert ran(shell) == ["make up", "make migrate", "make mode-full", "make reconcile"]
+
+
+@MODE_REQ
+def test_a_host_whose_database_differs_is_backed_up_confirmed_wiped_and_rebuilt(monkeypatch):
+    shell = Hosts(db="data", fail="make mode-full")
+    asked = []
+    monkeypatch.setattr(modes, "ask", lambda machine: asked.append(machine) or True)
+    assert modes.main(["host-claim"], shell) == 0
+    assert asked == ["host-b"]
+    assert without_backup_dir(ran(shell)) == [
+        "make up",
+        "make migrate",
+        "make mode-full",  # failed: the dry run found differences, back to direct mode
+        "make ingest-stop",
+        "uv run python -m earth_hub.direct.rebuild backup reports/backup/<time>",
+        "make reset",
+        "make up",
+        "make migrate",
+        "make mode-full REBUILD=1",
+        "make reconcile",
+    ]
+
+
+@MODE_REQ
+@pytest.mark.parametrize(
+    ("hosts", "says"),
+    [
+        (
+            {"mode": "full (active) since x", "owner": "host-b", "live": True},
+            "owns the bucket already",
+        ),
+        ({"mode": "full (active) since x", "owner": "host-a", "live": True}, "lease is live"),
+        ({"mode": "full (active) since x"}, "full mode with no owner"),
+        ({"mode": "direct (handing-over) since x"}, "mid-handover"),
+        ({"docker": False}, "Docker is not running"),
+        ({"direct_run": True}, "direct-run` is running"),
+    ],
+)
+def test_a_claim_refuses_a_wrong_start_without_changing_anything(hosts, says, capsys):
+    shell = Hosts(**hosts)
+    assert modes.main(["host-claim"], shell) == 2
+    assert ran(shell) == []
+    assert says in capsys.readouterr().out
+
+
+@MODE_REQ
+def test_a_claim_after_a_host_stopped_takes_the_bucket_over_first():
+    shell = Hosts(mode="full (active) since x", owner="host-a", live=False)
+    assert modes.main(["host-claim"], shell) == 0
+    assert ran(shell)[0] == "uv run python -m earth_hub.direct once"
+
+
+@MODE_REQ
+@pytest.mark.parametrize("why", ["the bucket lacks an event", "not confirmed"])
+def test_a_rebuild_that_would_lose_data_or_is_not_confirmed_wipes_nothing(why, capsys, monkeypatch):
+    shell = Hosts(db="data", check=1 if why == "the bucket lacks an event" else 0)
+    monkeypatch.setattr(modes, "ask", lambda machine: False)
+    assert modes.main(["host-rebuild"], shell) == 2
+    assert "make reset" not in ran(shell) and "make mode-full REBUILD=1" not in ran(shell)
+    out = capsys.readouterr().out
+    assert ("would lose data" if why != "not confirmed" else "not confirmed") in out
+
+
+@MODE_REQ
+def test_a_rebuild_dry_run_lists_its_steps_and_changes_nothing(capsys):
+    shell = Hosts(db="data", dry_run=True)
+    assert modes.main(["--dry-run", "host-rebuild"], shell) == 0
+    out = capsys.readouterr().out
+    assert "would ask for this host's machine ID (host-b)" in out and "Dry run" in out
+    assert shell.owner is None  # nothing happened
+
+
+@MODE_REQ
+def test_a_release_runs_only_on_the_owner():
+    owner = Hosts(mode="full (active) since x", owner="host-b", live=True)
+    assert modes.main(["host-release"], owner) == 0
+    assert ran(owner) == [
+        "make reconcile",
+        "make mode-direct",
+        "make down",
+        "make -s direct-runs LIMIT=3",
+    ]
+    other = Hosts(mode="full (active) since x", owner="host-a", live=True)
+    assert modes.main(["host-release"], other) == 2 and ran(other) == []
+
+
+@MODE_REQ
+def test_a_takeover_runs_direct_mode_at_once_and_only_from_full_mode():
+    shell = Hosts(mode="full (active) since x", owner="host-a", live=True)
+    assert modes.main(["host-takeover"], shell) == 0
+    assert ran(shell) == ["uv run python -m earth_hub.direct once --take-over"]
+    direct = Hosts()
+    assert modes.main(["host-takeover"], direct) == 2 and ran(direct) == []
+
+
+@MODE_REQ
+def test_host_status_writes_nothing(capsys):
+    shell = Hosts(mode="full (active) since x", owner="host-a", live=False)
+    assert modes.main(["host-status"], shell) == 0
+    assert ran(shell) == []
+    out = capsys.readouterr().out
+    assert "Owner: host-a, lease expired" in out and "This host: host-b" in out

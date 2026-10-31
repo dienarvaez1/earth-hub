@@ -321,3 +321,96 @@ def test_a_crash_is_recorded_and_still_raised(direct_main, s3, monkeypatch):
         direct_main(["once"])
     (record,) = audit_records(s3)
     assert (record["status"], record["reason"]) == ("failed", "RuntimeError: disk full")
+
+
+# Milestone 9, step 5: a scheduled round takes the bucket over from a host that stopped.
+
+
+def owned_by_host(s3, tmp_path, make_envelope, make_feature, *, lease_ends: datetime) -> None:
+    """Records with direct mode's state describing them, in full mode, owned by host-a."""
+    start_direct(s3)
+    (tmp_path / "host").mkdir()
+    DirectRunner(Bucket(s3, BUCKET), workdir=tmp_path / "host", workers=2).process(
+        [make_envelope(make_feature("us2", updated=1792137700000))],
+        now=datetime.now(UTC) - timedelta(hours=1),
+    )
+    marker = mode.read(Bucket(s3, BUCKET))
+    mode.write(
+        Bucket(s3, BUCKET),
+        marker,
+        mode=mode.FULL,
+        owner="host-a",
+        lease_expires_at=mode.iso(lease_ends),
+    )
+
+
+@pytest.mark.req("REQ-MODE-020")
+def test_a_scheduled_round_takes_over_from_a_host_whose_lease_expired(
+    direct_main, s3, capsys, tmp_path, make_envelope, make_feature
+):
+    lease = datetime.now(UTC) - timedelta(minutes=1)
+    owned_by_host(s3, tmp_path, make_envelope, make_feature, lease_ends=lease)
+    assert direct_main(["once", "--skip-unless-direct"]) == 0
+    out = capsys.readouterr().out
+    assert "took the bucket over from host-a" in out and "poller published" in out
+    assert mode.read(Bucket(s3, BUCKET)).mode == mode.DIRECT
+    assert s3.get_object(Bucket=BUCKET, Key="earthquakes/ak1.json")  # the round ran
+    record = audit_records(s3)[-1]
+    assert record["status"] == "succeeded" and record["mode"] == "full"
+    assert record["took_over"] == {
+        "from": "host-a",
+        "lease_expires_at": mode.iso(lease),
+        "rolled_back": 0,
+    }
+
+
+@pytest.mark.req("REQ-MODE-018", "REQ-MODE-020")
+def test_a_scheduled_round_skips_while_the_hosts_lease_is_live(
+    direct_main, s3, capsys, tmp_path, make_envelope, make_feature
+):
+    lease = datetime.now(UTC) + timedelta(minutes=10)
+    owned_by_host(s3, tmp_path, make_envelope, make_feature, lease_ends=lease)
+    assert direct_main(["once", "--skip-unless-direct"]) == 0
+    assert "skipped: the bucket is in full, owner host-a" in capsys.readouterr().out
+    assert audit_records(s3)[-1]["took_over"] is None
+    # Unless told to take over now.
+    assert direct_main(["once", "--take-over"]) == 0
+    assert mode.read(Bucket(s3, BUCKET)).mode == mode.DIRECT
+
+
+@pytest.mark.req("REQ-MODE-021")
+def test_a_takeover_that_rolled_back_an_export_fails_the_run_after_it(
+    direct_main, s3, capsys, tmp_path, make_envelope, make_feature
+):
+    owned_by_host(
+        s3, tmp_path, make_envelope, make_feature, lease_ends=datetime.now(UTC) - timedelta(1)
+    )
+    # An export that died after a row and a manifest checkpoint, before the snapshot.
+    from earth_hub.export.r2 import MANIFEST_KEY, fingerprint, manifest_body, parse_manifest
+
+    newer = b'{"newer":true}'
+    s3.put_object(Bucket=BUCKET, Key="earthquakes/us2.json", Body=newer)
+    rows = parse_manifest(s3.get_object(Bucket=BUCKET, Key=MANIFEST_KEY)["Body"].read())
+    body = manifest_body(rows | {"us2": fingerprint(newer)}, "export-x", "t")
+    s3.put_object(Bucket=BUCKET, Key=MANIFEST_KEY, Body=body)
+    assert direct_main(["once", "--skip-unless-direct"]) == 1  # so GitHub e-mails
+    record = audit_records(s3)[-1]
+    assert record["took_over"]["rolled_back"] == 1
+    assert record["status"] == "succeeded"  # the round itself ran
+    assert "after rolling back 1 row objects" in record["reason"]
+    assert mode.read(Bucket(s3, BUCKET)).mode == mode.DIRECT
+
+
+@pytest.mark.req("REQ-MODE-021")
+def test_a_refused_takeover_fails_the_run_and_writes_nothing(
+    direct_main, s3, capsys, tmp_path, make_envelope, make_feature
+):
+    owned_by_host(
+        s3, tmp_path, make_envelope, make_feature, lease_ends=datetime.now(UTC) - timedelta(1)
+    )
+    s3.put_object(Bucket=BUCKET, Key="_state/direct-pending.json", Body=b"{}")
+    before = [k for k in keys(s3) if not k.startswith("audit/")]
+    assert direct_main(["once", "--skip-unless-direct"]) == 1
+    assert "takeover refused" in capsys.readouterr().err
+    assert [k for k in keys(s3) if not k.startswith("audit/")] == before
+    assert audit_records(s3)[-1]["status"] == "failed"

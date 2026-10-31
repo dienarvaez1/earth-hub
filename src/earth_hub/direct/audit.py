@@ -101,6 +101,9 @@ class AuditRecord:
     errors: list[str] = field(default_factory=list)
     errata: list[dict] = field(default_factory=list)  # the rejected messages
     reason: str | None = None  # why it was skipped or failed, in a line
+    # It took the bucket over from full mode's host (direct/takeover.py): the previous owner,
+    # its lease, and the row objects rolled back to the last complete export.
+    took_over: dict | None = None
     github_run: str | None = None
     git_commit: str | None = None
 
@@ -152,6 +155,15 @@ class Audit(logging.Handler):
     def start(self, mode: str | None) -> None:
         with self._lock:
             self.record.mode = mode
+        self._save()
+
+    def took_over(self, previous_owner, lease_expires_at, rolled_back: int) -> None:
+        with self._lock:
+            self.record.took_over = {
+                "from": previous_owner,
+                "lease_expires_at": lease_expires_at,
+                "rolled_back": rolled_back,
+            }
         self._save()
 
     def round(self, source: str, outcomes, rows_written: int, rows_removed: int) -> None:
@@ -257,6 +269,10 @@ def format_record(run: dict) -> str:
         f"{(run.get('mode') or '-'):<7} {done}  "
         f"{'' if elapsed is None else f'{elapsed:.1f} s'}"
     )
+    if took := run.get("took_over"):
+        line += f"  took over from {took['from']}"
+        if took["rolled_back"]:
+            line += f" (rolled back {took['rolled_back']} rows)"
     return line + (f"  {run['reason']}" if run.get("reason") else "")
 
 

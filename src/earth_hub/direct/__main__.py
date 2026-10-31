@@ -15,6 +15,11 @@ PostgreSQL, only R2 credentials. Runs only while the bucket's marker says `direc
 mode, before or during the run, is a skip (exit 0) rather than an error, so the schedule stays
 quiet while full mode or a handover has the bucket. Missing settings still fail.
 
+First, a bucket in full mode whose host's lease has expired is taken over (takeover.py), and
+the execution goes on in direct mode; `--take-over` does it without waiting for the lease
+(/eh-host takeover). A takeover that had to roll back an export left unfinished exits 1 after
+its rounds, so the schedule's run fails and GitHub e-mails; one it refuses fails at once.
+
 Each execution leaves an audit record in the bucket (audit.py): who started it, the mode,
 what its rounds did and how it ended. Only missing R2 settings leave none.
 """
@@ -44,6 +49,11 @@ def main(argv: list[str] | None = None) -> int:
         "--skip-unless-direct",
         action="store_true",
         help="exit 0 without writing when the bucket is not in direct mode (for a schedule)",
+    )
+    parser.add_argument(
+        "--take-over",
+        action="store_true",
+        help="take the bucket from full mode's host now, without waiting for its lease to end",
     )
     parser.add_argument(
         "--all",
@@ -78,7 +88,17 @@ def main(argv: list[str] | None = None) -> int:
     root = logging.getLogger()
     root.addHandler(audit)
     try:
-        code, status, reason = _execute(args, settings, bucket, audit)
+        took = _take_over(args, settings, bucket, audit)
+        if isinstance(took, tuple):  # refused
+            code, status, reason = took
+        else:
+            code, status, reason = _execute(args, settings, bucket, audit)
+            if took is not None and took.rolled_back and code == 0:
+                code = 1  # so the scheduled run fails and GitHub e-mails
+                reason = (
+                    f"took over from {took.previous_owner} after rolling back "
+                    f"{took.rolled_back} row objects of an unfinished export"
+                )
     except BaseException as exc:
         audit.finish("failed", f"{type(exc).__name__}: {exc}"[:500])
         raise
@@ -86,6 +106,25 @@ def main(argv: list[str] | None = None) -> int:
         root.removeHandler(audit)
     audit.finish(status, reason)
     return code
+
+
+def _take_over(args, settings, bucket, audit):
+    """The takeover, if due: a TookOver, None, or (code, status, reason) when refused."""
+    from earth_hub.direct.takeover import Refused, take_over
+    from earth_hub.export import lock
+
+    try:
+        took = take_over(bucket, force=args.take_over, workers=settings.export_workers)
+    except lock.LockHeld as exc:  # an export in progress: the host is alive after all
+        logger.info("no takeover while another run holds the bucket: %s", exc)
+        return None
+    except Refused as exc:
+        print(f"direct: takeover refused: {exc}", file=sys.stderr)
+        return 1, "failed", f"takeover refused: {exc}"
+    if took is not None:
+        print(f"direct: took the bucket over from {took.previous_owner}")
+        audit.took_over(took.previous_owner, took.lease_expires_at, took.rolled_back)
+    return took
 
 
 def _execute(args, settings, bucket, audit) -> tuple[int, str, str | None]:  # noqa: C901, PLR0911 (to refactor: docs/progress/plan.md)
