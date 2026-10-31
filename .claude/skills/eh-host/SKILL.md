@@ -9,7 +9,7 @@ argument-hint: "[status | cutover-a | cutover-b | release | claim | rebuild | ta
 Run from the repository root. Only one host runs full mode. In full mode the bucket's marker,
 `_state/mode.json`, names the **owner** (`EARTH_HUB_MACHINE_ID`, the hostname when empty) and its **lease**
 (20 minutes, renewed by the host's `exporter` service). Direct mode's hourly rounds are the standby: once the
-lease has expired they take the bucket over by themselves (docs/technical/architecture.md#the-standby).
+lease has expired they take the bucket over by themselves (docs/technical/architecture.md#the-standby). The cutover, step by step, is in docs/technical/deployment.md#cutover-from-a-to-b.
 
 | Argument | Command | Writes |
 | --- | --- | --- |
