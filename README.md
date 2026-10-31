@@ -51,7 +51,7 @@ stateDiagram-v2
 | --- | --- |
 | **Requirements** | 200 requirements, each with a stable ID and at least one passing test that names it (`@pytest.mark.req`). A test naming an unknown ID fails at collection, and `make traceability` fails if any requirement has no passing test |
 | **Tests** | About 1,200, in eight layers: unit, integration, API, contract (Schemathesis), end-to-end, dashboard (in Chromium), disruptive (real outages) and performance. About 92% coverage across all layers |
-| **Defects** | 63 defects found and fixed, each with its milestone, severity, how it was found and the commit that fixed it; [six written up in full](docs/progress/defects.md) with root cause and prevention (kept in the git history) |
+| **Defects** | 65 defects found, 63 fixed and 2 open (DEF-066, DEF-067), each with its milestone, severity, how it was found and the commit that fixed it; [six written up in full](docs/progress/defects.md) with root cause and prevention (kept in the git history) |
 | **CI** | On every pull request and push to `main`, lint and unit tests, then the regression of every layer except performance in parallel parts (about 10 minutes), from the example settings and with no secrets; `main` accepts only changes that pass ([docs/technical/ci.md](docs/technical/ci.md)) |
 | **Data integrity** | Kafka offsets committed only after the database; idempotent upserts; newer revisions win; `make reconcile` compares each topic with the database. The guarantee claimed is at-least-once, never exactly-once |
 | **Recovery** | PostgreSQL stopped while events arrive, a Kafka restart, crashes between the two commits, poller and consumer restarts: each tested, and each ending in a reconciliation |
@@ -163,7 +163,7 @@ It writes `reports/regression-summary.md`, JUnit XML for each layer, a coverage 
 **QA documents** in `docs/`:
 - the [test strategy](docs/progress/test-strategy.md): risks, levels, techniques, scope, reports and testing by milestone;
 - the [requirements](docs/progress/requirements.md), 190 of them, and the [traceability matrix](docs/progress/traceability-matrix.md);
-- the [defect log](docs/progress/defects.md): 63 defects found and fixed, 6 with full reports in the git history;
+- the [defect log](docs/progress/defects.md): 65 defects found (63 fixed, 2 open), 6 with full reports in the git history;
 - the [data-quality rules](docs/technical/data-quality-rules.md) and the [known limitations](docs/overview/limitations.md).
 
 ## How Claude Code was used
@@ -195,7 +195,7 @@ Earth-Hub was built with [Claude Code](https://claude.com/claude-code), Anthropi
 - independent oracles;
 - tests of the test tooling.
 
-Five of the 63 defects were in the test tooling itself (DEF-007, DEF-008, DEF-025, DEF-028, DEF-029), found because results were checked rather than trusted. Seventeen were found after merge (DEF-034 to DEF-039, DEF-053 to DEF-063), and are logged as such.
+Five of the 65 defects were in the test tooling itself (DEF-007, DEF-008, DEF-025, DEF-028, DEF-029), found because results were checked rather than trusted. Nineteen were found after merge (DEF-034 to DEF-039, DEF-053 to DEF-063, and the open DEF-066 and DEF-067), and are logged as such.
 
 ## Documentation
 
