@@ -321,6 +321,8 @@ def test_the_service_without_r2_settings_exports_nothing(monkeypatch, capsys):
     for name in ("R2_ACCOUNT_ID", "R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY", "R2_BUCKET"):
         monkeypatch.setenv(name, "")
     monkeypatch.setenv("R2_ENDPOINT_URL", "")
+    for name in ("POSTGRES_DB", "POSTGRES_USER", "POSTGRES_PASSWORD"):  # CI has no .env
+        monkeypatch.setenv(name, "earth_hub")
     from earth_hub.config import get_settings
 
     get_settings.cache_clear()
