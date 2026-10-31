@@ -39,13 +39,14 @@ import sys
 import tempfile
 import time
 from collections.abc import Callable, Iterable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, date, datetime, timedelta
 from datetime import time as clock
 from pathlib import Path
 
 from earth_hub.ingestion import history
-from earth_hub.validation.earthquake_rules import review_status
+from earth_hub.ingestion.events import InvalidFeature, build_message
+from earth_hub.validation.earthquake_rules import Rejected, review_status, validate
 
 logger = logging.getLogger(__spec__.name)  # the module name, also under `python -m`
 
@@ -56,7 +57,9 @@ LOOKUPS = 25  # events looked up again by ID, at most, per run
 # The same revision can carry different `updated` times: for `uw` events FDSN says 5 to 9 s later
 # than the summary feeds the poller and catch-up read (measured 2026-10-21).
 SAME_REVISION_MS = 60_000
-SETTLED = {"no origin at FDSN"}  # explained, but not pending: USGS's services disagree (DEF-064)
+# Explained, but not pending: no later read of USGS changes them. USGS's services disagree
+# (DEF-064); Earth-Hub's rules reject the event; Earth-Hub never splits a record it merged.
+SETTLED = {"no origin at FDSN", "rejected here", "split at USGS"}
 
 
 @dataclass(frozen=True)
@@ -74,6 +77,8 @@ class Event:
     # A deletion FDSN kept no time for: only a lookup by ID finds it, and only the audit
     # brings it (DEF-066).
     timeless: bool = False
+    # Why Earth-Hub's data-quality rules reject USGS's event, if they do ("MAG-001: ...").
+    rejected: str | None = None
 
 
 @dataclass(frozen=True)
@@ -207,31 +212,19 @@ def compare(  # noqa: C901, PLR0912 (to refactor: docs/progress/plan.md)
         source, mark = marks.feed_for(theirs)
         pending = _after(theirs, mark)
         if mine is None:
-            report.differences.append(
-                Difference(
-                    _day(theirs.time_ms),
-                    "missing",
-                    theirs.id,
-                    pending,
-                    f"USGS updated it at {_when(theirs.updated_ms)}, "
-                    + (
-                        f"after the {source} was last read"
-                        if pending
-                        else f"before the {source} was last read"
-                    ),
-                )
-            )
+            report.differences.append(_not_stored(theirs, source, pending))
             continue
         if mine.id in matched:
-            # USGS split what it once listed as one event; Earth-Hub never splits a record.
+            # USGS split what it once listed as one event; Earth-Hub never splits a record, a
+            # known limitation (docs/overview/limitations.md).
             report.differences.append(
                 Difference(
                     _day(theirs.time_ms),
                     "split at USGS",
                     theirs.id,
-                    False,
+                    True,
                     f"USGS lists it apart from {matched[mine.id]}; Earth-Hub merged both "
-                    f"into {mine.id}",
+                    f"into {mine.id} and never splits a record",
                 )
             )
             continue
@@ -309,6 +302,28 @@ def compare(  # noqa: C901, PLR0912 (to refactor: docs/progress/plan.md)
             report.days.setdefault(_day(mine.time_ms), {"usgs": 0, "ours": 0})["ours"] += 1
     report.differences.sort(key=lambda d: (d.day, d.kind, d.event_id))
     return report
+
+
+def _not_stored(theirs: Event, source: str, pending: bool) -> Difference:
+    """USGS has the event, Earth-Hub doesn't: rejected by its rules, or missing."""
+    if theirs.rejected:
+        return Difference(
+            _day(theirs.time_ms),
+            "rejected here",
+            theirs.id,
+            True,
+            f"Earth-Hub's data-quality rules reject it ({theirs.rejected})",
+        )
+    return Difference(
+        _day(theirs.time_ms),
+        "missing",
+        theirs.id,
+        pending,
+        f"USGS updated it at {_when(theirs.updated_ms)}, "
+        + (
+            f"after the {source} was last read" if pending else f"before the {source} was last read"
+        ),
+    )
 
 
 def _deleted_at_usgs(mine: Event, gone: Event, marks: Marks) -> Difference:
@@ -391,8 +406,12 @@ def _has_origin(props: dict) -> bool:
     return "origin" in types.split(",")
 
 
-def usgs_events(fdsn, start: datetime, end: datetime, *, deleted: str) -> list[Event]:
-    """USGS's events in [start, end), one request a day (`deleted`: false or only)."""
+def usgs_events(
+    fdsn, start: datetime, end: datetime, *, deleted: str, known: frozenset[str] = frozenset()
+) -> list[Event]:
+    """USGS's events in [start, end), one request a day (`deleted`: false or only). Those none
+    of whose IDs is `known` (stored) go through Earth-Hub's data-quality rules, so a rejected
+    one is explained, not missing."""
     events = []
     day = start
     while day < end:
@@ -401,10 +420,25 @@ def usgs_events(fdsn, start: datetime, end: datetime, *, deleted: str) -> list[E
         for feature in body.get("features", []):
             event = from_feature(feature)
             # FDSN's end is inclusive: an event at midnight belongs to the next day.
-            if event is not None and event.time_ms < _ms(upper):
-                events.append(event)
+            if event is None or event.time_ms >= _ms(upper):
+                continue
+            if not (event.ids | {event.id}) & known:
+                event = replace(event, rejected=rejected_by(feature))
+            events.append(event)
         day = upper
     return events
+
+
+def rejected_by(feature: dict) -> str | None:
+    """Why the consumer would reject this USGS feature (its first rule), or None."""
+    try:
+        message = build_message(feature, fetched_at=datetime.now(UTC), feed_generated_ms=None)
+        validate(json.loads(message.to_json()), now=datetime.now(UTC))
+    except InvalidFeature:
+        return None  # the publishers drop it before Kafka: from_feature already skipped it
+    except Rejected as exc:
+        return f"{exc.rule}: {exc.violations[0].message}"
+    return None
 
 
 def usgs_lookup(fdsn) -> Callable[[str], Event | None]:
@@ -634,7 +668,8 @@ def main(argv: list[str] | None = None) -> int:  # noqa: PLR0915 (to refactor: d
     start, end = window(now, args.days, args.start, args.end)
     with make_http_client(settings.usgs_contact, timeout_s=60.0) as http:
         fdsn = FdsnClient(str(settings.fdsn_url), http, pause_s=settings.fdsn_pause_seconds)
-        live = usgs_events(fdsn, start, end, deleted="false")
+        known = frozenset(i for e in events for i in e.ids | {e.id})
+        live = usgs_events(fdsn, start, end, deleted="false", known=known)
         gone = usgs_events(fdsn, start, end, deleted="only")
         lookups = [0]
 

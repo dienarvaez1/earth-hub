@@ -160,7 +160,7 @@ def august(feature_template, fdsn_server, *extra_stored):
         event_at(feature_template, f"e{n}", AUGUST + timedelta(days=n, hours=6)) for n in (1, 2, 3)
     ]
     fdsn_server.put(*live)
-    progress = MemoryProgress()
+    progress = MemoryProgress({e["id"]: e["properties"]["updated"] for e in live})
     progress.events = [
         stored(f"e{n}", AUGUST + timedelta(days=n, hours=6)) for n in (1, 2, 3)
     ] + list(extra_stored)
@@ -273,3 +273,19 @@ def test_the_bucket_answers_what_history_is_stored_as_postgresql_does(
     )
     # Deleted events are left out: the audit compares what USGS still lists.
     assert [e.key for e in progress.stored_in(Window(AUGUST, NOW))] == ["ak1", "ak2"]
+
+
+@pytest.mark.req("REQ-CU-004")
+def test_the_audit_publishes_what_usgs_lists_and_earth_hub_never_stored(
+    make_job, fdsn_server, fake_producer, feature_template
+):
+    """An event USGS added with an old `updated`, so the history pass never asked for it."""
+    progress = august(feature_template, fdsn_server)
+    late = event_at(feature_template, "late1", AUGUST + timedelta(days=9, hours=2))
+    fdsn_server.put(late)
+    progress.points["audit_month"] = AUGUST
+    job, _ = make_job(progress)
+    assert job.audit() == 1
+    [(_, envelope)] = published(fake_producer)  # the stored events are not sent again
+    assert envelope["event_id"] == "late1" and envelope["source"] == "audit"
+    assert envelope["payload"] == late  # as USGS sent it: the consumer's rules decide
